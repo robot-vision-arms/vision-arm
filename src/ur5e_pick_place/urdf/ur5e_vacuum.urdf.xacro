@@ -1,0 +1,53 @@
+<?xml version="1.0"?>
+<!--
+  ur_simulation_gz 의 기본 로봇(ur_gz.urdf.xacro)에 흡착 패드와 DetachableJoint 슬롯만 덧붙인다.
+  sim.launch.py 가 ur_sim_control.launch.py 의 description_file 로 이 파일을 넘긴다.
+  ur_type 등 xacro 인자는 포함한 파일이 그대로 받는다.
+
+  1주차 확인: 포함 경로가 맞는지
+      ls $(ros2 pkg prefix ur_simulation_gz)/share/ur_simulation_gz/urdf/
+  흡착은 물리 마찰 대신 '고정 관절을 붙였다 떼는' 방식이다. 작은 나사를 마찰로 집으면 Gazebo 에서 미끄러지기 쉬워서
+  4주 안에 안정화하기 어렵다고 판단했다 (docs/DECISIONS.md).
+-->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="ur">
+  <xacro:include filename="$(find ur_simulation_gz)/urdf/ur_gz.urdf.xacro"/>
+
+  <!-- 길쭉한 흡착 패드: 긴 변이 tool0 +X. 나사 장축에 맞춰 돌려서 집는다. 길이는 config/sim.yaml 의 tool_length_m 과 맞출 것 -->
+  <xacro:property name="pad_length" value="0.05"/>
+  <link name="vacuum_pad">
+    <visual>
+      <origin xyz="0 0 ${pad_length / 2}"/>
+      <geometry><box size="0.04 0.012 ${pad_length}"/></geometry>
+    </visual>
+    <collision>
+      <origin xyz="0 0 ${pad_length / 2}"/>
+      <geometry><box size="0.04 0.012 ${pad_length}"/></geometry>
+    </collision>
+    <inertial>
+      <origin xyz="0 0 ${pad_length / 2}"/>
+      <mass value="0.05"/>
+      <inertia ixx="1e-5" ixy="0" ixz="0" iyy="1e-5" iyz="0" izz="1e-5"/>
+    </inertial>
+  </link>
+  <joint name="vacuum_joint" type="fixed">
+    <parent link="tool0"/>
+    <child link="vacuum_pad"/>
+  </joint>
+
+  <!-- 물체 슬롯 하나당 플러그인 하나. 슬롯 수 = config/sim.yaml 의 max_objects -->
+  <xacro:macro name="vacuum_slot" params="k">
+    <gazebo>
+      <plugin filename="gz-sim-detachable-joint-system" name="gz::sim::systems::DetachableJoint">
+        <!-- tool0·vacuum_pad 는 고정 관절이라 URDF → SDF 변환 때 wrist_3_link 로 합쳐진다. 그래서 부모는 wrist_3_link -->
+        <parent_link>wrist_3_link</parent_link>
+        <child_model>obj_${k}</child_model>
+        <child_link>link</child_link>
+        <attach_topic>/vacuum/obj_${k}/attach</attach_topic>
+        <detach_topic>/vacuum/obj_${k}/detach</detach_topic>
+      </plugin>
+    </gazebo>
+  </xacro:macro>
+  <xacro:vacuum_slot k="0"/>
+  <xacro:vacuum_slot k="1"/>
+  <xacro:vacuum_slot k="2"/>
+</robot>

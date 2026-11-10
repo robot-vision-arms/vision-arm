@@ -1,0 +1,18 @@
+# ros2 launch 시 노드에 전달되는 파라미터. 경로는 워크스페이스 루트(~/study/robot_vision) 기준.
+vision_node:
+  ros__parameters:
+    camera_index: 0              # /dev/video0. 이미지 폴더로 테스트할 땐 image_dir 사용
+    image_dir: ""                # 비어 있으면 카메라, 값이 있으면 폴더 이미지를 순서대로 재생
+    intrinsics_path: "data/calib/intrinsics.npz"   # scripts/calibrate_camera.py 출력
+    homography_path: "data/calib/homography.npz"   # scripts/compute_homography.py 출력
+    blur_ksize: 5                # Gaussian Blur 커널(홀수). 초기값, 실험으로 조정
+    threshold: -1                # -1 이면 Otsu 자동 임계값
+    min_area_px: 500             # 이보다 작은 윤곽선은 노이즈로 버림. 초기값, 실험으로 조정
+    nut_max_aspect: 1.5          # 장축/단축 비가 이 이하면 너트, 넘으면 나사. 초기값, MVTec 비율 분포 보고 조정
+    publish_rate_hz: 10.0
+
+robot_bridge:
+  ros__parameters:
+    robot_host: "127.0.0.1"
+    robot_port: 9000
+    ack_timeout_s: 1.0           # 이 시간 안에 ACK 가 없으면 송신 실패로 기록

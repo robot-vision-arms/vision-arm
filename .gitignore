@@ -1,0 +1,22 @@
+# colcon 빌드 산출물 (각자 빌드)
+build/
+install/
+log/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+
+# 데이터·로그는 용량이 크고 개인 촬영본이라 올리지 않는다 (폴더 구조만 .gitkeep 으로 유지)
+data/**
+!data/**/
+!data/**/.gitkeep
+logs/*
+!logs/.gitkeep
+*.csv
+
+# 에디터
+.vscode/

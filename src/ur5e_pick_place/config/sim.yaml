@@ -1,0 +1,27 @@
+# ur5e_pick_place 파라미터. sim.launch.py 가 static TF(base_link → work_plane) 도 이 값으로 만든다.
+pick_place_node:
+  ros__parameters:
+    use_sim_time: true
+    world_name: "workcell"         # worlds/workcell.sdf 의 <world name>
+    max_objects: 3                 # 한 사이클에 집는 최대 개수. urdf/ur5e_vacuum.urdf.xacro 의 슬롯 수와 같아야 함
+
+    # 격자 종이(work_plane)를 Gazebo 안 어디에 둘지 (base_link 기준, m / deg).
+    # 실제 종이 원점이 여기 놓였다고 보고 비전 mm 좌표를 옮긴다. worlds/workcell.sdf 의 work_mat 위치와 맞출 것.
+    # x=0.30 은 UR5e(도달 반경 약 0.85 m)가 A4(297x210 mm) 전체를 위에서 내려다보며 닿는 거리로 잡은 초기값
+    work_plane_x: 0.30
+    work_plane_y: -0.15
+    work_plane_z: 0.0
+    work_plane_yaw_deg: 0.0
+
+    tool_length_m: 0.05            # tool0 → 흡착 패드 끝. urdf/ur5e_vacuum.urdf.xacro 의 pad_length 와 맞출 것
+    grasp_gap_m: 0.002             # 패드를 물체 바로 위(2 mm)에서 멈추고 붙인다. 닿으면 물리 엔진이 물체를 밀어냄
+    approach_height_m: 0.10        # 접근·후퇴 높이 (물체 위)
+
+    # 분류 대상과 상자. 같은 순서의 병렬 배열 (ROS 파라미터는 dict 목록을 못 받음).
+    # 공구 종류를 늘릴 때: models/<type>/ 추가 → 여기 한 칸씩 추가 → workcell.sdf 에 <type>_bin 추가. 코드는 안 바꾼다
+    # 상자는 로봇 베이스 둘레 반경 약 0.45 m 에 둔다 (작업 평면과 겹치지 않고 UR5e 가 위에서 닿는 거리)
+    part_types: ["screw", "nut"]
+    bin_x: [0.0, 0.0]
+    bin_y: [0.45, -0.45]
+    bin_drop_z: 0.15               # 상자 위 놓는 높이 (패드 끝 기준)
+    max_velocity_scaling: 0.3      # 시뮬레이션이 느린 WSL2 에서 궤적 추종 오차를 줄이려고 낮춘 초기값

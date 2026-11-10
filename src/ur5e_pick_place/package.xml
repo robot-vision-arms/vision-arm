@@ -1,0 +1,37 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>ur5e_pick_place</name>
+  <version>0.0.0</version>
+  <description>비전 결과를 받아 Gazebo 속 UR5e 가 MoveIt2 로 나사/너트를 집어 상자에 분류하는 확장 패키지</description>
+  <maintainer email="dhehehrud@naver.com">ODK2</maintainer>
+  <license>MIT</license>
+
+  <!-- 아래 의존성은 rosdep install 이 apt 로 설치한다 (docs/SETUP.md Step 3) -->
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>xacro</exec_depend>
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+
+  <!-- UR5e 모델·컨트롤러·Gazebo Harmonic 연동 (Jazzy 는 Gazebo Classic 이 없어 ur_simulation_gazebo 가 아닌 ur_simulation_gz) -->
+  <exec_depend>ur_description</exec_depend>
+  <exec_depend>ur_simulation_gz</exec_depend>
+  <exec_depend>ros_gz_sim</exec_depend>
+  <exec_depend>ros_gz_bridge</exec_depend>
+
+  <!-- 모션 플래닝: move_group (ur_moveit_config 가 띄움) + Python 클라이언트 pymoveit2 -->
+  <exec_depend>moveit</exec_depend>
+  <exec_depend>ur_moveit_config</exec_depend>
+  <exec_depend>pymoveit2</exec_depend>
+
+  <test_depend>python3-pytest</test_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

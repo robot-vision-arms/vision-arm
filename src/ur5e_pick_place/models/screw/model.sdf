@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<!--
+  M8x40 나사를 원기둥(반지름 4 mm, 길이 40 mm)으로 단순화. 나사산·머리는 집기에 영향이 없어 생략.
+  장축 = 모델 +X (비전 각도와 같은 기준이라 스폰할 때 Yaw 에 각도를 그대로 넣으면 된다).
+  모델 원점 = 바닥면 중심 → 스폰 z 에 작업 평면 높이를 그대로 쓴다.
+-->
+<sdf version="1.9">
+  <model name="screw">
+    <link name="link">
+      <!-- 원기둥 축(링크 Z)을 모델 +X 로 눕힌다 -->
+      <pose>0 0 0.004 0 1.5708 0</pose>
+      <inertial>
+        <mass>0.02</mass>
+        <!-- 원기둥: 축 방향 m r²/2, 수직 방향 m(3r² + l²)/12 -->
+        <inertia><ixx>2.75e-6</ixx><iyy>2.75e-6</iyy><izz>1.6e-7</izz><ixy>0</ixy><ixz>0</ixz><iyz>0</iyz></inertia>
+      </inertial>
+      <collision name="collision">
+        <geometry><cylinder><radius>0.004</radius><length>0.04</length></cylinder></geometry>
+      </collision>
+      <visual name="visual">
+        <geometry><cylinder><radius>0.004</radius><length>0.04</length></cylinder></geometry>
+        <material><ambient>0.6 0.6 0.65 1</ambient><diffuse>0.6 0.6 0.65 1</diffuse></material>
+      </visual>
+    </link>
+  </model>
+</sdf>
