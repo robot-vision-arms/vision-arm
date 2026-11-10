@@ -10,7 +10,3 @@ PySide6>=6.6,<7
 
 # colcon test 는 apt 의 python3-pytest 로도 돌지만, venv 안에서 pytest 를 직접 돌릴 때 쓴다
 pytest
-
-# MVTec Screws 다운로드용 Kaggle CLI (docs/PROJECT.md 6.2). 브라우저로 zip 을 받아 풀어도 된다.
-# API 토큰 ~/.kaggle/kaggle.json 은 저장소에 넣지 말 것 (.gitignore 에 있음)
-kaggle

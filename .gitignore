@@ -43,9 +43,7 @@ rosbag2_*/
 *.db3
 *.mcap
 
-# 비밀 정보: Kaggle API 토큰, 환경 변수 파일
-kaggle.json
-.kaggle/
+# 비밀 정보: 환경 변수 파일
 .env
 .env.*
 !.env.example

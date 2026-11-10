@@ -240,14 +240,8 @@ robot_vision/                   ← git 저장소 = colcon 워크스페이스
 | 한계 | 로봇 세계좌표(mm) 정답이 아님 → 위치 KPI 에는 사용 불가. 공구는 없음 |
 | 라이선스 | CC BY-NC-SA 4.0 (비상업) |
 
-라이선스상 재배포하지 않으므로 **저장소에 올리지 않고 각자 받습니다** (`.gitignore` 의 `data/**`). 둘 중 하나:
-
-```bash
-# A. Kaggle CLI (SETUP.md Step 2 의 API 토큰 필요)
-kaggle datasets download -d ipythonx/mvtec-screws -p data/mvtec_screws --unzip
-
-# B. 브라우저로 Kaggle 에서 zip 다운로드 → data/mvtec_screws/ 에 압축 해제 (zip 안에 상위 폴더 없음)
-```
+라이선스상 재배포하지 않으므로 **저장소에 올리지 않고 각자 받습니다** (`.gitignore` 의 `data/**`).
+위 Kaggle 페이지에서 브라우저로 zip 을 내려받아 `data/mvtec_screws/` 에 그대로 압축을 풉니다 (zip 안에 상위 폴더 없음).
 
 풀고 나면 이렇게 됩니다:
 
