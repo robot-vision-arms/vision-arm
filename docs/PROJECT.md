@@ -58,7 +58,7 @@
 
 | 주차 | 팀원 1 (   ) | 팀원 2 (   ) | 팀원 3 (   ) |
 |---|---|---|---|
-| 1주차 | 캘리브레이션: `calibrate_camera.py`, `compute_homography.py`, `calibrator.py` | Gazebo 구동: UR5e + MoveIt 띄우기, `workcell.sdf`, `ur5e_vacuum.urdf.xacro` | 영상 입력: `camera_stream.py`, 촬영 사진 파일 입력, 3명 환경 점검 |
+| 1주차 | 캘리브레이션: `calibrate_camera.py`, `compute_homography.py`, `calibrator.py` | Gazebo 구동: UR5e + MoveIt 띄우기, `workcell.sdf`, `ur5e_vacuum.urdf.xacro` | 영상 입력: `camera_stream.py`, 스마트폰 IP 카메라 수신, 3명 환경 점검 |
 | 2주차 | MoveIt 이동: `grasp.py`, `pick_place_node` 의 지정 좌표 이동 | 검출·분류: `vision_detector.py` (MVTec 검증) | ROS2 발행: `vision_node.py`, `packet.py` |
 | 3주차 | GUI: `main_window.py`, `ros_worker.py` | TCP: `robot_bridge.py`, `robot_server.py` (+ `--publish-ros`) | 스폰·흡착: `object_spawner.py`, DetachableJoint, TF |
 | 4주차 | KPI: `evaluate_kpi.py`, 100회 송신 테스트 | Pick & Place 한 사이클 통합 (`pick_place_node`) | 실측 정답 30+ 자세 수집, 시연 준비 |
@@ -114,7 +114,7 @@ KPI 를 재려면 "무엇을 정답으로 볼지" 가 먼저 정해져야 합니
 ## 4. 시스템 구성
 
 ```
- 촬영 사진 / 이미지 폴더
+ 카메라 / 이미지 폴더
         │
  ┌──────▼─────────────── vision_node (ROS2) ───────────────┐
  │ camera_stream → vision_detector → calibrator(px→mm, 각도) │
@@ -221,13 +221,12 @@ robot_vision/                   ← git 저장소 = colcon 워크스페이스
 
 ## 6. 데이터
 
+기본 입력은 거치대에 고정한 스마트폰의 실시간 영상입니다 (DECISIONS.md 7절).
+같은 폰·같은 위치로 모눈종이를 찍고, 격자 교차점의 px 좌표와 실측 mm 좌표를 대응시켜 호모그래피를 구합니다.
 보유 MVTec 이미지는 물체 검출·중심점·장축 각도 계산 로직을 개발하고 검증하는 데이터입니다.
-실제 카메라로 모눈종이를 촬영하고, 격자 교차점의 px 좌표와 실측 mm 좌표를 대응시켜 호모그래피를 구하는 계획은 유지합니다.
-실시간 USB 웹캠 연결과 WSL usbipd 설정만 제외하며, 촬영한 사진을 파일로 가져와 입력합니다.
-가상 카메라로 전환하는 계획은 정하지 않았습니다. 사진의 촬영 장치·해상도·카메라와 작업면의 상대 자세는 보정 때와 같아야 합니다.
+사진 폴더·동영상 파일 입력(`image_dir`)은 폰 영상을 못 받을 때의 대체 입력입니다. 이때도 촬영 장치·해상도·카메라와 작업면의 상대 자세는 보정 때와 같아야 합니다.
 
-
-### 6.1 실제 촬영 사진과 좌표 보정 (메인)
+### 6.1 자체 촬영과 좌표 보정 (메인)
 
 나사·너트(최종 목표에서는 공구까지)를 격자 종이 위에 놓고 촬영합니다. **좌표·각도 정답은 이 데이터로만 만듭니다.**
 
@@ -299,7 +298,7 @@ Pick 성공률은 시뮬레이터 안의 결과라 비전 정확도와 별개로
 
 | 주차 | 할 일 | 끝났다는 기준 |
 |---|---|---|
-| **1주차** 환경·캘리브레이션·시뮬 구동 | 전원 SETUP.md 완료 (사진 입력, Gazebo·MoveIt 포함) · 체커보드 캘리브레이션 · 카메라 고정 후 격자 호모그래피 · 로봇 좌표계(원점·축) 종이에 표시 · **UR5e 를 Gazebo 에 띄우고 MoveIt 으로 움직이기** | 3명 모두 `colcon build` 성공 · `intrinsics.npz`, `homography.npz` 생성 · 재투영 오차(mm) 기록 · **확인 ①** 통과 여부 기록 |
+| **1주차** 환경·캘리브레이션·시뮬 구동 | 전원 SETUP.md 완료 (스마트폰 카메라, Gazebo·MoveIt 포함) · 체커보드 캘리브레이션 · 폰 고정 후 격자 호모그래피 · 로봇 좌표계(원점·축) 종이에 표시 · **UR5e 를 Gazebo 에 띄우고 MoveIt 으로 움직이기** | 3명 모두 `colcon build` 성공 · `intrinsics.npz`, `homography.npz` 생성 · 재투영 오차(mm) 기록 · **확인 ①** 통과 여부 기록 |
 | **2주차** 비전·ROS2 노드·로봇 이동 | MVTec 으로 검출·각도·분류 먼저 검증 · 자체 부품 촬영 · Blur/Threshold 조정 · `vision_node` 발행 · 코드(pymoveit2)로 작업 평면 위 지정 좌표 이동 · 손으로 스폰한 부품 attach/detach 시험 | `ros2 topic echo /vision/detections` 로 mm·각도·종류 확인 · `colcon test` 통과 · **확인 ②** 통과 여부 기록 |
 | **3주차** GUI·TCP·스폰 | 메인 윈도우 4화면 · QThread 로 ROS 구독 · `robot_server`, `robot_bridge` · `--publish-ros` · 인식 결과대로 Gazebo 에 부품 스폰 | GUI 실시간 표시 · TCP ACK 수신 · 카메라 앞 부품 위치대로 Gazebo 에 부품이 생김 |
 | **4주차** Pick & Place·KPI·시연 | 한 사이클 완성 · 실측 정답 30+ 자세 · 100회 송신 테스트 · `evaluate_kpi.py` | KPI 표 필수 4칸 + 측정 장비 표 채움 · 시연 (카메라 → GUI → TCP → Gazebo 분류) |
@@ -337,7 +336,8 @@ Pick 성공률은 시뮬레이터 안의 결과라 비전 정확도와 별개로
 
 | 위험 | 대응 |
 |---|---|
-| 실시간 웹캠·usbipd 연결 | 수행하지 않음. 실제 모눈종이·부품을 촬영한 사진 파일을 `image_dir`로 입력 |
+| WSL 에서 폰 영상을 못 받음 | SETUP.md Step 7 점검 순서 (같은 Wi-Fi, 폰 핫스팟). 안 되면 폰으로 찍은 사진·동영상 → `image_dir` 모드 |
+| Wi-Fi 지연·끊김 | `camera_stream` 에서 재연결. 시연은 폰 핫스팟 등 안정된 네트워크로, 실패 대비 동영상 파일도 준비 |
 | 조명·그림자로 이진화 실패 | 배경을 부품과 대비되는 단색으로, 조명 고정. Otsu 로 시작 후 고정값 비교 |
 | 카메라가 비스듬해 mm 오차 증가 | 카메라를 작업면에 최대한 수직으로 고정, 호모그래피 기준점은 작업 영역 가장자리까지 넓게 |
 | 카메라·종이가 움직임 | 테이프로 고정, 움직였으면 호모그래피 재계산 (GUI 캘리브 상태에 계산 시각 표시) |

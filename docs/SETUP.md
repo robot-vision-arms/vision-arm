@@ -205,18 +205,36 @@ ros2 launch vision_pick_place pipeline.launch.py                 # 터미널 3: 
 ros2 service call /sim/run_cycle std_srvs/srv/Trigger            # 터미널 4: 지금 보이는 부품으로 한 사이클
 ```
 
-## Step 7. 실제 촬영 사진 파일 입력
+## Step 7. 스마트폰을 카메라로 쓰기
 
-실시간 USB 웹캠·WSL USB 전달·usbipd 설정은 하지 않습니다. 실제 모눈종이 촬영과 좌표 보정은 유지합니다.
+PC 에 웹캠이 없으므로 스마트폰을 IP 카메라로 씁니다. 영상은 Wi-Fi 로 받기 때문에 USB 연결(usbipd)은 필요 없습니다.
 
-1. 보유 MVTec 이미지로 물체 검출·중심점·장축 각도 로직을 개발·검증합니다. 이 데이터에는 실제 mm 정답이 없습니다.
-2. 사용할 카메라로 체커보드·모눈종이를 촬영해 파일을 가져옵니다. 내부 보정과 px→mm 호모그래피를 계산합니다.
-3. 같은 촬영 장치·해상도·작업면 상대 자세로 부품을 촬영하고 `data/captures/` 등에 저장합니다. 카메라나 작업면이 움직이면 보정을 다시 합니다.
-4. `src/vision_pick_place/config/params.yaml`의 `image_dir`에 사진 폴더를 지정합니다. 현재 `camera_stream.py`·보정 스크립트·비전 노드는 뼈대이므로 해당 로직 구현이 필요합니다.
-5. 검출 결과를 로봇 작업 좌표계(mm)로 변환해 Gazebo의 UR5e에 전달합니다.
+1. 폰에 IP 카메라 앱을 설치합니다 (Android 예: IP Webcam. iPhone 은 HTTP(MJPEG)·RTSP 영상 주소를 주는 앱).
+   앱에서 서버를 시작하면 `http://192.168.0.23:8080` 같은 주소가 화면에 나옵니다.
+2. PC 와 폰을 **같은 Wi-Fi** 에 연결합니다.
+3. 영상 주소를 `src/vision_pick_place/config/params.yaml` 의 `camera_url` 에 넣습니다.
+   IP Webcam 은 보통 주소 끝에 `/video` 를 붙입니다. 앱마다 경로가 다르니 앱 화면의 안내를 따릅니다.
+4. WSL 에서 확인합니다.
 
-가상 카메라 도입은 현재 결정하지 않았습니다. 물리 웹캠·usbipd 경고는 현재 작업의 필수 실패가 아닙니다.
+```bash
+source ~/vision-arm/env.sh
+python scripts/check_environment.py        # '스마트폰 카메라 접속' 이 OK 인지
+python -c "import cv2; c=cv2.VideoCapture('http://192.168.0.23:8080/video'); ok,f=c.read(); print(ok, None if f is None else f.shape)"
+```
 
+   `True (720, 1280, 3)` 처럼 나오면 통과입니다 (주소는 자기 폰 것으로).
+5. 폰을 거치대로 작업면 위에 고정합니다. 보정(체커보드·모눈종이)과 부품 인식을 같은 위치·해상도로 해야 px→mm 가 맞습니다.
+   앱에서 해상도를 고정하고, 가능하면 자동 초점·자동 노출·화면 회전을 끕니다. 화면 꺼짐을 막고 충전기를 연결해 둡니다.
+
+접속이 안 될 때:
+
+- 먼저 Windows 브라우저로 같은 주소를 열어 봅니다. 여기서도 안 되면 폰·Wi-Fi 문제입니다.
+- 학교·회사 Wi-Fi 는 기기끼리 통신을 막는 경우가 있습니다. 폰 핫스팟에 PC 를 연결해 봅니다.
+- Windows 에서는 되는데 WSL 에서만 안 되면 Windows 방화벽과 WSL 네트워크 설정을 확인합니다.
+- 폰 IP 는 Wi-Fi 에 다시 붙으면 바뀔 수 있습니다. 바뀌면 `camera_url` 을 고칩니다.
+- 끝내 안 되면 폰으로 사진·동영상을 찍어 그 폴더를 `params.yaml` 의 `image_dir` 로 지정해 진행합니다.
+
+**1주차 안에 각자 확인**해 두세요.
 
 ---
 
@@ -234,7 +252,7 @@ ros2 service call /sim/run_cycle std_srvs/srv/Trigger            # 터미널 4: 
 | 8 | 파일 3개 (`camera_stream`, `vision_detector`, `calibrator`) | + ROS 노드, TCP 브리지·가상 로봇 서버, GUI, KPI 스크립트 | 과제 필수 항목(TCP 송수신, GUI 4화면, KPI 측정)을 담을 파일이 없었습니다. 구조는 `docs/PROJECT.md` 5장 참고. |
 | 9 | 파일마다 대원 A/B/C 고정 지정 | 주차마다 주 담당을 돌림 (PROJECT.md 2.3) | 팀 원칙이 "전원이 전 과정을 학습" 이라 고정 소유권과 맞지 않습니다. 작업 묶음은 받은 분담안 것을 쓰되 사람을 돌립니다. |
 | 10 | MuJoCo 를 주요 라이브러리로 명시, 설치 명령은 없음 | MuJoCo 제거, 시뮬레이터는 Gazebo Harmonic + `ur_simulation_gz` (Step 3) | 받은 역할 분담안이 Gazebo·UR5e·MoveIt2 기준이고, UR 공식 시뮬레이션 패키지와 MoveIt 설정이 Jazzy 용으로 apt 에 있어서 바로 쓸 수 있습니다. 과제 필수 범위(TCP 서버)는 그대로 유지합니다. |
-| 11 | 실시간 웹캠 연결 | 촬영 사진 파일 입력 | 모눈종이 실제 촬영·좌표 보정은 유지하고 USB 웹캠·usbipd 연결만 제외합니다. |
+| 11 | 웹캠 연결 언급 없음 | Step 7 스마트폰 IP 카메라 | PC 에 웹캠이 없고, WSL2 는 USB 장치를 기본으로 못 봅니다. 폰 영상은 네트워크로 받으므로 usbipd 가 필요 없습니다. |
 | 12 | `ur_simulation_gazebo` 클론 | `ros-jazzy-ur-simulation-gz` apt 설치 | `ur_simulation_gazebo` 는 Gazebo Classic 용(Humble)입니다. Jazzy 의 짝은 Gazebo Harmonic 이고 그쪽 패키지가 `ur_simulation_gz` 입니다. apt 판이 있어 클론·빌드할 필요가 없습니다. |
 | 13 | 의존성 직접 나열 | `rosdep install` (Step 3) | 의존성 기준을 package.xml 한 곳으로 둡니다. 문서와 따로 적으면 어긋납니다. |
 | 14 | 시뮬레이터 구동 확인 시점 없음 (3단계에서 처음 구축) | 1주차 Step 5 | WSL2 에서 Gazebo 렌더링·메모리 문제는 늦게 알면 대응할 시간이 없습니다. |

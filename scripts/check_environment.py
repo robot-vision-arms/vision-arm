@@ -5,10 +5,10 @@
     python scripts/check_environment.py
     python scripts/check_environment.py --json
 
-설치·빌드·카메라 촬영·로봇 이동은 수행하지 않는다.
-PASS=확인 성공, FAIL=필수 조건 미충족, WARN=추가 확인 필요,
-MANUAL=직접 실행해야 하는 검증. 종료 코드는 FAIL이 있으면 1, 없으면 0이다.
-종료 코드 0도 수동 구동 검증 완료를 의미하지 않는다.
+설치·빌드·영상 수신·로봇 이동은 수행하지 않는다. 스마트폰 카메라는 접속만 확인하고 영상은 열지 않는다.
+OK=확인 성공, FAIL=조건 미충족(조치 필요). 종료 코드는 FAIL이 있으면 1, 없으면 0이다.
+조회로 판정할 수 없는 구동 검증은 마지막 "직접 확인할 항목"에 따로 적는다.
+종료 코드 0도 그 항목의 완료를 의미하지 않는다.
 """
 import argparse
 from collections import Counter
@@ -18,16 +18,25 @@ from pathlib import Path
 import platform
 import re
 import shutil
+import socket
 import subprocess
 import sys
+from urllib.parse import urlparse
 import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
+PARAMS = ROOT / 'src/vision_pick_place/config/params.yaml'
 RESULTS = []
+MANUAL = []
 
 
-def record(status, name, detail, action=''):
-    RESULTS.append(dict(status=status, name=name, detail=str(detail), action=action))
+def record(ok, name, detail, action=''):
+    RESULTS.append(dict(status='OK' if ok else 'FAIL', name=name, detail=str(detail),
+                        action='' if ok else action))
+
+
+def manual(name, action):
+    MANUAL.append(dict(name=name, action=action))
 
 
 def run(command, timeout=12):
@@ -42,7 +51,7 @@ def run(command, timeout=12):
 
 def probe(name, code, action):
     status, output = run([sys.executable, '-c', code])
-    record('PASS' if status == 0 else 'FAIL', name, output[-1200:], action if status != 0 else '')
+    record(status == 0, name, output[-1200:], action)
 
 
 def system_checks():
@@ -51,45 +60,31 @@ def system_checks():
     except OSError:
         release = {}
     ubuntu = release.get('ID') == 'ubuntu' and release.get('VERSION_ID') == '24.04'
-    record('PASS' if ubuntu else 'FAIL', 'Ubuntu 24.04',
-           release.get('PRETTY_NAME', platform.platform()), 'SETUP.md 환경 사양 확인' if not ubuntu else '')
+    record(ubuntu, 'Ubuntu 24.04', release.get('PRETTY_NAME', platform.platform()), 'SETUP.md 환경 사양 확인')
     is_wsl = 'microsoft' in platform.release().lower()
-    record('PASS' if is_wsl else 'INFO', 'WSL', platform.release())
-    record('INFO', 'CPU', f'{os.cpu_count()} logical CPUs / {platform.machine()}')
+    record(True, 'WSL', platform.release() if is_wsl else 'WSL 아님: ' + platform.release())
+    record(True, 'CPU', f'{os.cpu_count()} logical CPUs / {platform.machine()}')
     memory = Path('/proc/meminfo')
-    if memory.exists():
-        values = dict(re.findall(r'^(MemTotal|SwapTotal):\s+(\d+)', memory.read_text(), re.M))
-        ram = int(values.get('MemTotal', 0)) / 1024**2
-        swap = int(values.get('SwapTotal', 0)) / 1024**2
-        # WSL의 8GB 설정도 커널 예약분 때문에 8GiB 미만으로 표시된다.
-        record('PASS' if ram >= 7.5 else 'WARN', 'WSL RAM / swap',
-               f'{ram:.1f} GiB / {swap:.1f} GiB',
-               'WSL 메모리 8GB 이상 권장 (WEEK1.md 1단계)' if ram < 7.5 else '')
-    else:
-        record('WARN', 'RAM', '/proc/meminfo 조회 불가')
+    values = dict(re.findall(r'^(MemTotal|SwapTotal):\s+(\d+)', memory.read_text(), re.M)) if memory.exists() else {}
+    ram = int(values.get('MemTotal', 0)) / 1024**2
+    swap = int(values.get('SwapTotal', 0)) / 1024**2
+    # WSL의 8GB 설정도 커널 예약분 때문에 8GiB 미만으로 표시된다.
+    record(ram >= 7.5, 'WSL RAM / swap', f'{ram:.1f} GiB / {swap:.1f} GiB',
+           'WSL 메모리 8GB 이상 (WEEK1.md 1단계)')
     free = shutil.disk_usage(ROOT).free / 1024**3
-    record('PASS' if free >= 15 else 'WARN', '디스크 여유', f'{free:.1f} GiB',
-           '설치 여유 공간 15GB 이상 권장' if free < 15 else '')
-    correct_python = sys.version_info[:2] == (3, 12)
-    record('PASS' if correct_python else 'FAIL', 'Python 3.12',
-           f'{platform.python_version()} / {sys.executable}',
-           '시스템 Python 3.12로 .venv 생성' if not correct_python else '')
+    record(free >= 15, '디스크 여유', f'{free:.1f} GiB', '설치 여유 공간 15GB 이상 확보')
+    record(sys.version_info[:2] == (3, 12), 'Python 3.12', f'{platform.python_version()} / {sys.executable}',
+           '시스템 Python 3.12로 .venv 생성')
     in_project_venv = Path(sys.prefix).absolute() == (ROOT / '.venv').absolute()
-    record('PASS' if in_project_venv else 'WARN', '프로젝트 venv 활성화', sys.prefix,
-           'source ./env.sh' if not in_project_venv else '')
+    record(in_project_venv, '프로젝트 venv 활성화', sys.prefix, 'source ./env.sh')
     config = ROOT / '.venv/pyvenv.cfg'
     shared = config.exists() and bool(re.search(r'include-system-site-packages\s*=\s*true', config.read_text(), re.I))
-    record('PASS' if shared else 'FAIL', 'venv 시스템 패키지 공유', str(config),
-           'python3 -m venv --system-site-packages .venv' if not shared else '')
+    record(shared, 'venv 시스템 패키지 공유', str(config), 'python3 -m venv --system-site-packages .venv')
     ignored = (ROOT / '.venv/COLCON_IGNORE').is_file()
-    record('PASS' if ignored else 'WARN', 'venv COLCON_IGNORE', ignored,
-           'touch .venv/COLCON_IGNORE' if not ignored else '')
+    record(ignored, 'venv COLCON_IGNORE', ignored, 'touch .venv/COLCON_IGNORE')
     active_conda = os.environ.get('CONDA_PREFIX')
-    record('FAIL' if active_conda else 'PASS', 'conda 비활성화', active_conda or '비활성화',
-           'conda deactivate 후 source ./env.sh' if active_conda else '')
-    record('MANUAL', 'conda 자동 활성화 설정', '현재 세션의 비활성화와 별도로 확인',
-           '새 터미널에서 which python3 및 conda config --show auto_activate_base 확인')
-    return is_wsl
+    record(not active_conda, 'conda 비활성화', active_conda or '비활성화', 'conda deactivate 후 source ./env.sh')
+    manual('conda 자동 활성화 꺼짐', '새 터미널에서 which python3 및 conda config --show auto_activate_base 확인')
 
 
 def python_checks():
@@ -127,14 +122,13 @@ def python_checks():
 
 def ros_checks():
     distro = os.environ.get('ROS_DISTRO')
-    record('PASS' if distro == 'jazzy' else 'FAIL', 'ROS_DISTRO', distro or '미설정',
-           'source ./env.sh' if distro != 'jazzy' else '')
-    record('PASS' if Path('/opt/ros/jazzy/setup.bash').is_file() else 'FAIL',
-           'ROS2 설치 파일', '/opt/ros/jazzy/setup.bash')
+    record(distro == 'jazzy', 'ROS_DISTRO', distro or '미설정', 'source ./env.sh')
+    record(Path('/opt/ros/jazzy/setup.bash').is_file(), 'ROS2 설치 파일', '/opt/ros/jazzy/setup.bash',
+           'SETUP.md Step 1: ROS2 Jazzy 설치')
     for command in ('git', 'ros2', 'colcon', 'rosdep', 'gz', 'xacro'):
         executable = shutil.which(command)
-        record('PASS' if executable else 'FAIL', '실행 파일: ' + command, executable or 'PATH에 없음',
-               'SETUP.md 설치 및 source ./env.sh 확인' if not executable else '')
+        record(bool(executable), '실행 파일: ' + command, executable or 'PATH에 없음',
+               'SETUP.md 설치 및 source ./env.sh 확인')
     dependencies = {'rviz2', 'moveit_ros_move_group', 'controller_manager', 'gz_ros2_control'}
     apt_packages = set()
     projects = set()
@@ -150,9 +144,9 @@ def ros_checks():
                     elif name:
                         dependencies.add(name)
         except (ET.ParseError, OSError) as exc:
-            record('FAIL', 'package.xml 읽기', f'{manifest}: {exc}')
+            record(False, 'package.xml 읽기', f'{manifest}: {exc}', 'package.xml 문법 확인')
     if not projects:
-        record('FAIL', '프로젝트 패키지', 'src/*/package.xml 없음')
+        record(False, '프로젝트 패키지', 'src/*/package.xml 없음', '저장소 src/ 확인')
     # shell이나 ROS daemon 없이 ament 인덱스를 한 번 조회한다.
     rc, output = run([sys.executable, '-c',
                       "import json; from ament_index_python.packages import get_packages_with_prefixes; "
@@ -163,7 +157,7 @@ def ros_checks():
     except ValueError:
         prefixes = None
     if prefixes is None:
-        record('FAIL', 'ROS 패키지 인덱스', output[-1000:], 'source ./env.sh 및 ament_index_python 설치 확인')
+        record(False, 'ROS 패키지 인덱스', output[-1000:], 'source ./env.sh 및 ament_index_python 설치 확인')
     else:
         for package in sorted(dependencies | projects):
             prefix = prefixes.get(package)
@@ -173,103 +167,94 @@ def ros_checks():
                     version = ET.parse(Path(prefix) / 'share' / package / 'package.xml').getroot().findtext('version')
                     detail = f'{prefix} / version={version}'
                 except (OSError, ET.ParseError):
-                    record('WARN', 'ROS 패키지 메타데이터: ' + package, 'package.xml 버전 조회 불가')
-            record('PASS' if prefix else 'FAIL', 'ROS 패키지: ' + package, detail,
-                   ('colcon build --symlink-install 후 source install/setup.bash' if package in projects
-                    else 'rosdep install --from-paths src --ignore-src -y --rosdistro jazzy') if not prefix else '')
+                    detail = f'{prefix} / 버전 조회 불가'
+            record(bool(prefix), 'ROS 패키지: ' + package, detail,
+                   'colcon build --symlink-install 후 source install/setup.bash' if package in projects
+                   else 'rosdep install --from-paths src --ignore-src -y --rosdistro jazzy')
     for package in sorted(apt_packages):
         rc, output = run(['dpkg-query', '-W', '-f=${Status} ${Version}', package])
         installed = rc == 0 and output.startswith('install ok installed ')
-        record('PASS' if installed else 'FAIL', 'apt 패키지: ' + package,
-               output if installed else '설치 확인 실패', 'sudo apt install ' + package if not installed else '')
+        record(installed, 'apt 패키지: ' + package, output if installed else '설치 확인 실패',
+               'sudo apt install ' + package)
     if shutil.which('gz'):
         rc, output = run(['gz', 'sim', '--version'])
         harmonic = rc == 0 and bool(re.search(r'version\s+8\.', output, re.I))
-        record('PASS' if harmonic else 'FAIL', 'Gazebo Harmonic', output[:500],
-               'ros-jazzy-ur-simulation-gz 및 ros_gz_sim 설치 확인' if not harmonic else '')
+        record(harmonic, 'Gazebo Harmonic', output[:500], 'ros-jazzy-ur-simulation-gz 및 ros_gz_sim 설치 확인')
     rosdep_config = Path('/etc/ros/rosdep/sources.list.d/20-default.list')
-    record('PASS' if rosdep_config.is_file() else 'WARN', 'rosdep 초기화', str(rosdep_config),
-           'sudo rosdep init 후 rosdep update' if not rosdep_config.is_file() else '')
-    record('MANUAL', 'rosdep 의존성 전체 점검', '규칙 해석과 캐시 최신 여부는 별도 확인',
-           'rosdep check --from-paths src --ignore-src --rosdistro jazzy')
+    record(rosdep_config.is_file(), 'rosdep 초기화', str(rosdep_config), 'sudo rosdep init 후 rosdep update')
+    manual('rosdep 의존성 전체 점검', 'rosdep check --from-paths src --ignore-src --rosdistro jazzy')
     built = (ROOT / 'install/setup.bash').is_file()
-    record('PASS' if built else 'WARN', '빌드 설치 파일 존재', built,
-           'colcon build --symlink-install' if not built else '')
-    record('MANUAL', '현재 소스 빌드·테스트', '파일 존재만으로 최신 빌드 성공은 판정하지 않음',
-           'colcon build --symlink-install && colcon test && colcon test-result --verbose')
+    record(built, '빌드 설치 파일 존재', built, 'colcon build --symlink-install')
+    manual('현재 소스 빌드·테스트', 'colcon build --symlink-install && colcon test && colcon test-result --verbose')
 
 
-def devices(is_wsl, skip_windows):
+def load_vision_params():
+    try:
+        import yaml
+        return yaml.safe_load(PARAMS.read_text())['vision_node']['ros__parameters']
+    except Exception as exc:  # 설정 파일이 깨졌거나 yaml이 없을 때 모두 같은 조치
+        return exc
+
+
+def camera_checks():
     display = os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY')
-    record('PASS' if display else 'WARN', '화면 세션 환경 변수', display or '없음',
-           'WSLg 또는 화면 세션 확인' if not display else '')
-    record('INFO', '소프트웨어 렌더링 설정', os.environ.get('LIBGL_ALWAYS_SOFTWARE', '미설정'))
-    video = sorted(Path('/dev').glob('video*'))
-    record('PASS' if video else 'WARN', 'WSL/Linux 웹캠 장치',
-           ', '.join(str(p) for p in video) or '장치 없음',
-           'WEEK1.md 2·9단계: usbipd 설치·웹캠 연결. 이미지 폴더로 대체 가능' if not video else '')
-    if video:
-        inaccessible = [str(p) for p in video if not os.access(p, os.R_OK | os.W_OK)]
-        record('WARN' if inaccessible else 'PASS', '웹캠 장치 접근 권한',
-               ', '.join(inaccessible) if inaccessible else '읽기·쓰기 권한 있음')
-    if is_wsl and not skip_windows:
-        powershell = shutil.which('powershell.exe')
-        if powershell:
-            code = ("$u=Get-Command usbipd -ErrorAction SilentlyContinue; "
-                    "$c=@(Get-PnpDevice -PresentOnly -ErrorAction Stop | "
-                    "Where-Object {$_.Class -in @('Camera','Image')}); "
-                    "[pscustomobject]@{usbipd=[bool]$u; cameras=$c.Count; "
-                    "gpu=@(Get-CimInstance Win32_VideoController -ErrorAction Stop | "
-                    "Select-Object -ExpandProperty Name)} | ConvertTo-Json -Compress")
-            rc, output = run([powershell, '-NoProfile', '-NonInteractive', '-Command', code], timeout=20)
-            try:
-                data = json.loads(output) if rc == 0 else None
-            except ValueError:
-                data = None
-            if data is None:
-                record('WARN', 'Windows 조회', '조회 불가: ' + output[-500:],
-                       'Windows PowerShell에서 usbipd list 및 카메라 장치 직접 확인')
-            else:
-                record('PASS' if data['usbipd'] else 'WARN', 'Windows usbipd',
-                       '설치됨' if data['usbipd'] else '명령을 찾을 수 없음',
-                       '관리자 PowerShell: winget install usbipd' if not data['usbipd'] else '')
-                record('PASS' if data['cameras'] else 'WARN', 'Windows 카메라',
-                       f"{data['cameras']}개 (WSL 연결·영상 수신 성공 여부는 별도)")
-                record('INFO', 'Windows GPU', ', '.join(data['gpu']))
-        else:
-            record('WARN', 'Windows 조회', 'powershell.exe가 PATH에 없음', 'Windows에서 직접 확인')
-    elif is_wsl:
-        record('WARN', 'Windows 조회', '--skip-windows로 생략')
-    record('MANUAL', '실제 영상 수신', '장치 존재만 점검. 카메라는 열지 않음',
-           '사용할 웹캠 영상 또는 대체 이미지 폴더 입력 확인')
-    record('MANUAL', 'ROS2 노드 통신', 'ROS daemon·노드는 실행하지 않음',
-           'SETUP.md Step 1: 별도 터미널의 talker/listener 송수신 확인')
-    record('MANUAL', 'Gazebo·RViz·MoveIt 구동', 'GUI 생성·계획·실행 성공은 설치 조회로 판정 불가',
-           'SETUP.md Step 5: UR 기본 예제 실행 후 RViz Plan & Execute 확인')
+    record(bool(display), '화면 세션 환경 변수', display or '없음', 'WSLg 또는 화면 세션 확인')
+    record(True, '소프트웨어 렌더링 설정', os.environ.get('LIBGL_ALWAYS_SOFTWARE', '미설정'))
+    params = load_vision_params()
+    if isinstance(params, Exception):
+        record(False, '비전 입력 설정', f'{PARAMS}: {params}', 'params.yaml 의 vision_node 항목 확인')
+        return
+    image_dir = params.get('image_dir') or ''
+    camera_url = params.get('camera_url') or ''
+    if image_dir:
+        # 대체 입력(사진 폴더·동영상 파일)을 쓰는 중이면 스마트폰 접속은 점검하지 않는다.
+        path = ROOT / image_dir
+        record(path.exists(), '비전 입력: image_dir', path, 'params.yaml 의 image_dir 경로 확인')
+        return
+    url = urlparse(camera_url)
+    if url.scheme not in ('http', 'https', 'rtsp') or not url.hostname:
+        record(False, '스마트폰 카메라 주소', camera_url or 'camera_url 미설정',
+               'SETUP.md Step 7: 폰 앱에 표시된 주소를 params.yaml 의 camera_url 에 입력')
+        return
+    record(True, '스마트폰 카메라 주소', camera_url)
+    port = url.port or {'http': 80, 'https': 443, 'rtsp': 554}[url.scheme]
+    try:
+        # 영상은 열지 않고 TCP 접속만 확인한다.
+        with socket.create_connection((url.hostname, port), timeout=3):
+            pass
+        record(True, '스마트폰 카메라 접속', f'{url.hostname}:{port} 접속됨')
+    except OSError as exc:
+        record(False, '스마트폰 카메라 접속', f'{url.hostname}:{port} 접속 불가 ({exc})',
+               '폰 앱 서버 실행, PC와 같은 Wi-Fi, 폰 IP 변경 여부 확인 (SETUP.md Step 7)')
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('--json', action='store_true', help='JSON 결과만 출력')
-    parser.add_argument('--skip-windows', action='store_true', help='Windows PowerShell 조회 생략')
     args = parser.parse_args()
     if not args.json:
         print(f'환경 설치 점검: {ROOT}\n각 외부 조회에는 제한 시간이 있습니다. 잠시 기다려 주세요.', flush=True)
-    is_wsl = system_checks()
+    system_checks()
     python_checks()
     ros_checks()
-    devices(is_wsl, args.skip_windows)
-    counts = dict(Counter(item['status'] for item in RESULTS))
+    camera_checks()
+    manual('스마트폰 영상 수신', 'SETUP.md Step 7 의 확인 명령으로 프레임 1장 읽기')
+    manual('ROS2 노드 통신', 'SETUP.md Step 1: 별도 터미널의 talker/listener 송수신 확인')
+    manual('Gazebo·RViz·MoveIt 구동', 'SETUP.md Step 5: UR 기본 예제 실행 후 RViz Plan & Execute 확인')
+    counts = Counter(item['status'] for item in RESULTS)
     if args.json:
-        print(json.dumps(dict(workspace=str(ROOT), summary=counts, checks=RESULTS), ensure_ascii=False, indent=2))
+        print(json.dumps(dict(workspace=str(ROOT), summary=dict(counts), checks=RESULTS, manual=MANUAL),
+                         ensure_ascii=False, indent=2))
     else:
         for item in RESULTS:
-            print(f"[{item['status']}] {item['name']}: {item['detail']}")
+            print(f"[{item['status']:<4}] {item['name']}: {item['detail']}")
             if item['action']:
-                print(f"       확인/조치: {item['action']}")
-        print('\n결과: ' + ', '.join(f'{key} {value}' for key, value in counts.items()))
-        print('MANUAL 항목은 직접 확인해야 합니다. 설치 조회 성공만으로 환경 전체 완료를 뜻하지 않습니다.')
-    return 1 if counts.get('FAIL', 0) else 0
+                print(f"       조치: {item['action']}")
+        print('\n직접 확인할 항목 (조회로 판정 불가):')
+        for item in MANUAL:
+            print(f"  [ ] {item['name']}: {item['action']}")
+        print(f"\n결과: OK {counts['OK']}, FAIL {counts['FAIL']}")
+    return 1 if counts['FAIL'] else 0
 
 
 if __name__ == '__main__':

@@ -17,7 +17,7 @@
 | Conda / ROS / venv | Conda 자동 활성화 꺼짐, Jazzy / Python 3.12.3 .venv 사용 |
 | 테스트 | 7개 중 3개 통과, 4개 skipped, 실패 0 |
 | 시뮬레이터 | 드라이버 설치 완료. 기본 예제 MoveIt 초기화·컨트롤러 활성화 확인. URDF/SRDF 이름 불일치 해결 및 실제 동작 검증 필요 |
-| USB / 웹캠 | usbipd Windows 설치 폴더 존재. 5.3.0 설치·서비스 실행 확인. 물리 웹캠 연결은 범위 제외 |
+| 카메라 | 웹캠 없음. 스마트폰 IP 카메라로 진행: 2·9단계 필요 |
 | 데이터 | `data/mvtec_screws`에 이미지 384장 및 어노테이션 복사 완료 |
 
 ### 현재 PC 남은 작업
@@ -36,7 +36,7 @@ ros2 launch ur_simulation_gz ur_sim_moveit.launch.py ur_type:=ur5e
 
 sudo 비밀번호가 없으면 Windows PowerShell에서 먼저 `wsl -d Ubuntu-24.04 -u root -- passwd user1` 실행.
 
-실제 웹캠·usbipd 설정은 수행하지 않습니다. 2·9단계는 보유 이미지 준비와 실제 촬영 사진 입력으로 대체합니다.
+카메라는 스마트폰을 씁니다. 2단계(앱 설치)와 9단계(WSL 에서 영상 수신)를 진행합니다 (DECISIONS.md 7절).
 
 WSL 메모리 설정 적용은 모든 WSL 작업을 저장한 뒤 Windows PowerShell에서 `wsl --shutdown` 실행 후 재접속.
 `free -h`로 적용 확인. Gazebo와 RViz의 실제 화면 및 Plan & Execute는 8단계대로 확인해야 하며 아직 통과로 기록하지 않았습니다.
@@ -56,14 +56,14 @@ WSL 메모리 설정 적용은 모든 WSL 작업을 저장한 뒤 Windows PowerS
 | ROS2 | `ls /opt/ros` | **없음** | 4단계 |
 | python3 | `which python3 && python3 --version` | **conda base 3.11** (`/home/user1/anaconda3/bin/python3`) | **3단계**: conda 자동 활성화 끄기 |
 | 시스템 Python | `/usr/bin/python3 --version` | 3.12.3 | 없음 (ROS2 Jazzy 짝) |
-| 웹캠 | `ls /dev/video*` | **없음** | 범위 제외 |
+| 웹캠 | `ls /dev/video*` | **없음** | 스마트폰으로 대체 (2·9단계) |
 
 ## 전체 순서
 
 ```
-[Windows]  1. WSL 메모리 늘리기 ──► 2. 보유 이미지 준비
+[Windows]  1. WSL 메모리 늘리기 ──► 2. 폰 IP 카메라 앱 설치
 [WSL]      3. conda 끄기 ──► 4. ROS2 Jazzy ──► 5. Python·venv ──► 6. 시뮬레이터 패키지 (rosdep)
-           ──► 7. 빌드·테스트 ──► 8. 시뮬레이터 확인 ① ──► 9. 이미지 입력 계획 ──► 10. 결과 기록
+           ──► 7. 빌드·테스트 ──► 8. 시뮬레이터 확인 ① ──► 9. 폰 영상 수신 ──► 10. 결과 기록
 ```
 
 순서를 지켜야 하는 곳: **3 → 4 → 5** (conda 가 켜진 채로 venv 를 만들면 Python 3.11 venv 가 생김),
@@ -98,10 +98,13 @@ WSL 을 다시 열고:
 free -h      # Mem total 이 9 GB 이상 보이면 통과 (커널 예약분 때문에 10 보다 조금 작게 나옴)
 ```
 
-## 2. 보유 이미지 준비
+## 2. 폰 IP 카메라 앱 설치
 
-- [ ] `data/mvtec_screws/images`에 이미지가 있는지 확인합니다 (현재 384장 복사 완료).
-- [ ] 개발 입력은 이미지 폴더로 정합니다. 실제 웹캠·usbipd는 설치·연결하지 않아도 됩니다.
+영상 수신 확인은 9단계에서 하지만, 앱 설치와 거치대 준비는 미리 해 둡니다 (SETUP.md Step 7).
+
+- [ ] 폰에 IP 카메라 앱 설치 (Android 예: IP Webcam)
+- [ ] 앱에서 서버를 시작하고, 같은 Wi-Fi 의 Windows 브라우저로 앱 주소를 열었을 때 영상이 보이면 통과
+- [ ] 작업면을 위에서 내려다보게 폰을 고정할 거치대 준비
 
 ## 3. conda 자동 활성화 끄기
 
@@ -215,18 +218,21 @@ ros2 launch ur5e_pick_place sim.launch.py
 화면이 검거나 너무 느리면 SETUP.md 5-4 표 순서대로 (소프트웨어 렌더링 → `gazebo_gui:=false`).
 그래도 안 되면 PROJECT.md 8장 "실패하면" 대로 진행하고, 팀에 바로 알립니다.
 
-## 9. 실제 촬영 사진 입력과 좌표 보정
+## 9. 폰 영상 수신
 
-실시간 USB 웹캠·usbipd 연결은 하지 않습니다. 실제 카메라 촬영 자체는 유지합니다.
+SETUP.md Step 7 대로 `params.yaml` 의 `camera_url` 에 폰 영상 주소를 넣고:
 
-- [ ] 보유 이미지로 물체 검출·중심점·장축 각도 계산 로직을 개발·검증합니다.
-- [ ] 체커보드·모눈종이를 실제 카메라로 촬영해 사진 파일을 가져옵니다.
-- [ ] 격자 교차점 px와 실측 mm 대응점을 기록하고 내부 보정·호모그래피 계산 로직을 구현합니다.
-- [ ] 보정과 동일한 촬영 조건의 부품 사진으로 좌표·각도를 로봇 작업 좌표계로 변환하고 실측 정답과 비교합니다.
-- [ ] 이미지 폴더 입력을 구현해 ROS·TCP·Gazebo 경로로 연결합니다.
+```bash
+source ~/vision-arm/env.sh
+python scripts/check_environment.py        # '스마트폰 카메라 접속' 이 OK
+python -c "import cv2; c=cv2.VideoCapture('<camera_url>'); ok,f=c.read(); print(ok, None if f is None else f.shape)"
+```
+
+- [ ] 점검 스크립트의 `스마트폰 카메라 접속` 이 OK
+- [ ] 위 명령이 `True (높이, 너비, 3)` 을 출력하면 통과
+- [ ] 끝내 안 되면 폰으로 찍은 사진·동영상 폴더를 `params.yaml` 의 `image_dir` 로 쓰기로 하고 팀에 알림
 
 보유 MVTec 사진에는 실제 mm 정답이 없으므로 위치 KPI를 대신하지 않습니다.
-점검 스크립트의 물리 웹캠·usbipd 경고는 이 파일 입력 방식의 필수 실패가 아닙니다. 가상 카메라 전환은 정하지 않았습니다.
 
 ## 10. 결과 기록
 
@@ -244,17 +250,17 @@ ros2 launch ur5e_pick_place sim.launch.py
 | 단계 | 팀원 1 | 팀원 2 | 팀원 3 |
 |---|---|---|---|
 | 1. WSL 메모리 | | | |
-| 2. 보유 이미지 | | | |
+| 2. 폰 카메라 앱 | | | |
 | 3. conda 끄기 | | | |
 | 4. ROS2 Jazzy | | | |
 | 5. Python·venv | | | |
 | 6. rosdep | | | |
 | 7. 빌드·테스트 | | | |
 | 8. 확인 ① | | | |
-| 9. 이미지 입력 계획 | | | |
+| 9. 폰 영상 수신 | | | |
 | 10. 기록 | | | |
 
-환경 설치가 끝나면 1주차 나머지 일(이미지 입력 구현, 실제 모눈종이 촬영·호모그래피, 로봇 좌표계 정의)로 넘어갑니다 (PROJECT.md 8장).
+환경 설치가 끝나면 1주차 나머지 일(폰 고정, 체커보드 캘리브레이션, 격자 호모그래피, 로봇 좌표계 정의)로 넘어갑니다 (PROJECT.md 8장).
 
 ## 현재 설치 상태 (2026-11-10)
 
@@ -267,8 +273,8 @@ ros2 launch ur5e_pick_place sim.launch.py
 | Python 환경 | venv, Python 3.12.3, OpenCV 4.6.0, NumPy 1.26.4, PySide6 6.12.0 |
 | 시뮬레이터 패키지 | Gazebo Harmonic 8.15.0, MoveIt 2.12.4, UR MoveIt 설정 3.9.0 |
 | ur_robot_driver | Jazzy 3.9.0 설치·패키지 인식 확인 |
-| Windows usbipd | 5.3.0 설치됨. 시뮬레이션 목표의 필수 항목은 아님 |
-| 웹캠 | Windows 카메라 장치 0개, WSL `/dev/video*` 없음 |
+| Windows usbipd | 5.3.0 설치됨 (스마트폰 입력에는 필요 없음) |
+| 웹캠 | Windows 카메라 장치 0개, WSL `/dev/video*` 없음. 스마트폰 IP 카메라로 대체 |
 
 `ur_robot_driver`는 `rosdep install`로 설치하거나 다음 명령으로 직접 설치합니다.
 
@@ -277,4 +283,4 @@ sudo apt install ros-jazzy-ur-robot-driver
 ```
 
 설치 확인: `source /opt/ros/jazzy/setup.bash` 후 `ros2 pkg prefix ur_robot_driver`를 실행합니다.
-물리 웹캠 연결은 하지 않습니다. 2·9단계의 이미지 입력 개발 및 실제 촬영 좌표 보정으로 진행합니다.
+폰 카메라 앱 설치(2단계)와 폰 영상 수신 확인(9단계)이 남아 있습니다.

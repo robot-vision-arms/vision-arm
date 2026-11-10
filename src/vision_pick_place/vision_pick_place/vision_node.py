@@ -12,6 +12,7 @@ from std_msgs.msg import String
 class VisionNode(Node):
     def __init__(self):
         super().__init__('vision_node')
+        self.declare_parameter('camera_url', '')
         self.declare_parameter('camera_index', 0)
         self.declare_parameter('image_dir', '')
         self.declare_parameter('intrinsics_path', 'data/calib/intrinsics.npz')

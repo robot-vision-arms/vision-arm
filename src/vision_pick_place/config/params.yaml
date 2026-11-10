@@ -1,8 +1,9 @@
 # ros2 launch 시 노드에 전달되는 파라미터. 경로는 워크스페이스 루트(~/study/robot_vision) 기준.
 vision_node:
   ros__parameters:
-    camera_index: 0              # /dev/video0. 이미지 폴더로 테스트할 땐 image_dir 사용
-    image_dir: ""                # 비어 있으면 카메라, 값이 있으면 폴더 이미지를 순서대로 재생
+    camera_url: ""               # 스마트폰 IP 카메라 영상 주소 (예: http://192.168.0.23:8080/video). docs/SETUP.md Step 7
+    camera_index: 0              # camera_url 이 비어 있을 때 쓰는 USB 카메라 번호 (/dev/video0)
+    image_dir: ""                # 값이 있으면 카메라 대신 폴더 이미지·동영상 파일을 순서대로 재생 (대체 입력)
     intrinsics_path: "data/calib/intrinsics.npz"   # scripts/calibrate_camera.py 출력
     homography_path: "data/calib/homography.npz"   # scripts/compute_homography.py 출력
     blur_ksize: 5                # Gaussian Blur 커널(홀수). 초기값, 실험으로 조정
