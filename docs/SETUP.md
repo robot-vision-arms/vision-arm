@@ -77,6 +77,10 @@ touch .venv/COLCON_IGNORE          # colcon 이 .venv 안을 패키지로 착각
 source .venv/bin/activate
 pip install -r requirements.txt
 
+# (MVTec 을 Kaggle CLI 로 받을 때만) Kaggle 웹 → Settings → API → Create New Token 으로 받은 kaggle.json 을 옮긴다
+# 토큰은 비밀번호와 같아서 저장소 안에 두지 않는다 (.gitignore 에 있지만 애초에 ~/.kaggle 에만 둘 것)
+mkdir -p ~/.kaggle && mv /mnt/c/Users/<윈도우사용자>/Downloads/kaggle.json ~/.kaggle/ && chmod 600 ~/.kaggle/kaggle.json
+
 # 확인: 셋 다 에러 없이 출력돼야 함
 python -c "import rclpy, cv2, numpy, PySide6; print(cv2.__version__, numpy.__version__, PySide6.__version__)"
 ```

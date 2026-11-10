@@ -234,17 +234,41 @@ robot_vision/                   ← git 저장소 = colcon 워크스페이스
 
 | 항목 | 내용 |
 |---|---|
-| 구성 | 나사·너트 13종, 384장, 회전 BBox 4,426개, COCO 유사 형식 (박스당 파라미터 5개) |
+| 구성 | 나사·너트 13종, 384장, 회전 BBox 4,427개 (README 표기는 4,426), COCO 유사 형식 (박스당 파라미터 5개) |
 | 받는 곳 | Kaggle [ipythonx/mvtec-screws](https://www.kaggle.com/datasets/ipythonx/mvtec-screws) (공식 사이트: [mvtec.com](https://www.mvtec.com/company/research/datasets/mvtec-screws)) |
 | 용도 | 검출·각도 알고리즘을 **픽셀 기준**으로 먼저 검증 (촬영 전 2주차 개발용). 13종이라 다중 분류 연습(9장 1단계)에도 쓴다 |
 | 한계 | 로봇 세계좌표(mm) 정답이 아님 → 위치 KPI 에는 사용 불가. 공구는 없음 |
 | 라이선스 | CC BY-NC-SA 4.0 (비상업) |
 
+라이선스상 재배포하지 않으므로 **저장소에 올리지 않고 각자 받습니다** (`.gitignore` 의 `data/**`). 둘 중 하나:
+
 ```bash
+# A. Kaggle CLI (SETUP.md Step 2 의 API 토큰 필요)
 kaggle datasets download -d ipythonx/mvtec-screws -p data/mvtec_screws --unzip
+
+# B. 브라우저로 Kaggle 에서 zip 다운로드 → data/mvtec_screws/ 에 압축 해제 (zip 안에 상위 폴더 없음)
 ```
 
-받은 뒤 이미지 384장, 어노테이션 4,426개가 맞는지 확인합니다.
+풀고 나면 이렇게 됩니다:
+
+```
+data/mvtec_screws/
+├── README_v1.0.txt             데이터셋 설명 (형식·라이선스)
+├── images/                     screws_001.png ~ screws_384.png
+├── mvtec_screws.json           전체 어노테이션 (COCO 유사 형식)
+├── mvtec_screws_{train,val,test}.json   논문에서 쓴 분할 (이미지 269 / 55 / 60장)
+└── *.hdict                     HALCON 전용 형식 (안 씀)
+```
+
+확인: 이미지 384장, 범주 13개(`type_001`~`type_013`). 어노테이션은 README 에 4,426개로 적혀 있지만
+`mvtec_screws.json` 에는 **4,427개**가 들어 있습니다 (분할 3개 합도 3,119 + 647 + 661 = 4,427). 2026-11-10 에 받은 Kaggle 판 기준.
+
+**박스 형식이 일반 COCO 와 다릅니다.** `bbox = [row, col, width, height, phi]`
+
+- `row, col`: 박스 **중심**의 행(세로)·열(가로) 좌표. COCO 의 `x, y`(왼쪽 위 모서리)가 아니고 순서도 반대
+- `width`: 박스 방향과 **평행한** 길이 (= 장축), `height`: 수직 길이
+- `phi`: 라디안, 이미지 가로축에서 **반시계(위쪽이 +)**, 범위 (−π, π]. 픽셀 v 축은 아래 방향이라 `atan2` 로 비교할 때 부호에 주의
+- 우리 각도 정의(3.2)와 비교하려면 `degrees(phi) % 180` 으로 [0°, 180°) 로 접는다
 
 ## 7. 성능 평가 (KPI)
 

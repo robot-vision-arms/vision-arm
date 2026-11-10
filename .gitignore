@@ -8,15 +8,60 @@ log/
 __pycache__/
 *.pyc
 *.egg-info/
+dist/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
 
 # 데이터·로그는 용량이 크고 개인 촬영본이라 올리지 않는다 (폴더 구조만 .gitkeep 으로 유지)
+#   data/mvtec_screws/ : MVTec Screws (CC BY-NC-SA 4.0, 1.4 GB). 재배포하지 않고 각자 받는다 (docs/PROJECT.md 6.2)
+#   data/calib/        : 체커보드·격자 사진, intrinsics.npz, homography.npz (카메라·PC 마다 다름)
 data/**
 !data/**/
 !data/**/.gitkeep
 logs/*
 !logs/.gitkeep
+# CSV 는 위치와 상관없이 올리지 않는다 (정답·로그·KPI 결과)
 *.csv
 
-# 에디터
+# 데이터가 data/ 밖에 잘못 저장돼도 올라가지 않게
+*.zip
+*.tar
+*.tar.gz
+*.7z
+*.npz
+*.hdict
+*.mp4
+*.avi
+*.mkv
+
+# ROS bag 녹화 (시연 녹화용, 용량 큼)
+rosbag2_*/
+*.db3
+*.mcap
+
+# 비밀 정보: Kaggle API 토큰, 환경 변수 파일
+kaggle.json
+.kaggle/
+.env
+.env.*
+!.env.example
+
+# WSL 로 Windows 에서 파일을 복사하면 생기는 부가 파일
+*:Zone.Identifier
+desktop.ini
+Thumbs.db
+
+# 에디터·OS
 .vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+
+# 프로그램 비정상 종료 시 덤프 (Gazebo 등). 'core' 라는 소스 폴더는 막지 않도록 루트의 파일만
+/core
+core.[0-9]*
