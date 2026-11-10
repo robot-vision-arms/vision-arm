@@ -101,7 +101,7 @@ rosdep 이 설치하는 주요 패키지 (확인용):
 | apt 패키지 | 용도 |
 |---|---|
 | `ros-jazzy-ur-simulation-gz` | UR 로봇 Gazebo 시뮬레이션 (`ur_sim_control.launch.py`) |
-| `ros-jazzy-ur-description`, `ros-jazzy-ur-moveit-config` | UR5e 모델, MoveIt 설정 (`ur_moveit.launch.py`) |
+| `ros-jazzy-ur-description`, `ros-jazzy-ur-moveit-config`, `ros-jazzy-ur-robot-driver` | UR5e 모델, MoveIt 설정 (`ur_moveit.launch.py`) |
 | `ros-jazzy-moveit` | MoveIt2 (`move_group`) |
 | `ros-jazzy-pymoveit2` | Python 에서 MoveIt 부르기 |
 | `ros-jazzy-ros-gz-sim`, `ros-jazzy-ros-gz-bridge` | Gazebo Harmonic 실행·스폰, ROS ↔ Gazebo 토픽 다리 (Gazebo 본체도 같이 설치됨) |

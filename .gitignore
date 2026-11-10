@@ -5,6 +5,7 @@ log/
 
 # Python
 .venv/
+.deps/
 __pycache__/
 *.pyc
 *.egg-info/

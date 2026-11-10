@@ -6,9 +6,9 @@
 
 `sudo` 는 비밀번호를 묻기 때문에, 명령은 **각자 WSL 터미널에서 직접** 실행합니다.
 
-## 0. 이 PC 의 현재 상태 (2026-11-10 확인)
+## 0. 이 PC 의 최초 설치 전 상태 (2026-11-10 확인)
 
-팀원마다 PC 가 다르므로 각자 같은 명령으로 확인해서 아래 표를 자기 값으로 채웁니다.
+아래 표는 설치 전 기록입니다. 최신 설치 상태는 문서 마지막에 기록합니다. 팀원마다 각자 확인합니다.
 
 | 항목 | 확인 명령 | 이 PC 값 | 필요한 조치 |
 |---|---|---|---|
@@ -231,3 +231,26 @@ ls /dev/video*
 | 10. 기록 | | | |
 
 환경 설치가 끝나면 1주차 나머지 일(체커보드 캘리브레이션, 격자 호모그래피, 로봇 좌표계 표시)로 넘어갑니다 (PROJECT.md 8장).
+
+## 현재 설치 상태 (2026-11-10)
+
+현재 단계는 **개발 환경 설치**입니다. 아래 결과는 이 PC 기준이며 팀원별로 확인해야 합니다.
+
+| 항목 | 이 PC 상태 |
+|---|---|
+| WSL 메모리 | 9.7 GiB, swap 8.0 GiB |
+| ROS2 | Jazzy 설치됨 |
+| Python 환경 | venv, Python 3.12.3, OpenCV 4.6.0, NumPy 1.26.4, PySide6 6.12.0 |
+| 시뮬레이터 패키지 | Gazebo Harmonic 8.15.0, MoveIt 2.12.4, UR MoveIt 설정 3.9.0 |
+| ur_robot_driver | 시스템 미설치. 추가 설치 필요 |
+| Windows usbipd | 미설치 |
+| 웹캠 | Windows 카메라 장치 0개, WSL `/dev/video*` 없음 |
+
+`ur_robot_driver`는 `rosdep install`로 설치하거나 다음 명령으로 직접 설치합니다.
+
+```bash
+sudo apt install ros-jazzy-ur-robot-driver
+```
+
+설치 확인: `source /opt/ros/jazzy/setup.bash` 후 `ros2 pkg prefix ur_robot_driver`를 실행합니다.
+Windows usbipd 설치와 웹캠 연결은 위 2·9단계가 남아 있습니다.
