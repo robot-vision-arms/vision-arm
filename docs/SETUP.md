@@ -13,7 +13,7 @@
 | 주요 라이브러리 | OpenCV·NumPy (apt, ROS 와 같은 빌드), PySide6 (pip, venv) |
 | 시뮬레이터 (확장) | Gazebo Harmonic (Jazzy 공식 짝) + `ur_simulation_gz` (UR5e) + MoveIt2 + pymoveit2, 전부 apt (rosdep) |
 | 권장 사양 | WSL 메모리 8 GB 이상, 디스크 여유 15 GB 이상 (ROS Desktop + Gazebo + MoveIt) |
-| 워크스페이스 | `~/study/robot_vision` (= GitHub 저장소 = colcon 워크스페이스 루트) |
+| 워크스페이스 | `~/vision-arm` (= GitHub 저장소 = colcon 워크스페이스 루트) |
 
 ---
 
@@ -68,8 +68,8 @@ source /opt/ros/jazzy/setup.bash && ros2 run demo_nodes_py listener
 sudo apt install -y python3-opencv python3-numpy python3-yaml python3-venv python3-pytest
 
 # 저장소 받기
-git clone https://github.com/robot-vision-arms/vision-arm.git ~/study/robot_vision
-cd ~/study/robot_vision
+git clone https://github.com/robot-vision-arms/vision-arm.git ~/vision-arm
+cd ~/vision-arm
 
 # 시스템 패키지(rclpy, cv2, numpy)를 그대로 보면서 PySide6 만 추가로 설치하는 venv
 python3 -m venv --system-site-packages .venv
@@ -91,7 +91,7 @@ sudo apt install -y python3-rosdep
 sudo rosdep init            # 처음 한 번만. "already exists" 가 나오면 이미 된 것
 rosdep update
 
-cd ~/study/robot_vision
+cd ~/vision-arm
 source /opt/ros/jazzy/setup.bash
 rosdep install --from-paths src --ignore-src -y --rosdistro jazzy
 ```
@@ -115,7 +115,7 @@ rosdep 이 어떤 키를 못 찾으면 위 표의 패키지를 `sudo apt install
 패키지 뼈대(`src/vision_pick_place`, `src/ur5e_pick_place`)는 저장소에 이미 있으므로 `ros2 pkg create` 는 다시 하지 않습니다.
 
 ```bash
-source ~/study/robot_vision/env.sh
+source ~/vision-arm/env.sh
 colcon build --symlink-install
 source install/setup.bash
 colcon test && colcon test-result --verbose
@@ -148,7 +148,7 @@ PowerShell 에서 `wsl --shutdown` 후 WSL 을 다시 엽니다.
 ### 5-2. UR 기본 예제부터 (우리 파일 없이)
 
 ```bash
-source ~/study/robot_vision/env.sh
+source ~/vision-arm/env.sh
 ros2 launch ur_simulation_gz ur_sim_moveit.launch.py ur_type:=ur5e
 ```
 
@@ -185,7 +185,7 @@ ros2 launch ur5e_pick_place sim.launch.py
 ## Step 6. 매일 작업 시작할 때
 
 ```bash
-source ~/study/robot_vision/env.sh     # conda 해제 → ROS2 → venv → install/setup.bash 순서로 켜고 저장소로 이동
+source ~/vision-arm/env.sh     # conda 해제 → ROS2 → venv → install/setup.bash 순서로 켜고 저장소로 이동
 code .                         # VS Code (WSL 확장)
 ```
 
@@ -205,26 +205,18 @@ ros2 launch vision_pick_place pipeline.launch.py                 # 터미널 3: 
 ros2 service call /sim/run_cycle std_srvs/srv/Trigger            # 터미널 4: 지금 보이는 부품으로 한 사이클
 ```
 
-## Step 7. WSL2 에서 USB 웹캠 쓰기
+## Step 7. 실제 촬영 사진 파일 입력
 
-WSL2 는 USB 장치를 기본으로 못 봅니다. Windows 쪽에 [usbipd-win](https://github.com/dorssel/usbipd-win) 을 설치하고 연결합니다.
+실시간 USB 웹캠·WSL USB 전달·usbipd 설정은 하지 않습니다. 실제 모눈종이 촬영과 좌표 보정은 유지합니다.
 
-```powershell
-# Windows PowerShell (관리자)
-winget install usbipd
-usbipd list                          # 웹캠 BUSID 확인 (예: 2-3)
-usbipd bind --busid 2-3
-usbipd attach --wsl --busid 2-3      # 웹캠을 뽑았다 꽂거나 재부팅하면 attach 다시
-```
+1. 보유 MVTec 이미지로 물체 검출·중심점·장축 각도 로직을 개발·검증합니다. 이 데이터에는 실제 mm 정답이 없습니다.
+2. 사용할 카메라로 체커보드·모눈종이를 촬영해 파일을 가져옵니다. 내부 보정과 px→mm 호모그래피를 계산합니다.
+3. 같은 촬영 장치·해상도·작업면 상대 자세로 부품을 촬영하고 `data/captures/` 등에 저장합니다. 카메라나 작업면이 움직이면 보정을 다시 합니다.
+4. `src/vision_pick_place/config/params.yaml`의 `image_dir`에 사진 폴더를 지정합니다. 현재 `camera_stream.py`·보정 스크립트·비전 노드는 뼈대이므로 해당 로직 구현이 필요합니다.
+5. 검출 결과를 로봇 작업 좌표계(mm)로 변환해 Gazebo의 UR5e에 전달합니다.
 
-```bash
-# WSL
-sudo modprobe uvcvideo
-ls /dev/video*                       # /dev/video0 이 보이면 성공
-```
+가상 카메라 도입은 현재 결정하지 않았습니다. 물리 웹캠·usbipd 경고는 현재 작업의 필수 실패가 아닙니다.
 
-웹캠이 끝내 안 잡히면 촬영은 Windows 에서 하고 이미지 폴더를 `params.yaml` 의 `image_dir` 로 지정해 진행합니다.
-**1주차 안에 각자 확인**해 두세요.
 
 ---
 
@@ -237,12 +229,12 @@ ls /dev/video*                       # /dev/video0 이 보이면 성공
 | 3 | `ros.key` curl + `ros2.list` 수동 작성 | `ros2-apt-source` 패키지 | 2025년 ROS 서명 키 교체 이후 공식 설치 문서가 이 방식으로 바뀌었습니다. 키가 바뀌어도 apt 업데이트로 따라갑니다. |
 | 4 | `python3-colcon-common-extensions` | `ros-dev-tools` | colcon 을 포함한 ROS 개발 도구 묶음으로, 현재 공식 문서 기준입니다. |
 | 5 | `echo "source ..." >> ~/.bashrc` 2회 | `env.sh` 를 필요할 때 `source` | 명령을 두 번 실행하면 `.bashrc` 에 줄이 중복되고, 빌드 전에 `install/setup.bash` 를 source 하면 터미널을 열 때마다 에러가 납니다. conda 해제·venv 활성화 순서도 한 곳에서 관리합니다. |
-| 6 | 워크스페이스 `~/study/robot_vision` 를 새로 만들고 git 위치는 정하지 않음 | `~/study/robot_vision` 자체를 git 저장소로 (GitHub 저장소를 이 폴더로 clone) | 팀원이 clone 하면 바로 빌드되게 했습니다. `build/ install/ log/` 는 `.gitignore` 에 있습니다. |
+| 6 | 워크스페이스 `~/vision-arm` 를 새로 만들고 git 위치는 정하지 않음 | `~/vision-arm` 자체를 git 저장소로 (GitHub 저장소를 이 폴더로 clone) | 팀원이 clone 하면 바로 빌드되게 했습니다. `build/ install/ log/` 는 `.gitignore` 에 있습니다. |
 | 7 | 의존성 `rclpy std_msgs sensor_msgs geometry_msgs` | + `cv_bridge` | 디버그 영상(`sensor_msgs/Image`)을 GUI 로 보내려면 OpenCV 이미지 ↔ ROS 메시지 변환이 필요합니다. |
 | 8 | 파일 3개 (`camera_stream`, `vision_detector`, `calibrator`) | + ROS 노드, TCP 브리지·가상 로봇 서버, GUI, KPI 스크립트 | 과제 필수 항목(TCP 송수신, GUI 4화면, KPI 측정)을 담을 파일이 없었습니다. 구조는 `docs/PROJECT.md` 5장 참고. |
 | 9 | 파일마다 대원 A/B/C 고정 지정 | 주차마다 주 담당을 돌림 (PROJECT.md 2.3) | 팀 원칙이 "전원이 전 과정을 학습" 이라 고정 소유권과 맞지 않습니다. 작업 묶음은 받은 분담안 것을 쓰되 사람을 돌립니다. |
 | 10 | MuJoCo 를 주요 라이브러리로 명시, 설치 명령은 없음 | MuJoCo 제거, 시뮬레이터는 Gazebo Harmonic + `ur_simulation_gz` (Step 3) | 받은 역할 분담안이 Gazebo·UR5e·MoveIt2 기준이고, UR 공식 시뮬레이션 패키지와 MoveIt 설정이 Jazzy 용으로 apt 에 있어서 바로 쓸 수 있습니다. 과제 필수 범위(TCP 서버)는 그대로 유지합니다. |
-| 11 | 웹캠 연결 언급 없음 | Step 7 추가 | WSL2 는 기본적으로 USB 웹캠이 보이지 않습니다 (`/dev/video*` 없음). |
+| 11 | 실시간 웹캠 연결 | 촬영 사진 파일 입력 | 모눈종이 실제 촬영·좌표 보정은 유지하고 USB 웹캠·usbipd 연결만 제외합니다. |
 | 12 | `ur_simulation_gazebo` 클론 | `ros-jazzy-ur-simulation-gz` apt 설치 | `ur_simulation_gazebo` 는 Gazebo Classic 용(Humble)입니다. Jazzy 의 짝은 Gazebo Harmonic 이고 그쪽 패키지가 `ur_simulation_gz` 입니다. apt 판이 있어 클론·빌드할 필요가 없습니다. |
 | 13 | 의존성 직접 나열 | `rosdep install` (Step 3) | 의존성 기준을 package.xml 한 곳으로 둡니다. 문서와 따로 적으면 어긋납니다. |
 | 14 | 시뮬레이터 구동 확인 시점 없음 (3단계에서 처음 구축) | 1주차 Step 5 | WSL2 에서 Gazebo 렌더링·메모리 문제는 늦게 알면 대응할 시간이 없습니다. |

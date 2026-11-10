@@ -2,7 +2,16 @@
 
 받은 "UR5e 기반 ROS2 & Gazebo 픽앤플레이스 3인 역할 분담표"를 이 저장소에 어떻게 반영했는지, 무엇을 바꿨고 왜 바꿨는지 남깁니다.
 각 결정은 **검증 상태**를 같이 적습니다. "문서 확인" 은 공식 문서를 읽고 확인한 것, "미확인" 은 아직 직접 돌려 보지 않은 것입니다.
-(작성: 2026-11-10. 이 시점에 이 PC 에는 ROS2 가 아직 설치되지 않아, 실행으로 확인한 항목은 없습니다.)
+(작성 및 환경 재점검: 2026-11-10. ROS2 Jazzy와 시뮬레이터 패키지 설치 완료. 실제 구동에서 발견한 설치 차단 항목은 아래에 기록합니다.)
+
+### 현재 PC 실행 점검 (2026-11-10)
+
+- Python·ROS import, pip 의존성 검사 정상. 테스트 7개 중 3개 통과, 4개 미구현으로 skipped.
+- WSL 설정: `C:\Users\user1\.wslconfig`에 memory=10GB, swap=8GB 작성. 현재 실행 중인 WSL은 7.6 GiB이며 재시작 후 적용 확인 필요.
+- 이전에 누락된 `ur_robot_driver`는 Jazzy 3.9.0 설치 확인 완료. sudo 인증 성공, rosdep check와 pip check 통과. 실행 의존성을 package.xml에 추가함.
+- UR 기본 예제 재실행에서 MoveIt 초기화(`You can start planning now!`) 및 joint_state_broadcaster / scaled_joint_trajectory_controller 활성화 확인. URDF·SRDF 로봇 이름 불일치와 선택적 인식/Octomap 기능 오류가 남아 있으며, 실제 화면·Plan & Execute·프로젝트 작업 셀은 미검증.
+- `/dev/video*` 없음. 현재 도구 환경은 Windows PowerShell 실행이 `Exec format error`로 실패하므로 usbipd 설치 폴더는 현재 존재함. 버전·서비스·USB 장치 확인은 Windows에서 실행해야 함.
+- 다음 절차: `WEEK1.md`의 현재 PC 남은 작업 참고. WSL 재시작은 현재 세션을 종료하므로 사용자가 Windows에서 수행.
 
 ## 1. 받은 분담안 요약
 
@@ -72,3 +81,14 @@ DetachableJoint 가 안 되면 시험해 볼 대안 (둘 다 아직 안 써 봄)
 - [pymoveit2 (Jazzy)](https://docs.ros.org/en/jazzy/p/pymoveit2/), [pymoveit2 패키지 인덱스](https://index.ros.org/p/pymoveit2/)
 - [MoveIt2 바이너리 설치](https://moveit.ros.org/install-moveit2/binary)
 - [ros-jazzy-moveit-py (RoboStack conda 판)](https://anaconda.org/robostack-jazzy/ros-jazzy-moveit-py)
+
+## 6. 실시간 웹캠 연결 제외 (2026-11-10)
+
+실시간 USB 웹캠 연결·usbipd 설정만 제외합니다. 실제 모눈종이 촬영과 카메라 좌표계(px) → 로봇 작업 좌표계(mm) 변환 계획은 유지합니다.
+
+- 보유 MVTec 사진은 물체 검출·중심점·장축 각도 계산 로직을 개발·검증하는 데이터입니다.
+- 실제 카메라로 촬영한 체커보드·모눈종이·부품 사진을 파일로 가져옵니다. 격자 실측 좌표로 보정하고 같은 촬영 조건의 부품 위치·방향을 mm·도로 변환합니다.
+- 보유 사진에는 mm 정답이 없으므로 임의 크기를 부여한 결과를 실제 위치 KPI로 삼지 않습니다.
+- 변환 결과를 Gazebo UR5e에 전달합니다. 가상 카메라 도입은 결정하지 않았습니다.
+- 이미지 입력·보정 스크립트·관련 노드는 아직 구현이 필요합니다. usbipd는 설치되어 있지만 현재 작업의 필수 항목이 아닙니다.
+- 기존 역할 분담표의 웹캠 언급은 이전 계획 기록이며, 현재 범위는 이 절을 따릅니다.

@@ -9,17 +9,21 @@ Gazebo 속 UR5e 가 그 결과로 부품을 집어 종류별로 분류합니다.
 | 확장 (4주) | Gazebo Harmonic + UR5e + MoveIt2 로 **나사·너트** Pick & Place 분류 |
 | 최종 목표 | 같은 구조로 **여러 종류의 공구**까지 분류 |
 
+보유 이미지는 물체 검출·중심점·장축 각도 계산 로직 개발·검증에 사용합니다.
+실제 모눈종이 촬영 사진으로 px→mm 좌표 보정을 수행하며, 실시간 USB 웹캠·usbipd 연결은 하지 않습니다.
+촬영 사진은 파일로 입력합니다. 이미지 입력·좌표 보정 기능은 아직 구현이 필요합니다.
+
 ## 문서
 
 - [docs/PROJECT.md](docs/PROJECT.md): 프로젝트 정의, 좌표·각도 정의, 시스템 구성, 역할 분담(주차별 순환), KPI, 4주 로드맵, 최종 목표
 - [docs/WEEK1.md](docs/WEEK1.md): 1주차 환경 설치 체크리스트 (실행 순서, 단계별 통과 기준, 결과 기록 위치)
-- [docs/SETUP.md](docs/SETUP.md): 개발 환경 구축 (ROS2 Jazzy, venv, rosdep 으로 Gazebo·MoveIt, 시뮬레이터 구동 확인, 웹캠)
+- [docs/SETUP.md](docs/SETUP.md): 개발 환경 구축 (ROS2 Jazzy, venv, rosdep 으로 Gazebo·MoveIt, 시뮬레이터 구동 확인, 이미지 입력)
 - [docs/DECISIONS.md](docs/DECISIONS.md): 받은 역할 분담안과 비교해 바꾼 점, 이유, 검증 상태, 아직 확인 못 한 것
 
 ## 구조
 
 ```
- 카메라 → vision_node → robot_bridge ──TCP──► robot_server ──(--publish-ros)──► pick_place_node → MoveIt2 → Gazebo UR5e
+ 촬영 사진 / 이미지 폴더 → vision_node → robot_bridge ──TCP──► robot_server ──(--publish-ros)──► pick_place_node → MoveIt2 → Gazebo UR5e
                 │                              (가상 로봇, ACK)                    (/sim/run_cycle)
                 └──────────► GUI (PySide6)
 ```
@@ -32,9 +36,9 @@ Gazebo 속 UR5e 가 그 결과로 부품을 집어 종류별로 분류합니다.
 ## 빠른 시작
 
 ```bash
-git clone https://github.com/robot-vision-arms/vision-arm.git ~/study/robot_vision
+git clone https://github.com/robot-vision-arms/vision-arm.git ~/vision-arm
 # docs/SETUP.md 의 Step 0~4 (conda 끄기, ROS2 Jazzy, .venv, rosdep, 빌드) 를 먼저 완료
-source ~/study/robot_vision/env.sh
+source ~/vision-arm/env.sh
 colcon build --symlink-install && source install/setup.bash
 
 # 과제 필수 범위
