@@ -21,15 +21,58 @@ class FrameSource:
         self.camera_index = camera_index
         self.camera_url = camera_url
         self.image_dir = Path(image_dir) if image_dir else None
-        # TODO: image_dir 이면 파일 목록 로드, 아니면 cv2.VideoCapture(camera_url or camera_index) 열기
-        #       네트워크 영상은 끊길 수 있으니 read() 실패 시 재연결
+        self._cap = None
+        self._closed = False
+        self._index = 0
+        self._images = []
+        if self.image_dir is not None:
+            if not self.image_dir.is_dir():
+                raise FileNotFoundError(f'이미지 폴더가 없습니다: {self.image_dir}')
+            extensions = {'.png', '.jpg', '.jpeg', '.bmp', '.tif', '.tiff'}
+            self._images = sorted(
+                p for p in self.image_dir.iterdir()
+                if p.is_file() and p.suffix.lower() in extensions
+            )
+            if not self._images:
+                raise ValueError(f'이미지 파일이 없습니다: {self.image_dir}')
+        else:
+            self._open_camera()
+
+    def _open_camera(self) -> None:
+        if self._cap is not None:
+            self._cap.release()
+        if self.camera_url:
+            self._cap = cv2.VideoCapture(
+                self.camera_url, cv2.CAP_FFMPEG,
+                [cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000,
+                 cv2.CAP_PROP_READ_TIMEOUT_MSEC, 5000],
+            )
+        else:
+            self._cap = cv2.VideoCapture(self.camera_index)
 
     def read(self) -> np.ndarray | None:
         """BGR 프레임 1장을 반환. 더 읽을 수 없으면 None."""
-        raise NotImplementedError
+        if self._closed:
+            return None
+        if self.image_dir is not None:
+            # 손상된 파일은 건너뛰되, 모두 손상된 경우 무한 반복하지 않는다.
+            for _ in self._images:
+                path = self._images[self._index]
+                self._index = (self._index + 1) % len(self._images)
+                frame = cv2.imread(str(path), cv2.IMREAD_COLOR)
+                if frame is not None:
+                    return frame
+            return None
+        ok, frame = self._cap.read()
+        if not ok and self.camera_url:
+            self._open_camera()
+            ok, frame = self._cap.read()
+        return frame if ok else None
 
     def release(self) -> None:
-        raise NotImplementedError
+        if self._cap is not None:
+            self._cap.release()
+        self._closed = True
 
 
 def preprocess(frame_bgr: np.ndarray, blur_ksize: int = 5, threshold: int = -1) -> np.ndarray:
@@ -37,6 +80,15 @@ def preprocess(frame_bgr: np.ndarray, blur_ksize: int = 5, threshold: int = -1) 
 
     threshold 가 -1 이면 Otsu 로 자동 결정한다. 배경이 물체보다 밝으면 THRESH_BINARY_INV 를 쓴다.
     """
+    if blur_ksize < 1 or blur_ksize % 2 == 0:
+        raise ValueError('blur_ksize는 1 이상의 홀수여야 합니다.')
+    if threshold != -1 and not 0 <= threshold <= 255:
+        raise ValueError('threshold는 -1(Otsu) 또는 0~255여야 합니다.')
     gray = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2GRAY)
-    # TODO: cv2.GaussianBlur, cv2.threshold(... THRESH_OTSU ...), 필요하면 morphology open/close
-    raise NotImplementedError
+    blurred = cv2.GaussianBlur(gray, (blur_ksize, blur_ksize), 0)
+    # 밝은 작업면 위의 어두운 부품을 흰색 전경으로 만든다.
+    mode = cv2.THRESH_BINARY_INV
+    if threshold == -1:
+        mode |= cv2.THRESH_OTSU
+    _, mask = cv2.threshold(blurred, max(threshold, 0), 255, mode)
+    return mask
