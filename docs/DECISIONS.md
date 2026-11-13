@@ -7,7 +7,7 @@
 ### 현재 PC 실행 점검 (2026-11-10)
 
 - Python·ROS import, pip 의존성 검사 정상. 테스트 7개 중 3개 통과, 4개 미구현으로 skipped.
-- WSL 설정: `C:\Users\user1\.wslconfig`에 memory=10GB, swap=8GB 작성. 현재 실행 중인 WSL은 7.6 GiB이며 재시작 후 적용 확인 필요.
+- WSL 설정: `C:\Users\user1\.wslconfig`에 memory=10GB, swap=8GB 작성. 11-13 점검 때 파일이 없어져 7.6 GiB 로 돌아가 있어 다시 작성함. 원인 미확인 (PC 초기화 프로그램 가능성). 재시작 후 적용 확인 필요.
 - 이전에 누락된 `ur_robot_driver`는 Jazzy 3.9.0 설치 확인 완료. sudo 인증 성공, rosdep check와 pip check 통과. 실행 의존성을 package.xml에 추가함.
 - UR 기본 예제 재실행에서 MoveIt 초기화(`You can start planning now!`) 및 joint_state_broadcaster / scaled_joint_trajectory_controller 활성화 확인. URDF·SRDF 로봇 이름 불일치와 선택적 인식/Octomap 기능 오류가 남아 있으며, 실제 화면·Plan & Execute·프로젝트 작업 셀은 미검증.
 - `/dev/video*` 없음. 현재 도구 환경은 Windows PowerShell 실행이 `Exec format error`로 실패하므로 usbipd 설치 폴더는 현재 존재함. 버전·서비스·USB 장치 확인은 Windows에서 실행해야 함.

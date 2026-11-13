@@ -9,11 +9,11 @@
 ## 현재 PC 재점검 결과 (2026-11-10)
 
 3~7단계의 기본 환경 설치와 테스트 완료. 이전에 누락된 `ur_robot_driver`도 Jazzy 3.9.0 설치 확인 및 sudo 인증에 성공했습니다.
-기존 0단계 표는 설치 전 상태입니다. 프로젝트 실제 경로는 `/home/user1/vision-arm`입니다.
+기존 0단계 표는 설치 전 상태입니다. 이 PC 의 저장소 실제 위치는 `~/study/robot_vision` 이고, 문서 명령이 그대로 통하도록 `~/vision-arm` 링크를 걸어 두었습니다 (2026-11-13).
 
 | 항목 | 현재 상태 |
 |---|---|
-| WSL 메모리 | Windows `.wslconfig`에 10GB / swap 8GB 작성 완료. WSL 재시작 후 확인 필요 |
+| WSL 메모리 | 2026-11-13 점검 때 `.wslconfig` 가 없어져 7.6 GiB / swap 2 GiB 로 돌아가 있었음. 10GB / swap 8GB 로 다시 작성. `wsl --shutdown` 후 `free -h` 확인 필요 |
 | Conda / ROS / venv | Conda 자동 활성화 꺼짐, Jazzy / Python 3.12.3 .venv 사용 |
 | 테스트 | 7개 중 3개 통과, 4개 skipped, 실패 0 |
 | 시뮬레이터 | 드라이버 설치 완료. 기본 예제 MoveIt 초기화·컨트롤러 활성화 확인. URDF/SRDF 이름 불일치 해결 및 실제 동작 검증 필요 |
@@ -268,7 +268,7 @@ python -c "import cv2; c=cv2.VideoCapture('<camera_url>'); ok,f=c.read(); print(
 
 | 항목 | 이 PC 상태 |
 |---|---|
-| WSL 메모리 | 9.7 GiB, swap 8.0 GiB |
+| WSL 메모리 | 11-10 에 9.7 GiB / swap 8.0 GiB 확인. 11-13 에 `.wslconfig` 가 사라져 7.6 GiB / swap 2 GiB 로 돌아감 → 다시 작성, 재시작 후 확인 필요 |
 | ROS2 | Jazzy 설치됨 |
 | Python 환경 | venv, Python 3.12.3, OpenCV 4.6.0, NumPy 1.26.4, PySide6 6.12.0 |
 | 시뮬레이터 패키지 | Gazebo Harmonic 8.15.0, MoveIt 2.12.4, UR MoveIt 설정 3.9.0 |

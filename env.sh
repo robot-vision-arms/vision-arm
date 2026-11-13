@@ -1,6 +1,6 @@
-# 작업할 때마다 터미널에서:  source ~/study/robot_vision/env.sh
+# 작업할 때마다 터미널에서:  source ~/vision-arm/env.sh   (저장소를 다른 곳에 뒀다면 ~/vision-arm 링크를 걸거나 그 경로로)
 # 순서가 중요하다: conda 해제 → ROS2 → venv → 워크스페이스 빌드 결과
-WS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+WS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd -P)"   # -P: 링크로 들어와도 실제 경로를 써서 colcon 빌드 경로가 한 가지로 유지됨
 
 # conda 의 python 이 PATH 앞에 있으면 rclpy(시스템 Python 3.12 용)를 못 불러온다
 while [ -n "${CONDA_PREFIX:-}" ]; do conda deactivate; done

@@ -140,10 +140,12 @@ Windows 의 `%UserProfile%\.wslconfig`:
 
 ```ini
 [wsl2]
-memory=8GB
+memory=10GB
+swap=8GB
 ```
 
-PowerShell 에서 `wsl --shutdown` 후 WSL 을 다시 엽니다.
+값은 Windows 전체 메모리 16 GB 기준입니다 (Windows 쪽에 약 6 GB 를 남김, WEEK1.md 1단계). 16 GB 보다 작은 PC 는 `memory=8GB` 로 둡니다.
+PowerShell 에서 `wsl --shutdown` 후 WSL 을 다시 엽니다. 파일이 `.wslconfig.txt` 로 저장되지 않았는지 확인하세요.
 
 ### 5-2. UR 기본 예제부터 (우리 파일 없이)
 
