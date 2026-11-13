@@ -55,8 +55,10 @@
 받은 역할 분담안(3단계 × 대원 A/B/C)의 작업 묶음을 그대로 쓰되, 사람을 고정하지 않고 **주차마다 돌린다**.
 고정하면 대원 A 는 MoveIt 을, 대원 C 는 비전을 한 번도 만지지 않게 되기 때문이다 (자세한 비교는 [DECISIONS.md](DECISIONS.md) 2장).
 팀원 1·2·3 이 누구인지는 1주차 첫 회의에서 정해 아래에 이름을 적는다.
+같은 회의에서 3장의 좌표·각도 정의와 4장의 패킷 형식을 셋이 함께 확인하고 확정한 뒤 작업을 시작한다.
+셋은 각자 맡은 파일을 병렬로 개발하고, 3장·4장에서 정한 인터페이스로 결과를 연결한다.
 
-| 주차 | 팀원 1 (   ) | 팀원 2 (   ) | 팀원 3 (   ) |
+| 주차 | 팀원 1 (동경) | 팀원 2 (성민) | 팀원 3 (가영) |
 |---|---|---|---|
 | 1주차 | 캘리브레이션: `calibrate_camera.py`, `compute_homography.py`, `calibrator.py` | Gazebo 구동: UR5e + MoveIt 띄우기, `workcell.sdf`, `ur5e_vacuum.urdf.xacro` | 영상 입력: `camera_stream.py`, 스마트폰 IP 카메라 수신, 3명 환경 점검 |
 | 2주차 | MoveIt 이동: `grasp.py`, `pick_place_node` 의 지정 좌표 이동 | 검출·분류: `vision_detector.py` (MVTec 검증) | ROS2 발행: `vision_node.py`, `packet.py` |
