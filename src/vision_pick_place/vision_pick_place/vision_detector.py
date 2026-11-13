@@ -8,6 +8,7 @@ cv2.minAreaRect 의 angle 은 OpenCV 버전마다 범위 규칙이 다르고 픽
 """
 from dataclasses import dataclass
 
+import cv2
 import numpy as np
 
 
@@ -28,9 +29,33 @@ def find_objects(mask: np.ndarray, min_area_px: float = 500) -> list[Detection]:
     최종 목표(여러 공구)에서는 무게중심이 물체 밖에 떨어질 수 있다 (펜치, 한쪽이 트인 스패너).
     그때는 마스크 거리 변환(cv2.distanceTransform) 최댓값 = 물체 안쪽에서 가장 두꺼운 점을 집는 점으로 쓴다.
     """
-    # TODO: cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    # TODO: 면적 필터 → cv2.minAreaRect → cv2.boxPoints → 긴 변 벡터로 long_axis_px 계산
-    raise NotImplementedError
+    if mask.ndim != 2 or mask.dtype != np.uint8:
+        raise ValueError('mask는 uint8 단일 채널 이진 영상이어야 합니다.')
+    if not np.isfinite(min_area_px) or min_area_px < 0:
+        raise ValueError('min_area_px는 0 이상의 유한한 값이어야 합니다.')
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    detections = []
+    for contour in contours:
+        area = float(cv2.contourArea(contour))
+        if area <= 0 or area < min_area_px:
+            continue
+        rect = cv2.minAreaRect(contour)
+        box = cv2.boxPoints(rect)
+        edges = np.roll(box, -1, axis=0) - box
+        lengths = np.linalg.norm(edges, axis=1)
+        index = int(np.argmax(lengths))
+        length, width = float(lengths[index]), float(np.min(lengths))
+        if width <= 0:
+            continue
+        axis = edges[index] / length
+        if axis[0] < 0 or (axis[0] == 0 and axis[1] < 0):
+            axis = -axis
+        detections.append(Detection(
+            tuple(float(v) for v in rect[0]), box,
+            tuple(float(v) for v in axis), length, width, area,
+        ))
+    # 프레임 내 ID 순서만 고정한다. 프레임 사이의 물체 추적 ID는 아니다.
+    return sorted(detections, key=lambda det: (det.center_px[1], det.center_px[0]))
 
 
 def normalize_angle_deg(angle: float) -> float:
@@ -50,5 +75,9 @@ def classify_part(det: Detection, nut_max_aspect: float = 1.5) -> str:
     nut_max_aspect 는 초기값이다. MVTec·자체 촬영본으로 두 부품의 비율 분포를 보고 조정한다 (params.yaml).
     두 종류일 때만 쓰는 규칙이다. 공구 종류를 늘리면 형상 특징 분류기로 바꾼다 (docs/PROJECT.md 3.5).
     """
-    # TODO: width_px 가 0 이면 'unknown', 아니면 length_px / width_px 를 nut_max_aspect 와 비교
-    raise NotImplementedError
+    if not np.isfinite(nut_max_aspect) or nut_max_aspect < 1:
+        raise ValueError('nut_max_aspect는 1 이상의 유한한 값이어야 합니다.')
+    if (not np.isfinite(det.length_px) or not np.isfinite(det.width_px)
+            or det.width_px <= 0 or det.length_px < det.width_px):
+        return 'unknown'
+    return 'nut' if det.length_px / det.width_px <= nut_max_aspect else 'screw'

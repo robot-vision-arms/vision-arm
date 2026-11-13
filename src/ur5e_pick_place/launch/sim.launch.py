@@ -3,11 +3,9 @@
     ros2 launch ur5e_pick_place sim.launch.py                     # Gazebo 창 + RViz
     ros2 launch ur5e_pick_place sim.launch.py gazebo_gui:=false   # WSL2 렌더링이 느리면 RViz 만
 
-비전 쪽(pipeline.launch.py)은 그대로 띄우고, robot_server 를 --publish-ros 로 실행해야 /robot/targets 가 들어온다.
-ur_simulation_gz 의 ur_sim_moveit.launch.py 도 내부에서 아래 두 런치를 같이 띄우는 구조인데, world·로봇 파일을 바꿔 넣으려고
-두 개를 직접 include 했다. 인자 이름은 1주차에 확인한다 (docs/SETUP.md Step 5):
-    ros2 launch ur_simulation_gz ur_sim_control.launch.py --show-args
-    ros2 launch ur_moveit_config ur_moveit.launch.py --show-args
+2주차 이동 확인은 /sim/move_to_target 서비스를 사용한다 (docs/WEEK2.md).
+Gazebo 구동은 설치된 ur_sim_control 런치를 쓰고, MoveIt은 패드가 포함된 로컬 moveit.launch.py를 사용한다.
+전체 파이프라인의 /robot/targets 연동과 집기 사이클은 후속 주차 구현 대상이다.
 """
 import math
 import os
@@ -42,8 +40,8 @@ def generate_launch_description():
 
     moveit = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(get_package_share_directory('ur_moveit_config'), 'launch', 'ur_moveit.launch.py')),
-        launch_arguments={'ur_type': UR_TYPE, 'use_sim_time': 'true', 'launch_rviz': 'true'}.items())
+            os.path.join(share, 'launch', 'moveit.launch.py')),
+        launch_arguments={'launch_rviz': LaunchConfiguration('launch_rviz')}.items())
 
     # 흡착 on/off: ROS std_msgs/Empty → Gazebo gz.msgs.Empty (']' = ROS 에서 Gazebo 한 방향)
     bridge = Node(
@@ -62,6 +60,7 @@ def generate_launch_description():
 
     return LaunchDescription([
         DeclareLaunchArgument('gazebo_gui', default_value='true', description='false 면 Gazebo 창 없이 서버만'),
+        DeclareLaunchArgument('launch_rviz', default_value='true', description='RViz 실행 여부'),
         AppendEnvironmentVariable('GZ_SIM_RESOURCE_PATH', os.path.join(share, 'models')),
         ur_sim,
         moveit,

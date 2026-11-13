@@ -27,6 +27,7 @@
   <!-- 모션 플래닝: move_group (ur_moveit_config 가 띄움) + Python 클라이언트 pymoveit2 -->
   <exec_depend>moveit</exec_depend>
   <exec_depend>ur_moveit_config</exec_depend>
+  <exec_depend>moveit_configs_utils</exec_depend>
   <!-- Jazzy 3.9 런치의 wait_for_robot_description 실행 파일 제공 -->
   <exec_depend>ur_robot_driver</exec_depend>
   <exec_depend>pymoveit2</exec_depend>

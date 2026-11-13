@@ -25,3 +25,9 @@ pick_place_node:
     bin_y: [0.45, -0.45]
     bin_drop_z: 0.15               # 상자 위 놓는 높이 (패드 끝 기준)
     max_velocity_scaling: 0.3      # 시뮬레이션이 느린 WSL2 에서 궤적 추종 오차를 줄이려고 낮춘 초기값
+    # 2주차 지정 좌표 이동. /sim/move_to_target (std_srvs/srv/Trigger) 호출 시 적용
+    target_x_mm: 100.0
+    target_y_mm: 100.0
+    target_angle_deg: 0.0
+    target_height_m: 0.25         # 이동 확인용 작업면 → 패드 끝 높이. tool0에는 tool_length_m을 더함
+    motion_timeout_s: 30.0

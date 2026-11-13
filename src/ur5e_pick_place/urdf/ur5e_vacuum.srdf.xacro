@@ -1,0 +1,9 @@
+<?xml version="1.0"?>
+<robot xmlns:xacro="http://wiki.ros.org/xacro" name="ur5e">
+  <xacro:include filename="$(find ur_moveit_config)/srdf/ur_macro.srdf.xacro"/>
+  <xacro:ur_srdf/>
+  <!-- 고정 장착 부위만 제외한다. 팔의 다른 링크와의 충돌은 검사한다. -->
+  <disable_collisions link1="vacuum_pad" link2="tool0" reason="Adjacent"/>
+  <disable_collisions link1="vacuum_pad" link2="flange" reason="Adjacent"/>
+  <disable_collisions link1="vacuum_pad" link2="wrist_3_link" reason="Adjacent"/>
+</robot>

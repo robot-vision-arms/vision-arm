@@ -6,7 +6,37 @@
 
 `sudo` 는 비밀번호를 묻기 때문에, 명령은 **각자 WSL 터미널에서 직접** 실행합니다.
 
-## 현재 PC 재점검 결과 (2026-11-10)
+## 최신 확인 결과 (2026-11-13)
+
+이 절이 아래 설치 당시 기록보다 최신이다. **개발 환경과 코드 기반은 준비됐지만 1주차 전체 완료는 아니다.**
+이 PC의 실제 저장소는 `/home/user1/mini_projects3/vision-arm`이며 `~/vision-arm` 링크는 현재 없다.
+이 문서의 `source ~/vision-arm/env.sh` 대신 다음 명령을 쓴다.
+
+```bash
+source /home/user1/mini_projects3/vision-arm/env.sh
+```
+
+| 1주차 항목 | 확인 결과 | 근거·남은 일 |
+|---|---|---|
+| WSL 메모리 | 확인 완료 | `free -h`: RAM 9.7GiB / swap 8.0GiB |
+| Conda·Python·venv | 확인 완료 | Conda `auto_activate: false`, 프로젝트 venv의 Python 3.12.3 |
+| ROS2·Python 라이브러리 | 확인 완료 | Jazzy 및 rclpy·cv_bridge·pymoveit2 import 정상. OpenCV 4.6.0, NumPy 1.26.4, PySide6 6.12.0 |
+| 시뮬레이터 의존성 | 확인 완료 | `rosdep check --from-paths src --ignore-src --rosdistro jazzy`: 모두 충족. MoveIt 2.12.4, UR 설정·드라이버 3.9.0 |
+| 빌드·테스트 | 확인 완료 | 기존 빌드 결과 두 패키지 exit 0. `colcon test-result`: 35개 통과, 오류·실패·skip 0개. 이번 재점검에서 영상 입력·보정 관련 테스트 15개 재실행 통과 |
+| 이미지 입력·전처리 | 구현·테스트 완료 | `FrameSource`, 그레이스케일·Blur·이진화. 실제 스마트폰 수신은 별도 |
+| MVTec 데이터 | 확인 완료 | 이미지 384장과 전체·train·val·test 어노테이션 존재 |
+| Gazebo UR5e·MoveIt | 화면 없이 이동 검증 완료 | 2주차 진행 중 지정 좌표 이동·흡착 시험 성공. `logs/week2_sim_check.json`, [WEEK2.md](WEEK2.md) 참고 |
+| 확인 ①의 GUI·RViz Plan & Execute | 미확인 | 화면 조작 기준까지 통과로 기록하지 않음 |
+| 스마트폰 앱·거치·영상 수신 | 미확인 | `params.yaml`의 `camera_url`이 비어 있고 `/dev/video*`도 없음. 실제 앱 설치·거치 상태는 이 PC에서 확인 못 함 |
+| 실제 체커보드·격자 보정 | 남음 | `data/calib`, `data/captures`는 `.gitkeep`만 존재. 실측 `intrinsics.npz`, `homography.npz` 없음 |
+| 원점·축의 작업면 표시 | 미확인 | 좌표계 정의는 PROJECT.md에 있지만 종이에 표시·고정했는지는 확인 못 함 |
+| 팀원 3명 환경 확인 | 미확인 | 아래 팀원별 체크표는 비어 있음. 현재 점검은 이 PC에 한함 |
+
+보정 스크립트와 로딩·변환 코드는 2주차 진행 중 구현해 합성 데이터로 검증했다.
+실제 폰 사진으로 보정하고 재투영 오차를 기록해야 1주차 보정 항목을 완료할 수 있다.
+아래의 재설치·WSL 재시작 안내는 과거 상태를 설명한 것이며, 이번 점검에서 재설치나 재시작이 필요하다고 확인한 것은 아니다.
+
+## 이전 PC 재점검 기록 (2026-11-10 및 11-13 초기 점검)
 
 3~7단계의 기본 환경 설치와 테스트 완료. 이전에 누락된 `ur_robot_driver`도 Jazzy 3.9.0 설치 확인 및 sudo 인증에 성공했습니다.
 기존 0단계 표는 설치 전 상태입니다. 이 PC 의 저장소 실제 위치는 `~/study/robot_vision` 이고, 문서 명령이 그대로 통하도록 `~/vision-arm` 링크를 걸어 두었습니다 (2026-11-13).

@@ -13,6 +13,14 @@
 - `/dev/video*` 없음. 현재 도구 환경은 Windows PowerShell 실행이 `Exec format error`로 실패하므로 usbipd 설치 폴더는 현재 존재함. 버전·서비스·USB 장치 확인은 Windows에서 실행해야 함.
 - 다음 절차: `WEEK1.md`의 현재 PC 남은 작업 참고. WSL 재시작은 현재 세션을 종료하므로 사용자가 Windows에서 수행.
 
+### 2주차 실행 점검 (2026-11-13)
+
+- 현재 세션에서 메모리 9.7GiB / swap 8.0GiB 확인.
+- `colcon build` 2개 패키지 성공, `colcon test` 35개 통과(실패·오류·skip 0개).
+- 프로젝트 작업 셀을 headless로 띄워 지정 좌표 이동, 늦게 스폰한 부품의 자동 연결·분리·재연결·상승 추종·낙하를 확인했다.
+- URDF/SRDF 이름과 패드 고정 장착부 충돌 설정을 보완했다. GUI·실제 폰 보정·KPI·부품 재생성 후 재흡착은 미검증.
+- 나머지 한계와 실행·평가 수치는 [WEEK2.md](WEEK2.md)에 기록했다. 위 11-10 기록은 당시 상태로 남긴다.
+
 ## 1. 받은 분담안 요약
 
 | 단계 | 목표 | 대원 A | 대원 B | 대원 C |
@@ -58,12 +66,12 @@
 
 | 항목 | 확인 방법 | 관련 파일 | 결과 | 조치 |
 |---|---|---|---|---|
-| `ur_sim_control.launch.py` 가 `description_file`, `world_file`, `gazebo_gui`, `launch_rviz` 를 받는지 (Jazzy 판) | `--show-args` (SETUP.md 5-3) | `launch/sim.launch.py` | | |
+| `ur_sim_control.launch.py` 가 `description_file`, `world_file`, `gazebo_gui`, `launch_rviz` 를 받는지 (Jazzy 판) | 설치된 런치 소스·실행 확인 | `launch/sim.launch.py` | 11-13 확인, 프로젝트 world·패드 포함 로봇으로 headless 구동 | XML 주석의 YAML 해석 오류 수정 |
 | `ur_moveit.launch.py` 가 `ur_type`, `use_sim_time`, `launch_rviz` 를 받는지 | `--show-args` | `launch/sim.launch.py` | | |
 | `ur_simulation_gz/urdf/ur_gz.urdf.xacro` 경로 | `ls` (SETUP.md 5-3) | `urdf/ur5e_vacuum.urdf.xacro` | | |
-| 계획 그룹 이름 `ur_manipulator` | RViz MotionPlanning 패널 | `pick_place_node.py` | | |
+| 계획 그룹 이름 `ur_manipulator` | 설치된 SRDF·MoveIt 실행 | `pick_place_node.py` | 11-13 해당 그룹으로 실제 계획·실행 성공 | 패드를 포함한 로컬 URDF/SRDF 런치 추가 |
 | 고정 관절로 붙은 `tool0` 이 SDF 변환 뒤 `wrist_3_link` 로 합쳐지는지 | `gz model -m ur -l` 로 링크 목록 | `urdf/ur5e_vacuum.urdf.xacro` | | |
-| DetachableJoint 가 **나중에 스폰한** 모델을 잡는지, 스폰 즉시 붙는지 | 확인 ② (손으로 스폰 → detach → attach) | `pick_place_node.py`, `object_spawner.py` | | |
+| DetachableJoint 가 **나중에 스폰한** 모델을 잡는지, 스폰 즉시 붙는지 | 확인 ② (`scripts/check_sim_week2.py`) | `pick_place_node.py`, `object_spawner.py` | 11-13 통과. 자동 연결→분리→재연결→약 9.9cm 상승 추종→분리·낙하 | 슬롯별 상태 토픽과 부품 스폰 전 경고 억제 설정 추가 |
 | DetachableJoint 가 지웠다 다시 만든 같은 이름 모델을 잡는지 | 사이클 두 번 연속 | `object_spawner.remove` | | |
 | WSL2 에서 Gazebo + MoveIt + RViz 가 쓸 만한 속도로 도는지 | 확인 ① | `env.sh`, `sim.yaml` | | |
 | rosdep 이 `ur5e_pick_place/package.xml` 의존성을 전부 찾는지 | SETUP.md Step 3 | `package.xml` | | |

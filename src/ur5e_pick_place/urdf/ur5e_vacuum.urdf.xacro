@@ -4,12 +4,13 @@
   sim.launch.py 가 ur_sim_control.launch.py 의 description_file 로 이 파일을 넘긴다.
   ur_type 등 xacro 인자는 포함한 파일이 그대로 받는다.
 
-  1주차 확인: 포함 경로가 맞는지
+  1주차에는 포함 경로가 맞는지 확인한다.
       ls $(ros2 pkg prefix ur_simulation_gz)/share/ur_simulation_gz/urdf/
   흡착은 물리 마찰 대신 '고정 관절을 붙였다 떼는' 방식이다. 작은 나사를 마찰로 집으면 Gazebo 에서 미끄러지기 쉬워서
   4주 안에 안정화하기 어렵다고 판단했다 (docs/DECISIONS.md).
 -->
-<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="ur">
+<!-- Jazzy 3.9 ur_moveit.launch.py의 SRDF 이름(ur_type)과 일치시킨다. -->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="$(arg ur_type)">
   <xacro:include filename="$(find ur_simulation_gz)/urdf/ur_gz.urdf.xacro"/>
 
   <!-- 길쭉한 흡착 패드: 긴 변이 tool0 +X. 나사 장축에 맞춰 돌려서 집는다. 길이는 config/sim.yaml 의 tool_length_m 과 맞출 것 -->
@@ -44,6 +45,8 @@
         <child_link>link</child_link>
         <attach_topic>/vacuum/obj_${k}/attach</attach_topic>
         <detach_topic>/vacuum/obj_${k}/detach</detach_topic>
+        <output_topic>/vacuum/obj_${k}/state</output_topic>
+        <suppress_child_warning>true</suppress_child_warning>
       </plugin>
     </gazebo>
   </xacro:macro>

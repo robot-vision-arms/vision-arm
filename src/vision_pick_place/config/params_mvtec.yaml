@@ -1,0 +1,11 @@
+# 검증 split의 F1으로 고른 MVTec 전용 설정. 폰 카메라는 params.yaml에서 별도로 조정.
+vision_node:
+  ros__parameters:
+    image_dir: "data/mvtec_screws/images"
+    intrinsics_path: ""
+    homography_path: ""
+    blur_ksize: 5
+    threshold: 100
+    min_area_px: 500
+    nut_max_aspect: 1.5
+    publish_rate_hz: 10.0

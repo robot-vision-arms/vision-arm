@@ -20,14 +20,15 @@ class PlanePose:
 
 def wrap180(angle_deg: float) -> float:
     """각도를 [-180, 180) 로 접는다."""
-    # TODO: % 360 을 이용해 접기 (180 은 -180 으로)
-    raise NotImplementedError
+    return (angle_deg + 180.0) % 360.0 - 180.0
 
 
 def work_to_base(x_mm: float, y_mm: float, plane: PlanePose) -> tuple[float, float, float]:
     """work_plane 의 (x_mm, y_mm) → base_link 의 (x, y, z) [m]. 평면 위의 점이므로 z 는 평면 높이."""
-    # TODO: mm → m, plane.yaw_deg 만큼 Z 축 회전 후 (plane.x, plane.y) 더하기. z = plane.z
-    raise NotImplementedError
+    yaw = math.radians(plane.yaw_deg)
+    x, y = x_mm / 1000.0, y_mm / 1000.0
+    return (plane.x + math.cos(yaw) * x - math.sin(yaw) * y,
+            plane.y + math.sin(yaw) * x + math.cos(yaw) * y, plane.z)
 
 
 def nearest_equivalent_yaw_deg(angle_deg: float, current_yaw_deg: float) -> float:
@@ -35,8 +36,9 @@ def nearest_equivalent_yaw_deg(angle_deg: float, current_yaw_deg: float) -> floa
 
     이렇게 안 하면 170° 물체를 집으려고 손목을 -10° 대신 +170° 까지 돌리는 일이 생긴다.
     """
-    # TODO: 후보 (angle_deg, angle_deg + 180) 중 wrap180(후보 - current_yaw_deg) 의 절댓값이 작은 쪽 → wrap180
-    raise NotImplementedError
+    nearest = min((angle_deg, angle_deg + 180.0),
+                  key=lambda candidate: abs(wrap180(candidate - current_yaw_deg)))
+    return wrap180(nearest)
 
 
 def tool_down_quaternion(yaw_deg: float) -> tuple[float, float, float, float]:
@@ -44,5 +46,5 @@ def tool_down_quaternion(yaw_deg: float) -> tuple[float, float, float, float]:
 
     q = Rz(yaw) · Rx(180°). Rx(180°) = (1, 0, 0, 0), Rz(ψ) = (0, 0, sin ψ/2, cos ψ/2) 의 해밀턴 곱으로 구한다.
     """
-    # TODO: 두 쿼터니언을 곱한 식을 직접 전개해 (x, y, z, w) 반환. test/test_grasp.py 로 아래를 보는지 확인
-    raise NotImplementedError
+    half_yaw = math.radians(yaw_deg) / 2.0
+    return (math.cos(half_yaw), math.sin(half_yaw), 0.0, 0.0)
