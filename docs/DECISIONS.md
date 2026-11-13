@@ -9,7 +9,7 @@
 - Python·ROS import, pip 의존성 검사 정상. 테스트 7개 중 3개 통과, 4개 미구현으로 skipped.
 - WSL 설정: `C:\Users\user1\.wslconfig`에 memory=10GB, swap=8GB 작성. 11-13 점검 때 파일이 없어져 7.6 GiB 로 돌아가 있어 다시 작성함. 원인 미확인 (PC 초기화 프로그램 가능성). 재시작 후 적용 확인 필요.
 - 이전에 누락된 `ur_robot_driver`는 Jazzy 3.9.0 설치 확인 완료. sudo 인증 성공, rosdep check와 pip check 통과. 실행 의존성을 package.xml에 추가함.
-- UR 기본 예제 재실행에서 MoveIt 초기화(`You can start planning now!`) 및 joint_state_broadcaster / scaled_joint_trajectory_controller 활성화 확인. URDF·SRDF 로봇 이름 불일치와 선택적 인식/Octomap 기능 오류가 남아 있으며, 실제 화면·Plan & Execute·프로젝트 작업 셀은 미검증.
+- UR 기본 예제 재실행에서 MoveIt 초기화(`You can start planning now!`) 및 joint_state_broadcaster / scaled_joint_trajectory_controller 활성화 확인. URDF·SRDF 로봇 이름 불일치와 선택적 인식/Octomap 기능 오류가 남아 있으며, 이후 기본 예제 Plan·Execute 및 Gazebo 팔 이동은 사용자 확인 완료(2026-11-13, 8절). 프로젝트 작업 셀은 미검증.
 - `/dev/video*` 없음. 현재 도구 환경은 Windows PowerShell 실행이 `Exec format error`로 실패하므로 usbipd 설치 폴더는 현재 존재함. 버전·서비스·USB 장치 확인은 Windows에서 실행해야 함.
 - 다음 절차: `WEEK1.md`의 현재 PC 남은 작업 참고. WSL 재시작은 현재 세션을 종료하므로 사용자가 Windows에서 수행.
 
@@ -112,3 +112,48 @@ DetachableJoint 가 안 되면 시험해 볼 대안 (둘 다 아직 안 써 봄)
 - MVTec 이미지는 계속 검출 로직 개발·검증용입니다. 사진 폴더·동영상 파일 입력(`image_dir`)은 폰 영상을 못 받을 때의 대체 입력과 같은 장면을 반복 재현하는 테스트용으로 남깁니다.
 - 남은 일: 폰 거치대 준비, 3명 모두 WSL 에서 폰 영상 수신 확인, `camera_stream.FrameSource` 구현.
 - 검증 상태: **미확인** (폰 영상 수신 아직 시험 안 함).
+
+## 8. 팀원 2 (성민) — 1주차 시뮬레이터 작업 기록 (2026-11-13)
+
+### 담당 파일과 기록 위치
+
+- 실제 구현·설정: `src/ur5e_pick_place/launch/sim.launch.py`, `worlds/workcell.sdf`, `urdf/ur5e_vacuum.urdf.xacro`, `config/sim.yaml`.
+- 목표·역할 분담: `docs/PROJECT.md` 2.3절. 환경·실행 절차: `docs/SETUP.md`, `docs/WEEK1.md`.
+- 오류·조치·검증 결과: 이 문서. `build/`, `install/`, `log/`는 생성 결과이므로 원본 수정 위치가 아님.
+
+### 확인한 결과
+
+| 항목 | 결과 및 근거 |
+|---|---|
+| 기본 UR5e 예제 | `ros2 launch ur_simulation_gz ur_sim_moveit.launch.py ur_type:=ur5e` 실행 |
+| 기본 예제 경로 계획 | 처음에는 약 5초 후 OMPL 실패. 목표를 조정한 뒤 `Motion plan was computed successfully` 출력, 계획 시간 약 0.04055초 |
+| 기본 예제 실행 | Execute 후 Gazebo에서 팔이 움직였다고 사용자 확인. 기본 예제 계획·실행 확인 완료 |
+| 프로젝트 robot_description 오류 | UR 런치가 Xacro 출력을 YAML로 해석할 때 주석의 `1주차 확인:`에서 파싱 실패 재현. 콜론과 공백을 없애는 주석 수정 |
+| 수정 후 파라미터 검증 | 실제 Xacro 출력의 ROS launch 파라미터 변환 및 XML 파싱 통과. 흡착 패드와 DetachableJoint 슬롯 3개 존재 확인 |
+| 프로젝트 반복 경고 | 아직 스폰되지 않은 obj_0~2의 모델·link를 DetachableJoint가 찾으면서 경고 출력. `suppress_child_warning=true` 추가하여 해당 경고를 생략하도록 설정 |
+| 빌드 | `colcon build --symlink-install --packages-select ur5e_pick_place` 성공 |
+
+경고 생략은 물체 스폰·흡착 구현을 완료했다는 뜻이 아니다. 전체 런치 재실행 후 경고 해소와 동작은 별도 확인해야 한다.
+
+### 다음 확인 항목
+
+- [ ] 프로젝트 Gazebo에서 UR5e·흰색 매트·상자 2개·흡착 패드가 모두 보이는지 확인.
+- [ ] 프로젝트 작업 셀에서 Plan → Execute 후 Gazebo 팔 이동 확인 (기본 예제와 구분).
+- [ ] `sim.yaml`과 `workcell.sdf` 및 실행 중 Pose 비교. 작업 평면 원점 (0.30, -0.15, 0.0)m, 매트 중심 (0.4485, -0.045, 0.0005)m, 크기 0.297×0.210m. 상자 중심은 screw (0, 0.45), nut (0, -0.45)m.
+- [ ] URDF·SRDF 로봇 이름 불일치 메시지의 재발 여부 확인. 기본 예제의 이동 성공만으로 이 문제가 해결됐다고 판정하지 않음.
+- [ ] 화면·로그 증거와 확인 결과를 이 절에 추가하고 팀원 리뷰 후 GitHub에 공유.
+
+### 재개 명령
+
+기존 시뮬레이터는 해당 터미널에서 Ctrl+C로 종료하고, 새 실행을 하나만 띄운다.
+
+```bash
+source ~/vision-arm/env.sh
+ros2 launch ur5e_pick_place sim.launch.py
+```
+
+자동 물체 생성·실제 attach/detach·상자의 MoveIt 충돌 회피·자동 분류 사이클은 아직 미검증이며 1주차 화면·수동 이동 검증과 구분한다.
+
+### 팀원 2 후속 자동 검증 (2026-11-13)
+
+최신 코드 재빌드와 35개 테스트를 이 PC에서 통과했다. 실행 중 장면에서 매트·두 상자 좌표와 로봇·흡착 패드를 확인했고 프로젝트 지정 이동 및 흡착·해제는 재시도에서 성공했다. 최초 이동 계획 실패와 GUI·실측 자료 미검증은 구분해서 남겼다. 자세한 결과·재현 명령·미완료 항목은 [TEAM2_PROGRESS.md](TEAM2_PROGRESS.md)를 따른다. 이전 체크리스트의 장면·좌표 항목은 자동 확인했으며 GUI 직접 확인은 여전히 남아 있다.
