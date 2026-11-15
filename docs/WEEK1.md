@@ -43,8 +43,8 @@ source /home/user1/mini_projects3/vision-arm/env.sh
 | Gazebo UR5e·MoveIt | 화면 없이 이동 검증 완료 | 2주차 진행 중 지정 좌표 이동·흡착 시험 성공. `logs/week2_sim_check.json`, [WEEK2.md](WEEK2.md) 참고 |
 | 확인 ①의 GUI·RViz Plan & Execute | 미확인 | 화면 조작 기준까지 통과로 기록하지 않음 |
 | 스마트폰 앱·거치·영상 수신 | 미확인 | `params.yaml`의 `camera_url`이 비어 있고 `/dev/video*`도 없음. 실제 앱 설치·거치 상태는 이 PC에서 확인 못 함 |
-| 실제 체커보드·격자 보정 | 남음 | `data/calib`, `data/captures`는 `.gitkeep`만 존재. 실측 `intrinsics.npz`, `homography.npz` 없음 |
-| 원점·축의 작업면 표시 | 미확인 | 좌표계 정의는 PROJECT.md에 있지만 종이에 표시·고정했는지는 확인 못 함 |
+| 실제 ChArUco·작업 시트 보정 | 남음 | `data/calib`, `data/captures`는 `.gitkeep`만 존재. 실측 `intrinsics.npz`, `homography.npz` 없음 |
+| 원점·축의 작업면 표시 | 인쇄물로 대체 | 작업 시트에 원점·축이 인쇄됨 (DECISIONS.md 9절). 시트를 작업대에 고정했는지는 확인 필요 |
 | 팀원 3명 환경 확인 | 미확인 | 아래 팀원별 체크표는 비어 있음. 현재 점검은 이 PC에 한함 |
 
 보정 스크립트와 로딩·변환 코드는 2주차 진행 중 구현해 합성 데이터로 검증했다.
@@ -305,7 +305,7 @@ python -c "import cv2; c=cv2.VideoCapture('<camera_url>'); ok,f=c.read(); print(
 | 9. 폰 영상 수신 | | | |
 | 10. 기록 | | | |
 
-환경 설치가 끝나면 1주차 나머지 일(폰 고정, 체커보드 캘리브레이션, 격자 호모그래피, 로봇 좌표계 정의)로 넘어갑니다 (PROJECT.md 8장).
+환경 설치가 끝나면 1주차 나머지 일(폰 고정, ChArUco 캘리브레이션, 작업 시트 호모그래피)로 넘어갑니다 (PROJECT.md 8장).
 
 ## 현재 설치 상태 (2026-11-10)
 
