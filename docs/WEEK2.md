@@ -2,7 +2,7 @@
 
 ## 팀원 2 (성민) 공유 기록 — 2026-11-13
 
-최신 공유 구현을 `/home/user1/vision-arm`에서 재현·검증했습니다. 아래 검출·분류 핵심 로직은 이번에 새로 작성한 것이 아니라 기존 공유 코드입니다.
+최신 공유 구현을 `~/vision-arm`에서 재현·검증했습니다. 아래 검출·분류 핵심 로직은 이번에 새로 작성한 것이 아니라 기존 공유 코드입니다.
 
 | 항목 | 결과 |
 |---|---|
@@ -45,7 +45,7 @@
 
 ## 실행 순서
 
-저장소 루트에서 실행한다. 이 PC의 실제 경로는 `/home/user1/mini_projects3/vision-arm`이다.
+저장소 루트(`~/vision-arm`, 다른 곳에 clone 했다면 [WEEK1.md](WEEK1.md) 의 링크 방법 참고)에서 실행한다.
 
 ```bash
 source env.sh
@@ -231,3 +231,41 @@ python scripts/preview_steps.py --image data/captures/part.png --mode gray
 Gazebo는 headless로 검증했다. GUI 화면·RViz 조작은 직접 확인하지 않았다.
 현재 Gazebo DART의 로봇 STL 충돌 메시 생성 경고와 MoveIt의 3D 센서 미설정 Octomap 오류가 남아 있다.
 이번 이동과 관절 기반 흡착 시험은 성공했지만, Gazebo에서 팔 메시의 물리 충돌과 작업 셀 벽을 포함한 계획 장면은 추가 검증 대상이다.
+
+## 팀원 1 (동경) 다음 작업 계획 — 2026-11-16 작성
+
+2주차 담당(`grasp.py`, `/sim/move_to_target`)은 완료. 아래는 1주차에서 넘어온 일과 3주차(2026-11-23 ~ 11-29) 담당 작업이다.
+
+### 1주차에서 넘어온 일 (3주차 전에 끝낼 것)
+
+| 작업 | 내용 | 완료 기준 |
+|---|---|---|
+| 실제 캘리브레이션 | 11-17 촬영 예정. ChArUco 보드 15~20장 → `calibrate_camera.py`, 폰 고정 후 작업 시트 1장 → `compute_homography.py --aruco --debug-out` ([PR #1](https://github.com/robot-vision-arms/vision-arm/pull/1)) | `data/calib/intrinsics.npz`, `homography.npz` 생성. RMS(px), 시트 RMS·한 점씩 뺀 오차(mm)를 WEEK1에 기록 |
+| 작업 시트 마커 마스크 / 검출 ROI | 작업 시트 귀퉁이 ArUco 마커(검은 사각형)가 `vision_detector` 에 부품으로 잡히지 않게 한다. 호모그래피 역변환으로 마커 영역(mm 위치는 `aruco_calib.SHEET_MARKERS`)을 이미지에서 가리거나, 검출 ROI 를 시트 안쪽으로 제한 | 시트만 찍은 사진에서 검출 0개, 시트 위 부품 사진에서 마커 오검출 0개. 테스트 추가. 검출 로직(성민)과 인터페이스만 맞춘다 |
+
+### 3주차: GUI (`gui/main_window.py`, `gui/ros_worker.py`)
+
+현재 두 파일은 뼈대(TODO)만 있다. 과제 필수 4화면 (PROJECT.md 2.2):
+
+| 화면 | 데이터 출처 | 표시 내용 |
+|---|---|---|
+| ① 영상 | `/vision/debug_image` (Image) | 검출 ROI·중심·장축 화살표가 그려진 영상 |
+| ② 좌표 표 | `/vision/detections` (String·JSON, `packet.py`) | id, part_type, u/v px, x/y mm, angle_deg. `calib_ok: false` 면 mm·각도 칸을 비우고 "미보정" 표시 |
+| ③ 송수신 기록 | `/robot/log` `{"seq","sent","acked","latency_ms","error"}`, `/sim/pick_log` `{"seq","obj","part_type","result","plan_ms","error"}` | 최근 N건, 실패는 색으로 구분, 지연 ms |
+| ④ 캘리브 상태 | 패킷 `calib_ok` + 보정 파일 | 내부 파라미터·호모그래피 로드 여부, RMS(px), 재투영 오차(mm), 보정 파일 생성 시각 (카메라가 움직였는지 판단용, PROJECT.md 11장) |
+
+구현 순서:
+
+1. `ros_worker.py`: QThread 안에서 `rclpy` 노드 생성 → 네 토픽 구독 → 콜백에서 Signal emit → `spin_once` 루프. `stop()` 은 플래그 → `rclpy.try_shutdown()` → `wait()`
+2. `main_window.py`: 위 4화면 배치, Signal → 위젯 갱신 슬롯 연결, 창 닫을 때 워커 정지
+3. 이미지 변환(BGR numpy → QImage)은 `gui/pipeline_inspector.py` 에 있는 방식과 맞춘다
+4. 테스트: 워커 없이 슬롯에 가짜 패킷·로그를 넣어 표·상태 갱신 확인 (`QT_QPA_PLATFORM=offscreen`), 실제 ROS 로 `vision_node` 발행 → GUI 수신 확인
+5. 문서: 실행 명령, 화면 캡처를 WEEK3 기록에 남김
+
+의존성: ③의 `/robot/log` 는 성민 님 3주차 `robot_bridge.py` 가 발행한다. 먼저 나오기 전까지는 가짜 발행(`ros2 topic pub`)으로 확인한다.
+
+완료 기준 (PROJECT.md 8장 3주차): GUI 에 영상·좌표·캘리브 상태가 실시간으로 갱신되고, 송수신 기록이 쌓인다.
+
+### 4주차 (참고)
+
+KPI 측정(`evaluate_kpi.py`), 100회 송신 테스트. 3주차 GUI 와 `robot_bridge` CSV 가 입력이다.

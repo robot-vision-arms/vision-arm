@@ -42,11 +42,12 @@
 ## 최신 확인 결과 (2026-11-13)
 
 이 절이 아래 설치 당시 기록보다 최신이다. **개발 환경과 코드 기반은 준비됐지만 1주차 전체 완료는 아니다.**
-이 PC의 실제 저장소는 `/home/user1/mini_projects3/vision-arm`이며 `~/vision-arm` 링크는 현재 없다.
-이 문서의 `source ~/vision-arm/env.sh` 대신 다음 명령을 쓴다.
+문서의 명령은 모두 `~/vision-arm` 기준이다. 저장소를 다른 곳에 clone 했다면 링크를 한 번 걸어 두면 그대로 통한다
+(예: 11-13 확인 PC는 `/home/user1/mini_projects3/vision-arm`, 팀원 1 PC는 `~/study/robot_vision`).
 
 ```bash
-source /home/user1/mini_projects3/vision-arm/env.sh
+ln -s <실제 저장소 경로> ~/vision-arm   # 한 번만
+source ~/vision-arm/env.sh
 ```
 
 | 1주차 항목 | 확인 결과 | 근거·남은 일 |
@@ -92,6 +93,20 @@ source /home/user1/mini_projects3/vision-arm/env.sh
 2. 확인 ① (8-3단계): `source ~/vision-arm/env.sh && ros2 launch ur5e_pick_place sim.launch.py` → Gazebo 에 UR5e, RViz Plan & Execute 로 팔이 움직이는지 직접 봄
 3. 폰 IP 카메라 주소를 `params.yaml` 의 `camera_url` 에 넣고 9단계 확인 (점검 스크립트의 남은 FAIL 1개)
 4. 결과를 아래 "팀원별 진행 체크" 표와 10단계 기록 위치에 적고, 1주차 캘리브레이션(PROJECT.md 2.3 팀원 1)으로 넘어감
+
+### 2026-11-16 재점검 결과 (팀원 1 동경, `~/study/robot_vision` = `~/vision-arm` 링크)
+
+| 항목 | 결과 |
+|---|---|
+| WSL 메모리 | ✅ `free -h` Mem 9.7 GiB / Swap 8.0 GiB (`.wslconfig` 10GB / 8GB 적용됨) |
+| Conda | ✅ `auto_activate_base: False`, 새 셸 `python3` = `.venv` |
+| rosdep | ✅ `rosdep check` 의존성 모두 충족 |
+| 빌드·테스트 | ✅ `colcon build` 2 packages, `colcon test` 55개 실패 0 / skipped 0 |
+| ROS2 통신 | ✅ talker/listener 송수신 확인 |
+| `check_environment.py` | OK 62 / FAIL 1: `camera_url`(`rtsp://172.20.10.1:8554/live`)은 설정돼 있으나 접속 시간 초과. 폰 앱 서버 실행·같은 Wi-Fi·IP 변경 여부 확인 필요 |
+| 시뮬레이터 (headless) | ✅ `sim.launch.py gazebo_gui:=false launch_rviz:=false` 후 `check_sim_week2.py` 통과: 지정 이동, 늦은 스폰 흡착, 분리 낙하, 0.099 m 들어올림. 서비스가 뜬 직후(약 16초)에 호출하면 첫 계획이 OMPL `Unable to solve` 로 실패, 40초 기다린 뒤에는 첫 시도 성공 |
+| 확인 ① 화면 | ⬜ Gazebo·RViz 창을 띄워 Plan & Execute 로 팔이 움직이는지 사람이 직접 봐야 함 |
+| 폰 영상 수신 | ⬜ 폰 앱 서버를 켠 뒤 `check_environment.py` 재실행, `scripts/live_view.py` 로 프레임 확인 |
 
 ### 현재 PC 남은 작업
 
@@ -312,7 +327,7 @@ python -c "import cv2; c=cv2.VideoCapture('<camera_url>'); ok,f=c.read(); print(
 폰 앱 스트리밍을 켠 상태에서 VS Code 터미널(WSL)에서 실행합니다.
 
 ```bash
-source /home/user1/mini_projects3/vision-arm/env.sh
+source ~/vision-arm/env.sh
 python scripts/live_view.py
 ```
 
