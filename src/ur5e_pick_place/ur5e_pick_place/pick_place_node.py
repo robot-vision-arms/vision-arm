@@ -24,10 +24,12 @@ move_group 은 sim.launch.py 가 ur_moveit_config 로 띄운다.
 """
 import json
 import math
+import os
 import threading
 import time
 
 import rclpy
+from ament_index_python.packages import get_package_share_directory
 from moveit_msgs.msg import MoveItErrorCodes
 from pymoveit2 import MoveIt2, MoveIt2State
 from rclpy.callback_groups import ReentrantCallbackGroup
@@ -38,6 +40,7 @@ from std_srvs.srv import Trigger
 
 from ur5e_pick_place.object_spawner import slot_name
 from ur5e_pick_place.grasp import PlanePose, tool_down_quaternion, work_to_base
+from ur5e_pick_place.workcell_scene import collision_boxes
 
 # ur_moveit_config 의 계획 그룹·관절 이름 (1주차에 RViz MotionPlanning 패널에서 그룹 이름 확인)
 UR_JOINTS = ['shoulder_pan_joint', 'shoulder_lift_joint', 'elbow_joint',
@@ -50,14 +53,19 @@ EE_LINK = 'tool0'   # MoveIt 은 흡착 패드를 모르므로 tool0 목표 = �
 # (특히 시뮬레이터를 막 띄운 직후, 2026-11-16 확인: "Unable to solve the planning problem").
 # Jazzy 의 OMPL 은 계획 실패를 PLANNING_FAILED 가 아니라 범용 FAILURE(99999) 로 돌려준다 (move_group 로그로 확인).
 # 다시 시도는 MoveIt 이 IDLE(실행 중 아님)일 때만 하고, 계획은 항상 현재 자세에서 새로 시작하므로 안전하다.
+# INVALID_MOTION_PLAN: 찾은 경로를 촘촘히 다시 검사했더니 중간에 충돌(예: forearm_link ↔ vacuum_pad)이 있어
+#   MoveIt 이 실행하지 않고 버린 경우. 로봇은 안 움직였고 다시 계획하면 다른 경로가 나온다 (11-16 확인).
 # CONTROL_FAILED(컨트롤러 추종 실패)·NO_IK_SOLUTION(닿을 수 없는 목표)은 다시 해도 같으므로 넣지 않는다.
-RETRYABLE_ERRORS = (MoveItErrorCodes.FAILURE, MoveItErrorCodes.PLANNING_FAILED, MoveItErrorCodes.TIMED_OUT)
+RETRYABLE_ERRORS = (MoveItErrorCodes.FAILURE, MoveItErrorCodes.PLANNING_FAILED, MoveItErrorCodes.TIMED_OUT,
+                    MoveItErrorCodes.INVALID_MOTION_PLAN)
 
 
 class PickPlaceNode(Node):
     def __init__(self):
         super().__init__('pick_place_node')
         self.declare_parameter('world_name', 'workcell')
+        # 빈 문자열이면 이 패키지의 worlds/<world_name>.sdf. 여기 있는 고정 물체(상자·바닥)를 MoveIt 충돌 물체로 등록한다
+        self.declare_parameter('world_file', '')
         self.declare_parameter('max_objects', 3)
         self.declare_parameter('work_plane_x', 0.30)
         self.declare_parameter('work_plane_y', -0.15)
@@ -101,8 +109,31 @@ class PickPlaceNode(Node):
                                callback_group=self.cb_group, use_move_group_action=True,
                                ignore_new_calls_while_executing=True)
         self.moveit2.max_velocity = self.get_parameter('max_velocity_scaling').value
-        # TODO: 작업면·상자 벽을 충돌 물체로 등록 (moveit2.add_collision_box) → 계획이 상자 벽을 피해 간다
+
+        # Gazebo 의 상자·바닥을 MoveIt 에도 알려 준다. 모르면 상자 벽을 뚫고 가는 경로를 계획할 수 있다.
+        # /collision_object 는 저장되지 않는(volatile) 토픽이라 move_group 이 아직 안 떴을 때 보내면 사라진다.
+        # 그래서 move_group 이 구독할 때까지 1초마다 확인하고, 구독이 보이면 두 번 보낸 뒤 멈춘다.
+        world_file = self.get_parameter('world_file').value or os.path.join(
+            get_package_share_directory('ur5e_pick_place'), 'worlds', f"{self.get_parameter('world_name').value}.sdf")
+        self.scene_boxes = collision_boxes(world_file)
+        self.scene_sent = 0
+        self.scene_timer = self.create_timer(1.0, self.publish_scene, callback_group=self.cb_group)
         # TODO: logs/sim_pick_YYYYMMDD_HHMMSS.csv 열기
+
+    def publish_scene(self) -> bool:
+        """충돌 박스를 MoveIt 에 등록. move_group 이 아직 구독하지 않으면 False. 같은 id 로 다시 보내면 덮어쓴다."""
+        if self.count_subscribers('/collision_object') == 0:
+            return False
+        for box in self.scene_boxes:
+            self.moveit2.add_collision_box(id=box.id, size=box.size, position=box.position,
+                                           quat_xyzw=box.quat_xyzw, frame_id=BASE_LINK)
+        self.scene_sent += 1
+        if self.scene_sent == 1:
+            self.get_logger().info(f'MoveIt 충돌 물체 {len(self.scene_boxes)}개 등록: '
+                                   + ', '.join(box.id for box in self.scene_boxes))
+        if self.scene_sent >= 2:
+            self.scene_timer.cancel()
+        return True
 
     def on_targets(self, msg: String):
         try:
@@ -140,6 +171,11 @@ class PickPlaceNode(Node):
             if attempts < 1 or delay < 0:
                 raise ValueError('plan_attempts는 1 이상, plan_retry_delay_s는 0 이상이어야 합니다.')
             self.wait_for_joint_state(value('joint_state_wait_s'))
+            if self.scene_sent == 0:
+                # 시작 직후 바로 불린 경우: 충돌 물체 없이 계획하면 상자를 뚫을 수 있으므로 먼저 등록하고 반영될 시간을 준다
+                if not self.publish_scene():
+                    raise RuntimeError('move_group 이 아직 /collision_object 를 구독하지 않습니다. 잠시 후 다시 부르세요.')
+                time.sleep(1.0)
             planning_time = value('planning_time_s')
             if planning_time <= 0:
                 raise ValueError('planning_time_s는 양수여야 합니다.')

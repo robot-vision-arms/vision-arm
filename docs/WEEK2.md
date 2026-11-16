@@ -271,7 +271,22 @@ Gazebo는 headless로 검증했다. GUI 화면·RViz 조작은 직접 확인하�
 | 실패 메시지 | `error_code` 와 pymoveit2 실패 이유를 같이 표시 |
 
 확인: `planning_time_s` 를 0.0001초로 낮춰 매번 실패시키면 코드 99999 → 2/3, 3/3 재시도 → 실패 보고, 5초로 되돌리면 노드 재시작 없이 바로 성공. 서비스가 뜬 뒤 10초에 `check_sim_week2.py` 전체 통과. colcon 68개 통과.
-자연 발생 실패가 재시도로 풀리는 장면은 이번 실행에서 다시 나오지 않아 아직 직접 보지 못했다.
+자연 발생 실패도 재시도로 풀리는 것을 확인했다 (아래 충돌 물체 확인 중 첫 호출: 99999 실패 → 2초 뒤 2/3 에서 성공).
+같은 확인 중 `INVALID_MOTION_PLAN`(-2) 도 나왔다. 찾은 경로를 MoveIt 이 다시 검사했더니 중간에 `forearm_link` 와 `vacuum_pad` 가 닿아서 실행하지 않고 버린 경우로, 로봇은 안 움직였으므로 재시도 대상에 추가했다.
+
+### 2주차 보강: 상자·바닥을 MoveIt 충돌 물체로 등록 (11-16)
+
+MoveIt 은 Gazebo world 파일을 읽지 않아서, 그대로 두면 상자 벽을 뚫고 가는 경로를 계획할 수 있다 (RViz 에도 상자가 안 보였다).
+`ur5e_pick_place/workcell_scene.py` 가 `worlds/workcell.sdf` 의 static 모델 충돌(box·plane) 을 읽고, `pick_place_node` 가 시작할 때 move_group 이 `/collision_object` 를 구독하면 등록한다.
+크기·위치를 코드에 따로 적지 않으므로 **sdf 에서 상자를 옮기거나 늘리면 MoveIt 에도 자동 반영**된다. 바닥 plane 은 윗면이 z=0 보다 2 mm 아래인 2 cm 판으로 바꾼다 (z=0 에 맞추면 로봇 베이스가 시작부터 충돌로 잡힘). `work_mat` 은 충돌 없는 표시용이라 빠진다.
+
+| 확인 (나사 상자, base (0, 0.45)) | 결과 |
+|---|---|
+| `/get_planning_scene` | 충돌 물체 11개 (상자 2 × 바닥·벽 4 + 바닥 판) |
+| 상자 위 15 cm / 상자 안쪽 가운데 바닥 위 2 cm | 둘 다 성공 (시도 1회) |
+| 패드 끝을 벽(`wall_px`) 속 1 cm 높이에 | 거부: `Unable to sample any valid states for goal tree` (목표 자세가 충돌) |
+
+colcon 72개 통과 (`test_workcell_scene.py` 4개 추가).
 
 ### 3주차: GUI (`gui/main_window.py`, `gui/ros_worker.py`)
 
