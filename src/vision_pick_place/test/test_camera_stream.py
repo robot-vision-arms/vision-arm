@@ -74,3 +74,72 @@ def test_morphology_fills_small_gap_and_removes_isolated_noise():
 def test_invalid_segmentation_settings_are_rejected(kwargs):
     with pytest.raises(ValueError):
         preprocess(np.zeros((10, 10, 3), np.uint8), **kwargs)
+
+
+class _FakeCapture:
+    """초당 수백 장을 내보내는 가짜 카메라. 프레임 값 [0,0,0] 에 몇 번째 프레임인지 적는다."""
+    opened = 0
+
+    def __init__(self, *args, fail_after=None, **kwargs):
+        _FakeCapture.opened += 1
+        self.count = 0
+        self.fail_after = fail_after
+        self.released = False
+
+    def read(self):
+        import time
+        time.sleep(0.002)
+        if self.released or (self.fail_after is not None and self.count >= self.fail_after):
+            return False, None
+        self.count += 1
+        frame = np.zeros((4, 4, 3), np.uint8)
+        frame[0, 0, 0] = self.count % 256
+        frame[0, 0, 1] = self.count // 256
+        return True, frame
+
+    def release(self):
+        self.released = True
+
+
+def _frame_no(frame):
+    return int(frame[0, 0, 0]) + 256 * int(frame[0, 0, 1])
+
+
+def test_live_source_returns_latest_frame_not_backlog(monkeypatch):
+    import time
+    monkeypatch.setattr(cv2, 'VideoCapture', _FakeCapture)
+    source = FrameSource(camera_url='rtsp://fake/live', read_timeout_s=1.0)
+    first = _frame_no(source.read())
+    time.sleep(0.3)  # 노드가 다른 일을 하는 동안 카메라는 계속 프레임을 보낸다
+    second = _frame_no(source.read())
+    # 버퍼를 한 장씩 꺼내면 first+1 이 나오지만, 최신 프레임만 쓰므로 훨씬 뒤 번호가 나와야 한다
+    assert second > first + 20
+    source.release()
+    assert source.read() is None
+    assert not source._thread.is_alive()
+
+
+def test_live_source_reconnects_after_stream_drop(monkeypatch):
+    _FakeCapture.opened = 0
+    caps = []
+
+    def factory(*args, **kwargs):
+        cap = _FakeCapture(fail_after=5 if not caps else None)
+        caps.append(cap)
+        return cap
+
+    monkeypatch.setattr(cv2, 'VideoCapture', factory)
+    import time
+    source = FrameSource(camera_url='rtsp://fake/live', read_timeout_s=2.0)
+    time.sleep(1.0)  # 첫 연결은 5장 뒤 끊기고, 0.5초 쉰 뒤 다시 연결된다
+    assert len(caps) >= 2
+    assert source.read() is not None  # 다시 연결된 스트림의 프레임
+    assert caps[-1].count > 0
+    source.release()
+
+
+def test_live_source_read_times_out_when_no_frames(monkeypatch):
+    monkeypatch.setattr(cv2, 'VideoCapture', lambda *a, **k: _FakeCapture(fail_after=0))
+    source = FrameSource(camera_url='rtsp://fake/live', read_timeout_s=0.3)
+    assert source.read() is None
+    source.release()
