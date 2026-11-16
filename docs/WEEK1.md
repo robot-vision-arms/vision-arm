@@ -34,6 +34,7 @@
 | OpenCV 직접 수신 | `cv2.VideoCapture(url, CAP_FFMPEG)` 30/30 프레임 수신 |
 | 프로젝트 코드 수신 | `params.yaml` 설정 그대로 `FrameSource` 열기 2.0초, 60/60 프레임 (720, 1280, 3), `preprocess` 마스크 (720, 1280) 정상, `release()` 후 `read()`는 `None` |
 | 실시간 뷰어 | `scripts/live_view.py` 추가 (아래 9단계 참고) |
+| 빌드·테스트 | 최신 `main`(`0af3e57`)에서 `colcon build` 2개 패키지 성공, `colcon test` **55 tests, 0 errors, 0 failures, 0 skipped** (보정 테스트 추가로 47 → 55) |
 | 미완료 | 폰 고정 거치·해상도 고정 상태에서의 촬영(캘리브레이션과 함께), 동경·성민 PC의 환경 점검 결과 수집 |
 
 운용 시 주의: 아이폰 앱이 백그라운드로 가거나 화면이 잠기면 스트리밍이 멈춰 `Connection refused`가 난다.
@@ -60,12 +61,12 @@ source ~/vision-arm/env.sh
 | 이미지 입력·전처리 | 구현·테스트 완료 | `FrameSource`, 그레이스케일·Blur·이진화. 2026-11-16 실제 폰 RTSP 영상으로도 수신·전처리 확인 (가영 PC) |
 | MVTec 데이터 | 확인 완료 | 이미지 384장과 전체·train·val·test 어노테이션 존재 |
 | Gazebo UR5e·MoveIt | 화면 없이 이동 검증 완료 | 2주차 진행 중 지정 좌표 이동·흡착 시험 성공. `logs/week2_sim_check.json`, [WEEK2.md](WEEK2.md) 참고 |
-| 확인 ①의 GUI·RViz Plan & Execute | 미확인 | 화면 조작 기준까지 통과로 기록하지 않음 |
+| 확인 ①의 GUI·RViz Plan & Execute | 확인 완료 (2026-11-16, 동경 PC) | Gazebo·RViz 화면에서 Plan & Execute로 팔 이동 확인. `sim.launch.py`에서 RViz가 뜨지 않던 버그(RViz 끄기 인자가 MoveIt 쪽으로 새어 나감)는 `b0d63a7`에서 수정 |
 | 스마트폰 앱·영상 수신 | 확인 완료 (2026-11-16, 가영 PC) | 아이폰 RTSP + USB 핫스팟, `camera_url: rtsp://172.20.10.1:8554/live`. 위 팀원 3 기록 참고 |
 | 스마트폰 고정 거치 | 남음 | 캘리브레이션 촬영 위치에 고정·해상도 고정 필요 |
-| 실제 체커보드·격자 보정 | 남음 | `data/calib`, `data/captures`는 `.gitkeep`만 존재. 실측 `intrinsics.npz`, `homography.npz` 없음 |
-| 원점·축의 작업면 표시 | 미확인 | 좌표계 정의는 PROJECT.md에 있지만 종이에 표시·고정했는지는 확인 못 함 |
-| 팀원 3명 환경 확인 | 미확인 | 아래 팀원별 체크표는 비어 있음. 현재 점검은 이 PC에 한함 |
+| 실제 ChArUco·작업 시트 보정 | 남음 | `data/calib`, `data/captures`는 `.gitkeep`만 존재. 실측 `intrinsics.npz`, `homography.npz` 없음 |
+| 원점·축의 작업면 표시 | 인쇄물로 대체 | 작업 시트에 원점·축이 인쇄됨 (DECISIONS.md 9절). 시트를 작업대에 고정했는지는 확인 필요 |
+| 팀원 3명 환경 확인 | 확인 완료 (2026-11-16) | 동경: OK 62 / FAIL 1, 테스트 55개 통과, 1~8단계 OK. 성민: OK 62 / FAIL 1, 테스트 65개 통과. 가영: 최신 `main` 68개 통과, 폰 수신 포함 통과. 폰은 가영 PC에서만 연결하기로 해서 동경·성민의 FAIL 1(`camera_url` 접속 시간 초과)은 해당 없음. 아래 팀원별 체크표 참고 |
 
 보정 스크립트와 로딩·변환 코드는 2주차 진행 중 구현해 합성 데이터로 검증했다.
 실제 폰 사진으로 보정하고 재투영 오차를 기록해야 1주차 보정 항목을 완료할 수 있다.
@@ -105,8 +106,8 @@ source ~/vision-arm/env.sh
 | ROS2 통신 | ✅ talker/listener 송수신 확인 |
 | `check_environment.py` | OK 62 / FAIL 1: `camera_url`(`rtsp://172.20.10.1:8554/live`)은 설정돼 있으나 접속 시간 초과. 폰 앱 서버 실행·같은 Wi-Fi·IP 변경 여부 확인 필요 |
 | 시뮬레이터 (headless) | ✅ `sim.launch.py gazebo_gui:=false launch_rviz:=false` 후 `check_sim_week2.py` 통과: 지정 이동, 늦은 스폰 흡착, 분리 낙하, 0.099 m 들어올림. 서비스가 뜬 직후(약 16초)에 호출하면 첫 계획이 OMPL `Unable to solve` 로 실패, 40초 기다린 뒤에는 첫 시도 성공 |
-| 확인 ① 화면 | ⬜ Gazebo·RViz 창을 띄워 Plan & Execute 로 팔이 움직이는지 사람이 직접 봐야 함 |
-| 폰 영상 수신 | ⬜ 폰 앱 서버를 켠 뒤 `check_environment.py` 재실행, `scripts/live_view.py` 로 프레임 확인 |
+| 확인 ① 화면 | ✅ Gazebo·RViz 창에서 Plan & Execute 로 팔 이동 확인. 처음엔 RViz 가 아예 안 떴음: `sim.launch.py` 가 UR 시뮬 include 에 넘긴 `launch_rviz:=false` 가 바깥까지 새어 MoveIt 쪽 RViz 도 꺼짐 → include 를 `GroupAction(scoped=True)` 로 감싸 수정 |
+| 폰 영상 수신 | ➖ 폰은 가영 PC 에서만 연결하기로 함 (위 팀원 3 기록). 이 PC 의 `check_environment.py` FAIL 1 은 이 항목 |
 
 ### 현재 PC 남은 작업
 
@@ -350,18 +351,21 @@ python scripts/live_view.py
 
 | 단계 | 팀원 1 (동경) | 팀원 2 (성민) | 팀원 3 (가영) |
 |---|---|---|---|
-| 1. WSL 메모리 | | | |
-| 2. 폰 카메라 앱 | | | ✅ 11-16 아이폰 RTSP |
-| 3. conda 끄기 | | | |
-| 4. ROS2 Jazzy | | | |
-| 5. Python·venv | | | |
-| 6. rosdep | | | |
-| 7. 빌드·테스트 | | | |
-| 8. 확인 ① | | | |
-| 9. 폰 영상 수신 | | | ✅ 11-16 USB 핫스팟 |
+| 1. WSL 메모리 | ✅ 11-16 9.7GiB / swap 8GiB | | ✅ 9.7GiB / swap 8GiB |
+| 2. 폰 카메라 앱 | 해당 없음 | 해당 없음 | ✅ 11-16 아이폰 RTSP |
+| 3. conda 끄기 | ✅ 11-16 | | ✅ |
+| 4. ROS2 Jazzy | ✅ 11-16 talker/listener | ✅ 11-16 보고 (ROS·Gazebo·MoveIt 정상) | ✅ |
+| 5. Python·venv | ✅ 11-16 | ✅ 11-16 보고 | ✅ Python 3.12.3 |
+| 6. rosdep | ✅ 11-16 `rosdep check` 충족 | ✅ 11-16 보고 | ✅ |
+| 7. 빌드·테스트 | ✅ 11-16 빌드 성공, 55개 통과 (보고 기준) | ✅ 11-16 재점검: 빌드 성공, 65개 통과 (보고 기준) | ✅ 11-16 최신 `main`(작업 시트 ROI·RViz 수정 포함) 68개 통과 (ChArUco 머지 전 55, 직후 62) |
+| 8. 확인 ① | ✅ 11-16 Gazebo·RViz 화면 Plan & Execute로 팔 이동 확인 (headless `check_sim_week2.py`도 통과) | ⚠️ 11-13 UR 기본 예제 Plan & Execute 확인. 프로젝트 `sim.launch.py` 화면 확인 남음 | |
+| 9. 폰 영상 수신 | 해당 없음 (`check_environment.py` FAIL 1은 카메라 접속) | 해당 없음 (`check_environment.py` FAIL 1은 카메라 접속) | ✅ 11-16 USB 핫스팟 |
 | 10. 기록 | | | |
 
-환경 설치가 끝나면 1주차 나머지 일(폰 고정, 체커보드 캘리브레이션, 격자 호모그래피, 로봇 좌표계 정의)로 넘어갑니다 (PROJECT.md 8장).
+폰 카메라는 가영 PC에서만 연결하기로 했다 (동경 11-16 전달). 그래서 동경·성민 PC의 2·9단계는 해당 없음이다. 두 PC의 `check_environment.py` FAIL 1은 `camera_url`(`172.20.10.1`, 가영 PC의 아이폰 USB 핫스팟 주소)에 접속할 수 없어서 생기며 환경 문제가 아니다. 다른 PC에서 폰 영상이 필요해지면 그 PC에 아이폰을 USB 핫스팟으로 연결하거나 자기 폰 앱 주소로 `camera_url`을 바꾼다(바꾼 주소는 커밋하지 않음).
+테스트 수는 같은 날에도 코드 버전에 따라 다르다: 55개(ChArUco 머지 전), 62개(머지 직후), 68개(작업 시트 ROI `bf7c306`·RViz 수정 `b0d63a7` 포함, 가영 PC 재실행). 성민 보고 65개는 어느 버전인지 미확인.
+
+환경 설치가 끝나면 1주차 나머지 일(폰 고정, ChArUco 캘리브레이션, 작업 시트 호모그래피)로 넘어갑니다 (PROJECT.md 8장).
 
 ## 현재 설치 상태 (2026-11-10)
 

@@ -11,14 +11,23 @@ from vision_pick_place.vision_detector import classify_part, find_objects, norma
 
 def process_frame(frame, calibrator, seq, t_capture, *, blur_ksize=5, threshold=-1,
                   min_area_px=500, nut_max_aspect=1.5, segmentation_mode='gray',
-                  hsv_max_saturation=70, hsv_max_dark_value=70, close_ksize=0, open_ksize=0):
+                  hsv_max_saturation=70, hsv_max_dark_value=70, close_ksize=0, open_ksize=0,
+                  roi_mask=None):
+    """roi_mask: 원본 영상 크기의 uint8 마스크(255 = 검출할 곳, workspace_roi.sheet_roi_mask). None 이면 영상 전체."""
     if calibrator.image_size is not None and calibrator.image_size != (frame.shape[1], frame.shape[0]):
         raise ValueError('입력 영상과 보정 사진의 해상도가 다릅니다. 같은 해상도로 다시 보정하세요.')
     mask = preprocess(frame, blur_ksize, threshold, segmentation_mode=segmentation_mode,
                       hsv_max_saturation=hsv_max_saturation, hsv_max_dark_value=hsv_max_dark_value,
                       close_ksize=close_ksize, open_ksize=open_ksize)
-    detections = find_objects(mask, min_area_px)
     debug = frame.copy()
+    if roi_mask is not None:
+        if roi_mask.shape != mask.shape:
+            raise ValueError('ROI 마스크와 입력 영상의 크기가 다릅니다.')
+        mask = cv2.bitwise_and(mask, roi_mask)
+        # 검출 영역 경계를 노란 선으로 표시 (GUI 에서 시트·마커 제외 영역이 맞게 잡혔는지 확인용)
+        outline, _ = cv2.findContours(roi_mask, cv2.RETR_LIST, cv2.CHAIN_APPROX_SIMPLE)
+        cv2.drawContours(debug, outline, -1, (0, 220, 255), 1)
+    detections = find_objects(mask, min_area_px)
     objects = []
     for index, det in enumerate(detections):
         part_type = classify_part(det, nut_max_aspect)

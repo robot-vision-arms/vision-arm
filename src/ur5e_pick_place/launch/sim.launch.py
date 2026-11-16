@@ -13,7 +13,7 @@ import os
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import AppendEnvironmentVariable, DeclareLaunchArgument, IncludeLaunchDescription
+from launch.actions import AppendEnvironmentVariable, DeclareLaunchArgument, GroupAction, IncludeLaunchDescription
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -27,6 +27,8 @@ def generate_launch_description():
     with open(params_file) as f:
         p = yaml.safe_load(f)['pick_place_node']['ros__parameters']
 
+    # GroupAction(scoped=True) 로 감싸야 한다. IncludeLaunchDescription 에 넘긴 인자는 바깥 설정까지 덮어써서,
+    # 감싸지 않으면 아래 launch_rviz:='false' 가 새어 나와 MoveIt 쪽 RViz 도 뜨지 않는다 (2026-11-16 확인).
     ur_sim = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(get_package_share_directory('ur_simulation_gz'), 'launch', 'ur_sim_control.launch.py')),
@@ -62,7 +64,7 @@ def generate_launch_description():
         DeclareLaunchArgument('gazebo_gui', default_value='true', description='false 면 Gazebo 창 없이 서버만'),
         DeclareLaunchArgument('launch_rviz', default_value='true', description='RViz 실행 여부'),
         AppendEnvironmentVariable('GZ_SIM_RESOURCE_PATH', os.path.join(share, 'models')),
-        ur_sim,
+        GroupAction([ur_sim], scoped=True),
         moveit,
         bridge,
         work_plane_tf,

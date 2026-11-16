@@ -157,3 +157,20 @@ ros2 launch ur5e_pick_place sim.launch.py
 ### 팀원 2 후속 자동 검증 (2026-11-13)
 
 최신 코드 재빌드와 35개 테스트를 이 PC에서 통과했다. 실행 중 장면에서 매트·두 상자 좌표와 로봇·흡착 패드를 확인했고 프로젝트 지정 이동 및 흡착·해제는 재시도에서 성공했다. 최초 이동 계획 실패와 GUI·실측 자료 미검증은 구분해서 남겼다. 자세한 결과·재현 명령·미완료 항목은 [TEAM2_PROGRESS.md](TEAM2_PROGRESS.md)를 따른다. 이전 체크리스트의 장면·좌표 항목은 자동 확인했으며 GUI 직접 확인은 여전히 남아 있다.
+
+## 9. 캘리브레이션을 ArUco 기반으로 변경 (2026-11-16, 팀원 1 동경)
+
+체커보드·모눈종이 방식을 ChArUco 보드·ArUco 작업 시트로 바꿉니다. 출력 파일(`intrinsics.npz`, `homography.npz`)의 형식은 그대로라 `calibrator.py` 와 그 뒤 코드는 바뀌지 않습니다.
+
+| 단계 | 기존 | 변경 | 이유 |
+|---|---|---|---|
+| 렌즈 왜곡 보정 (과제 필수) | 체커보드 15~20장 | **ChArUco 보드** 15~20장 (`data/calib/charuco_board_A4.pdf`) | 보드 일부가 가려지거나 화면 밖이어도 보이는 코너만으로 계산된다 → 왜곡이 큰 화면 가장자리까지 덮어 찍기 쉽다. 체커보드는 전체가 보여야 인식됨 |
+| px → mm | 모눈종이 + 교차점 px 좌표를 손으로 찍은 CSV | **작업 시트**(`data/calib/work_sheet_A4.pdf`) 네 귀퉁이 ArUco 마커 (ID 40~43) | 꼭짓점 16개를 서브픽셀로 자동 검출. 손 클릭 오차가 없고, 폰이 움직여도 명령 한 번으로 재계산 |
+| 좌표계 원점·축 | 종이에 손으로 표시 | 시트 왼쪽 아래 모서리, 인쇄된 화살표 | 마커 mm 위치가 인쇄로 정해져 실측이 필요 없다. Gazebo `work_mat`(A4) 과 원점·크기가 같다 |
+
+- 왜곡 보정을 빼고 마커 4개만 쓰는 안도 검토했지만, 과제 필수 항목이고 마커가 왜곡이 가장 큰 귀퉁이에 놓이므로 **두 단계 모두 유지**한다.
+- 기존 체커보드(`--board chessboard`)와 CSV(`--points`) 방식도 스크립트 옵션으로 남겨 두었다.
+- OpenCV 4.6(apt) 의 옛 aruco API 와 4.7+ 새 API 를 모두 지원한다. ChArUco 행 수를 홀수(5)로 둔 것은 OpenCV 4.8 의 짝수 행 보드 무늬 변경을 피하기 위해서다.
+- 사용법: `PYTHONPATH=src/vision_pick_place python scripts/make_calib_sheets.py` 로 PDF 생성 → A4 가로 100% 인쇄 → `scripts/calibrate_camera.py --images data/calib/charuco` → `scripts/compute_homography.py --aruco --image data/calib/sheet.png`.
+- 검증 상태: 합성 이미지 테스트 7개 추가 (`test_aruco_calib.py`, 전체 42개 통과). PDF 를 렌더링한 이미지에서 마커 4개·보드 코너 24개 검출 확인. **실제 인쇄·폰 촬영은 미실시.**
+- 후속 과제: 작업 시트 마커(검은 사각형)가 카메라에 보이므로 `vision_detector` 가 마커를 부품으로 검출할 수 있다. 호모그래피로 마커 영역을 마스크하거나 검출 ROI 를 시트 안쪽으로 제한해야 한다 (검출 담당과 협의).

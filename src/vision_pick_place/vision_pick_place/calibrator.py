@@ -102,6 +102,31 @@ class Calibrator:
             raise ValueError('변환 결과가 유한하지 않습니다.')
         return result
 
+    def mm_to_px(self, pts_mm: np.ndarray) -> np.ndarray:
+        """(N, 2) 작업 평면 mm → (N, 2) 원본 픽셀. px_to_mm 의 역변환 (H 역행렬 → 렌즈 왜곡 다시 적용).
+
+        작업 영역(ROI)·마커 위치를 원본 영상 위에 그리거나 마스크로 만들 때 쓴다.
+        """
+        if not self.status.ready:
+            raise RuntimeError('내부 파라미터와 호모그래피가 모두 필요합니다.')
+        points = _as_points(pts_mm)
+        if not np.isfinite(points).all():
+            raise ValueError('mm 좌표는 유한한 값이어야 합니다.')
+        if not len(points):
+            return points
+        homogeneous = np.column_stack((points, np.ones(len(points)))) @ np.linalg.inv(self.H).T
+        if np.any(np.abs(homogeneous[:, 2]) < 1e-12):
+            raise ValueError('호모그래피로 변환할 수 없는 점입니다.')
+        undistorted = homogeneous[:, :2] / homogeneous[:, 2:3]
+        # 왜곡 보정된 픽셀 → 정규화 좌표(z=1 인 카메라 광선) → 렌즈 왜곡을 넣어 다시 투영 = 원본 픽셀
+        rays = np.column_stack((undistorted, np.ones(len(undistorted)))) @ np.linalg.inv(self.camera_matrix).T
+        projected, _ = cv2.projectPoints(rays.reshape(-1, 1, 3), np.zeros(3), np.zeros(3),
+                                         self.camera_matrix, self.dist_coeffs)
+        result = projected.reshape(-1, 2)
+        if not np.isfinite(result).all():
+            raise ValueError('변환 결과가 유한하지 않습니다.')
+        return result
+
 
 def _as_points(pts_px) -> np.ndarray:
     """리스트·튜플·(2,) 도 받아서 (N, 2) float64 로 맞춘다. OpenCV 는 정수 배열이나 (N, 2) 모양을 거부한다."""
