@@ -259,6 +259,20 @@ Gazebo는 headless로 검증했다. GUI 화면·RViz 조작은 직접 확인하�
 | 작업 시트 마커 마스크 / 검출 ROI | 작업 시트 귀퉁이 ArUco 마커(검은 사각형)가 `vision_detector` 에 부품으로 잡히지 않게 한다. 호모그래피 역변환으로 마커 영역(mm 위치는 `aruco_calib.SHEET_MARKERS`)을 이미지에서 가리거나, 검출 ROI 를 시트 안쪽으로 제한 | 시트만 찍은 사진에서 검출 0개, 시트 위 부품 사진에서 마커 오검출 0개. 테스트 추가. 검출 로직(성민)과 인터페이스만 맞춘다 |
 |  ↳ 11-16 진행 | 구현: `workspace_roi.py` (시트 안쪽 − 마커 영역 마스크), `Calibrator.mm_to_px`, `process_frame(roi_mask=...)`, `vision_node` 파라미터 `sheet_roi`·`sheet_edge_margin_mm`(3)·`sheet_marker_margin_mm`(5). 디버그 영상에 노란 경계선 | 합성 사진 테스트 6개 통과: ROI 없이는 마커 4개·시트 밖 물체 오검출 → ROI 적용 시 0개, 시트 위 나사·너트는 mm 오차 1 mm 미만·각도 1.5° 미만. **실제 촬영으로 여백 조정 남음** |
 
+### 2주차 보강: 지정 좌표 이동 재시도 (11-16)
+
+시뮬레이터를 막 띄운 직후 `/sim/move_to_target` 을 부르면 OMPL 이 가끔 `Unable to solve the planning problem` 으로 실패했다 (11-16 띄운 직후 3~16초에 부른 7번 중 2번 실패).
+
+| 바꾼 것 | 내용 |
+|---|---|
+| 계획 실패 시 다시 시도 | `plan_attempts`(3), `plan_retry_delay_s`(2초). MoveIt 이 IDLE(실행 중 아님)이고 실패 코드가 계획 실패일 때만. Jazzy OMPL 은 계획 실패를 `PLANNING_FAILED` 가 아니라 범용 `FAILURE`(99999) 로 돌려줘서 이것도 포함 (`move_group` 로그로 확인). `CONTROL_FAILED`·`NO_IK_SOLUTION` 은 다시 해도 같으므로 제외 |
+| 관절 상태 대기 | 첫 이동 전에 `/joint_states` 를 최대 `joint_state_wait_s`(10초) 기다림 |
+| 계획 시간 파라미터 | 고정 5초 → `planning_time_s`(5초) |
+| 실패 메시지 | `error_code` 와 pymoveit2 실패 이유를 같이 표시 |
+
+확인: `planning_time_s` 를 0.0001초로 낮춰 매번 실패시키면 코드 99999 → 2/3, 3/3 재시도 → 실패 보고, 5초로 되돌리면 노드 재시작 없이 바로 성공. 서비스가 뜬 뒤 10초에 `check_sim_week2.py` 전체 통과. colcon 68개 통과.
+자연 발생 실패가 재시도로 풀리는 장면은 이번 실행에서 다시 나오지 않아 아직 직접 보지 못했다.
+
 ### 3주차: GUI (`gui/main_window.py`, `gui/ros_worker.py`)
 
 현재 두 파일은 뼈대(TODO)만 있다. 과제 필수 4화면 (PROJECT.md 2.2):

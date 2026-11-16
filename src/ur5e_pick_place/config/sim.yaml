@@ -31,3 +31,7 @@ pick_place_node:
     target_angle_deg: 0.0
     target_height_m: 0.25         # 이동 확인용 작업면 → 패드 끝 높이. tool0에는 tool_length_m을 더함
     motion_timeout_s: 30.0
+    planning_time_s: 5.0           # OMPL 이 길을 찾는 최대 시간 (시도 1번당)
+    plan_attempts: 3               # 계획만 실패했을 때(로봇은 안 움직임) 최대 시도 횟수. 1 이면 다시 시도 안 함
+    plan_retry_delay_s: 2.0        # 다시 시도 전 쉬는 시간
+    joint_state_wait_s: 10.0       # 첫 이동 전에 /joint_states 를 기다리는 최대 시간
