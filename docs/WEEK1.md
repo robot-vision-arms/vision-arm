@@ -60,10 +60,19 @@ source /home/user1/mini_projects3/vision-arm/env.sh
 |---|---|
 | WSL 메모리 | 2026-11-13 점검 때 `.wslconfig` 가 없어져 7.6 GiB / swap 2 GiB 로 돌아가 있었음. 10GB / swap 8GB 로 다시 작성. `wsl --shutdown` 후 `free -h` 확인 필요 |
 | Conda / ROS / venv | Conda 자동 활성화 꺼짐, Jazzy / Python 3.12.3 .venv 사용 |
-| 테스트 | 7개 중 3개 통과, 4개 skipped, 실패 0 |
+| 테스트 | 2026-11-13 재확인: `colcon build` 2 packages, `colcon test` 7개 중 실패 0 / skipped 4. `rosdep check` 의존성 모두 충족. `check_environment.py` OK 60 / FAIL 1 (camera_url 미설정) |
 | 시뮬레이터 | 드라이버 설치 완료. 기본 예제 MoveIt 초기화·컨트롤러 활성화 확인. URDF/SRDF 이름 불일치 해결 및 실제 동작 검증 필요 |
 | 카메라 | 웹캠 없음. 스마트폰 IP 카메라로 진행: 2·9단계 필요 |
 | 데이터 | `data/mvtec_screws`에 이미지 384장 및 어노테이션 복사 완료 |
+
+### 2026-11-13 재시작 후 이어서 할 일 (팀원 1 동경)
+
+`.wslconfig` 적용을 위해 `wsl --shutdown` 으로 끊은 지점입니다. 다시 접속하면 아래 순서대로 진행합니다.
+
+1. `free -h` → Mem total 9 GB 이상, Swap 8 GB 확인 (재시작 전 7.6 GiB / 2 GiB)
+2. 확인 ① (8-3단계): `source ~/vision-arm/env.sh && ros2 launch ur5e_pick_place sim.launch.py` → Gazebo 에 UR5e, RViz Plan & Execute 로 팔이 움직이는지 직접 봄
+3. 폰 IP 카메라 주소를 `params.yaml` 의 `camera_url` 에 넣고 9단계 확인 (점검 스크립트의 남은 FAIL 1개)
+4. 결과를 아래 "팀원별 진행 체크" 표와 10단계 기록 위치에 적고, 1주차 캘리브레이션(PROJECT.md 2.3 팀원 1)으로 넘어감
 
 ### 현재 PC 남은 작업
 

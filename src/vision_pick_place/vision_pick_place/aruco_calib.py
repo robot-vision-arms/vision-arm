@@ -97,18 +97,25 @@ def detect_charuco(gray: np.ndarray, board=None):
 
 def calibrate_charuco(all_corners: list, all_ids: list, image_size: tuple, board=None):
     """(rms, camera_matrix, dist_coeffs). image_size = (너비, 높이)."""
+    rms, matrix, distortion, _ = calibrate_charuco_extended(all_corners, all_ids, image_size, board)
+    return rms, matrix, distortion
+
+
+def calibrate_charuco_extended(all_corners: list, all_ids: list, image_size: tuple, board=None):
+    """(rms, camera_matrix, dist_coeffs, 사진별 재투영 오차 (N,) px). 유독 큰 사진은 빼고 다시 돌려 볼 후보."""
     board = board or charuco_board()
-    if hasattr(cv2.aruco, 'calibrateCameraCharuco'):
-        rms, matrix, distortion, _, _ = cv2.aruco.calibrateCameraCharuco(
+    if hasattr(cv2.aruco, 'calibrateCameraCharucoExtended'):
+        rms, matrix, distortion, _, _, _, _, per_view = cv2.aruco.calibrateCameraCharucoExtended(
             all_corners, all_ids, board, image_size, None, None)
-        return rms, matrix, distortion
+        return rms, matrix, distortion, np.asarray(per_view).reshape(-1)
     object_points, image_points = [], []
     for corners, ids in zip(all_corners, all_ids):
         obj, img = board.matchImagePoints(corners, ids)
         object_points.append(obj)
         image_points.append(img)
-    rms, matrix, distortion, _, _ = cv2.calibrateCamera(object_points, image_points, image_size, None, None)
-    return rms, matrix, distortion
+    rms, matrix, distortion, _, _, _, _, per_view = cv2.calibrateCameraExtended(
+        object_points, image_points, image_size, None, None)
+    return rms, matrix, distortion, np.asarray(per_view).reshape(-1)
 
 
 # ---------- 작업 시트 (px → mm 호모그래피) ----------
@@ -147,12 +154,8 @@ def render_sheet(px_per_mm: float, grid_mm: float = 10.0, grid_gray: int = 220) 
     return image
 
 
-def sheet_homography(gray: np.ndarray, camera_matrix=None, dist_coeffs=None, min_markers: int = 3):
-    """작업 시트 사진 → (H, rms_mm, 찾은 ID 목록). H 는 (왜곡 보정된) px → 시트 mm.
-
-    마커당 꼭짓점 4개를 모두 쓰므로 마커 4개면 기준점 16개다. camera_matrix 가 있으면 꼭짓점을 먼저 왜곡 보정한다
-    (calibrator.Calibrator.px_to_mm 과 같은 순서).
-    """
+def sheet_points(gray: np.ndarray, min_markers: int = 3):
+    """작업 시트 사진 → (원본 px (N, 2), 시트 mm (N, 2), 찾은 ID 목록). 마커당 꼭짓점 4개, 왜곡 보정 전 좌표."""
     corners, ids = detect_markers(gray)
     found = [] if ids is None else [int(i) for i in ids]
     pixels, millimeters, used = [], [], []
@@ -164,8 +167,18 @@ def sheet_homography(gray: np.ndarray, camera_matrix=None, dist_coeffs=None, min
     if len(used) < min_markers:
         raise ValueError(f'작업 시트 마커가 {len(used)}개만 보입니다 (필요 {min_markers}개 이상, '
                          f'찾은 ID {sorted(found)}). 네 귀퉁이가 모두 화면에 들어오게 하세요.')
-    pixels = np.concatenate(pixels)
-    millimeters = np.concatenate(millimeters)
+    order = np.argsort(used, kind='stable')  # ID 순으로 정렬해 출력·디버그 그림 순서를 일정하게
+    return (np.concatenate([pixels[i] for i in order]), np.concatenate([millimeters[i] for i in order]),
+            sorted(used))
+
+
+def sheet_homography(gray: np.ndarray, camera_matrix=None, dist_coeffs=None, min_markers: int = 3):
+    """작업 시트 사진 → (H, rms_mm, 찾은 ID 목록). H 는 (왜곡 보정된) px → 시트 mm.
+
+    마커당 꼭짓점 4개를 모두 쓰므로 마커 4개면 기준점 16개다. camera_matrix 가 있으면 꼭짓점을 먼저 왜곡 보정한다
+    (calibrator.Calibrator.px_to_mm 과 같은 순서).
+    """
+    pixels, millimeters, used = sheet_points(gray, min_markers)
     if camera_matrix is not None:
         pixels = cv2.undistortPoints(pixels.reshape(-1, 1, 2), camera_matrix, dist_coeffs,
                                      P=camera_matrix).reshape(-1, 2)
@@ -174,4 +187,4 @@ def sheet_homography(gray: np.ndarray, camera_matrix=None, dist_coeffs=None, min
         raise ValueError('호모그래피를 계산할 수 없습니다.')
     projected = cv2.perspectiveTransform(pixels.reshape(-1, 1, 2), H).reshape(-1, 2)
     rms = float(np.sqrt(np.mean(np.sum((projected - millimeters) ** 2, axis=1))))
-    return H, rms, sorted(used)
+    return H, rms, used
