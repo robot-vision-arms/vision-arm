@@ -288,6 +288,19 @@ python -c "import cv2; c=cv2.VideoCapture('<camera_url>'); ok,f=c.read(); print(
 
 보유 MVTec 사진에는 실제 mm 정답이 없으므로 위치 KPI를 대신하지 않습니다.
 
+### 실시간 뷰어로 폰 영상 보기
+
+폰 앱 스트리밍을 켠 상태에서 VS Code 터미널(WSL)에서 실행합니다.
+
+```bash
+source /home/user1/mini_projects3/vision-arm/env.sh
+python scripts/live_view.py
+```
+
+- 키: `s` 현재 화면 저장(`data/captures/`), `r` 90° 회전 전환, `q`/ESC 종료
+- 기본 주소는 `rtsp://172.20.10.1:8554/live` (아이폰 USB 개인용 핫스팟). 다른 주소는 `python scripts/live_view.py <영상주소> [저장폴더]`
+- `Connection refused` 가 나오면 폰 앱 스트리밍이 꺼진 것입니다. 앱을 화면에 띄운 채 다시 시작합니다.
+
 ## 10. 결과 기록
 
 설치가 끝나면 아래를 채웁니다. 팀원 3명의 값이 다르면 그 차이가 나중에 "내 PC 에서는 되는데" 문제의 원인이 됩니다.
