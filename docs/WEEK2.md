@@ -26,11 +26,12 @@
 
 | 항목 | 결과 |
 |---|---|
-| 빌드·테스트 | `0af3e57`에서 **55 tests** 통과. 동경 ChArUco 보정 PR #1 머지 후 `main`에서 다시 실행해 **62 tests, 0 errors, 0 failures, 0 skipped** (vision_pick_place 54, ur5e_pick_place 8) |
+| 빌드·테스트 | `0af3e57`에서 **55 tests** 통과. ChArUco 보정 PR #1 머지 후 62 tests, 작업 시트 ROI(`bf7c306`)·RViz 수정(`b0d63a7`) 머지 후 **68 tests, 0 errors, 0 failures, 0 skipped** (vision_pick_place 60, ur5e_pick_place 8) |
 | 실제 폰 영상으로 `vision_node` 실행 | `params.yaml`(아이폰 RTSP `rtsp://172.20.10.1:8554/live`)로 실행. 시작 시 "미보정: px만 발행" 경고는 보정 파일이 없어서 정상 |
 | `/vision/detections` | JSON 수신. `calib_ok: false`, 물체별 `part_type`·`u_px`·`v_px` 발행, `x_mm`·`y_mm`·`angle_deg`는 `null` |
 | `/vision/debug_image` | 1280×720 영상에 검출 박스·라벨 표시 확인 |
 | 발행 주기 | `ros2 topic hz`: 평균 9.998Hz (설정 10Hz). 측정 중 한 번 약 5.3초 공백 → 폰 스트림 일시 끊김 후 재접속으로 추정 (읽기 타임아웃 5초). 노드 오류 로그는 없음 |
+| 작업 시트 ROI 영향 | `bf7c306`의 `sheet_roi`는 보정 파일이 있을 때만 적용된다. 미보정인 현재 폰 실행 결과(영상 전체 검출)에는 영향 없음 (코드 확인) |
 | 제약 | 폰이 어두운 면을 비추고 있어 밝기 차이로 인한 오검출만 나왔다. 실제 부품 검출·분류 정확도, mm·각도는 미확인 |
 | 남은 일 | 흰 종이 위 대체 물체(둥근 것·길쭉한 것)로 검출·분류 확인, 스트림 끊김 시 재접속 동작 점검, 동경 보정 완료 후 mm·각도 발행 확인 |
 
