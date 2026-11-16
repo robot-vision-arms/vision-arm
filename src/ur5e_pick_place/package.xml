@@ -17,6 +17,8 @@
   <exec_depend>launch</exec_depend>
   <exec_depend>launch_ros</exec_depend>
   <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
 
   <!-- UR5e 모델·컨트롤러·Gazebo Harmonic 연동 (Jazzy 는 Gazebo Classic 이 없어 ur_simulation_gazebo 가 아닌 ur_simulation_gz) -->
   <exec_depend>ur_description</exec_depend>

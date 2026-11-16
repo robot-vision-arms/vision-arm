@@ -266,6 +266,35 @@ Gazebo는 headless로 검증했다. GUI 화면·RViz 조작은 직접 확인하�
 | 작업 시트 마커 마스크 / 검출 ROI | 작업 시트 귀퉁이 ArUco 마커(검은 사각형)가 `vision_detector` 에 부품으로 잡히지 않게 한다. 호모그래피 역변환으로 마커 영역(mm 위치는 `aruco_calib.SHEET_MARKERS`)을 이미지에서 가리거나, 검출 ROI 를 시트 안쪽으로 제한 | 시트만 찍은 사진에서 검출 0개, 시트 위 부품 사진에서 마커 오검출 0개. 테스트 추가. 검출 로직(성민)과 인터페이스만 맞춘다 |
 |  ↳ 11-16 진행 | 구현: `workspace_roi.py` (시트 안쪽 − 마커 영역 마스크), `Calibrator.mm_to_px`, `process_frame(roi_mask=...)`, `vision_node` 파라미터 `sheet_roi`·`sheet_edge_margin_mm`(3)·`sheet_marker_margin_mm`(5). 디버그 영상에 노란 경계선 | 합성 사진 테스트 6개 통과: ROI 없이는 마커 4개·시트 밖 물체 오검출 → ROI 적용 시 0개, 시트 위 나사·너트는 mm 오차 1 mm 미만·각도 1.5° 미만. **실제 촬영으로 여백 조정 남음** |
 
+### 2주차 보강: 지정 좌표 이동 재시도 (11-16)
+
+시뮬레이터를 막 띄운 직후 `/sim/move_to_target` 을 부르면 OMPL 이 가끔 `Unable to solve the planning problem` 으로 실패했다 (11-16 띄운 직후 3~16초에 부른 7번 중 2번 실패).
+
+| 바꾼 것 | 내용 |
+|---|---|
+| 계획 실패 시 다시 시도 | `plan_attempts`(3), `plan_retry_delay_s`(2초). MoveIt 이 IDLE(실행 중 아님)이고 실패 코드가 계획 실패일 때만. Jazzy OMPL 은 계획 실패를 `PLANNING_FAILED` 가 아니라 범용 `FAILURE`(99999) 로 돌려줘서 이것도 포함 (`move_group` 로그로 확인). `CONTROL_FAILED`·`NO_IK_SOLUTION` 은 다시 해도 같으므로 제외 |
+| 관절 상태 대기 | 첫 이동 전에 `/joint_states` 를 최대 `joint_state_wait_s`(10초) 기다림 |
+| 계획 시간 파라미터 | 고정 5초 → `planning_time_s`(5초) |
+| 실패 메시지 | `error_code` 와 pymoveit2 실패 이유를 같이 표시 |
+
+확인: `planning_time_s` 를 0.0001초로 낮춰 매번 실패시키면 코드 99999 → 2/3, 3/3 재시도 → 실패 보고, 5초로 되돌리면 노드 재시작 없이 바로 성공. 서비스가 뜬 뒤 10초에 `check_sim_week2.py` 전체 통과. colcon 68개 통과.
+자연 발생 실패도 재시도로 풀리는 것을 확인했다 (아래 충돌 물체 확인 중 첫 호출: 99999 실패 → 2초 뒤 2/3 에서 성공).
+같은 확인 중 `INVALID_MOTION_PLAN`(-2) 도 나왔다. 찾은 경로를 MoveIt 이 다시 검사했더니 중간에 `forearm_link` 와 `vacuum_pad` 가 닿아서 실행하지 않고 버린 경우로, 로봇은 안 움직였으므로 재시도 대상에 추가했다.
+
+### 2주차 보강: 상자·바닥을 MoveIt 충돌 물체로 등록 (11-16)
+
+MoveIt 은 Gazebo world 파일을 읽지 않아서, 그대로 두면 상자 벽을 뚫고 가는 경로를 계획할 수 있다 (RViz 에도 상자가 안 보였다).
+`ur5e_pick_place/workcell_scene.py` 가 `worlds/workcell.sdf` 의 static 모델 충돌(box·plane) 을 읽고, `pick_place_node` 가 시작할 때 move_group 이 `/collision_object` 를 구독하면 등록한다.
+크기·위치를 코드에 따로 적지 않으므로 **sdf 에서 상자를 옮기거나 늘리면 MoveIt 에도 자동 반영**된다. 바닥 plane 은 윗면이 z=0 보다 2 mm 아래인 2 cm 판으로 바꾼다 (z=0 에 맞추면 로봇 베이스가 시작부터 충돌로 잡힘). `work_mat` 은 충돌 없는 표시용이라 빠진다.
+
+| 확인 (나사 상자, base (0, 0.45)) | 결과 |
+|---|---|
+| `/get_planning_scene` | 충돌 물체 11개 (상자 2 × 바닥·벽 4 + 바닥 판) |
+| 상자 위 15 cm / 상자 안쪽 가운데 바닥 위 2 cm | 둘 다 성공 (시도 1회) |
+| 패드 끝을 벽(`wall_px`) 속 1 cm 높이에 | 거부: `Unable to sample any valid states for goal tree` (목표 자세가 충돌) |
+
+colcon 72개 통과 (`test_workcell_scene.py` 4개 추가).
+
 ### 3주차: GUI (`gui/main_window.py`, `gui/ros_worker.py`)
 
 현재 두 파일은 뼈대(TODO)만 있다. 과제 필수 4화면 (PROJECT.md 2.2):
