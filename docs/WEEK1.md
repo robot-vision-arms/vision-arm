@@ -105,8 +105,8 @@ source ~/vision-arm/env.sh
 | ROS2 통신 | ✅ talker/listener 송수신 확인 |
 | `check_environment.py` | OK 62 / FAIL 1: `camera_url`(`rtsp://172.20.10.1:8554/live`)은 설정돼 있으나 접속 시간 초과. 폰 앱 서버 실행·같은 Wi-Fi·IP 변경 여부 확인 필요 |
 | 시뮬레이터 (headless) | ✅ `sim.launch.py gazebo_gui:=false launch_rviz:=false` 후 `check_sim_week2.py` 통과: 지정 이동, 늦은 스폰 흡착, 분리 낙하, 0.099 m 들어올림. 서비스가 뜬 직후(약 16초)에 호출하면 첫 계획이 OMPL `Unable to solve` 로 실패, 40초 기다린 뒤에는 첫 시도 성공 |
-| 확인 ① 화면 | ⬜ Gazebo·RViz 창을 띄워 Plan & Execute 로 팔이 움직이는지 사람이 직접 봐야 함 |
-| 폰 영상 수신 | ⬜ 폰 앱 서버를 켠 뒤 `check_environment.py` 재실행, `scripts/live_view.py` 로 프레임 확인 |
+| 확인 ① 화면 | ✅ Gazebo·RViz 창에서 Plan & Execute 로 팔 이동 확인. 처음엔 RViz 가 아예 안 떴음: `sim.launch.py` 가 UR 시뮬 include 에 넘긴 `launch_rviz:=false` 가 바깥까지 새어 MoveIt 쪽 RViz 도 꺼짐 → include 를 `GroupAction(scoped=True)` 로 감싸 수정 |
+| 폰 영상 수신 | ➖ 폰은 가영 PC 에서만 연결하기로 함 (위 팀원 3 기록). 이 PC 의 `check_environment.py` FAIL 1 은 이 항목 |
 
 ### 현재 PC 남은 작업
 
