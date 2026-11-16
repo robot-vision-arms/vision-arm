@@ -18,6 +18,7 @@ from vision_pick_place.calibrator import Calibrator
 from vision_pick_place.camera_stream import FrameSource
 from vision_pick_place.packet import encode
 from vision_pick_place.vision_pipeline import process_frame
+from vision_pick_place.workspace_roi import sheet_roi_mask
 
 
 class VisionNode(Node):
@@ -38,6 +39,9 @@ class VisionNode(Node):
         self.declare_parameter('min_area_px', 500)
         self.declare_parameter('nut_max_aspect', 1.5)
         self.declare_parameter('publish_rate_hz', 10.0)
+        self.declare_parameter('sheet_roi', True)
+        self.declare_parameter('sheet_edge_margin_mm', 3.0)
+        self.declare_parameter('sheet_marker_margin_mm', 5.0)
 
         self.pub_det = self.create_publisher(String, '/vision/detections', 10)
         self.pub_image = self.create_publisher(Image, '/vision/debug_image', 10)
@@ -53,6 +57,8 @@ class VisionNode(Node):
                                   image_dir=self.get_parameter('image_dir').value)
         if not self.calibrator.status.ready:
             self.get_logger().warning('미보정: px만 발행합니다. mm 좌표와 각도는 null입니다.')
+        self.roi_mask = None
+        self.roi_size = None  # ROI 는 보정·해상도가 정해지면 바뀌지 않으므로 첫 프레임에서 한 번만 만든다
         self.seq = 0
         self.timer = self.create_timer(1.0 / rate, self.on_timer)
 
@@ -66,7 +72,8 @@ class VisionNode(Node):
                    ('blur_ksize', 'threshold', 'min_area_px', 'nut_max_aspect', 'segmentation_mode',
                     'hsv_max_saturation', 'hsv_max_dark_value', 'close_ksize', 'open_ksize')}
         try:
-            packet, debug = process_frame(frame, self.calibrator, self.seq, t_capture, **options)
+            packet, debug = process_frame(frame, self.calibrator, self.seq, t_capture,
+                                          roi_mask=self.sheet_roi(frame), **options)
         except (ValueError, RuntimeError, cv2.error) as exc:
             self.get_logger().error(f'프레임 처리 실패: {exc}', throttle_duration_sec=5.0)
             return
@@ -76,6 +83,19 @@ class VisionNode(Node):
         image.header.frame_id = 'camera'
         self.pub_image.publish(image)
         self.seq += 1
+
+    def sheet_roi(self, frame):
+        """작업 시트 안쪽·마커 제외 마스크. 보정이 없거나 sheet_roi=false 면 None (영상 전체에서 검출)."""
+        if not self.get_parameter('sheet_roi').value or not self.calibrator.status.ready:
+            return None
+        size = (frame.shape[1], frame.shape[0])
+        if size != self.roi_size:
+            self.roi_mask = sheet_roi_mask(self.calibrator, size,
+                                           self.get_parameter('sheet_edge_margin_mm').value,
+                                           self.get_parameter('sheet_marker_margin_mm').value)
+            self.roi_size = size
+            self.get_logger().info(f'작업 시트 ROI 사용: 검출 영역 = 영상의 {int((self.roi_mask > 0).mean() * 100)}%')
+        return self.roi_mask
 
     def destroy_node(self):
         self.source.release()

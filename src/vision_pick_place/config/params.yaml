@@ -16,6 +16,9 @@ vision_node:
     min_area_px: 500             # 이보다 작은 윤곽선은 노이즈로 버림. 초기값, 실험으로 조정
     nut_max_aspect: 1.5          # 장축/단축 비가 이 이하면 너트, 넘으면 나사. 초기값, MVTec 비율 분포 보고 조정
     publish_rate_hz: 10.0
+    sheet_roi: true              # 보정됐을 때 작업 시트 안쪽만 검출 (귀퉁이 ArUco 마커·시트 밖 책상 제외). workspace_roi.py
+    sheet_edge_margin_mm: 3.0    # 시트 가장자리에서 안쪽으로 뺄 여백. 초기값, 실제 촬영으로 조정
+    sheet_marker_margin_mm: 5.0  # 마커 정사각형 바깥으로 더 뺄 여백. 초기값, 실제 촬영으로 조정
 
 robot_bridge:
   ros__parameters:

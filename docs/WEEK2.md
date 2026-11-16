@@ -242,6 +242,7 @@ Gazebo는 headless로 검증했다. GUI 화면·RViz 조작은 직접 확인하�
 |---|---|---|
 | 실제 캘리브레이션 | 11-17 촬영 예정. ChArUco 보드 15~20장 → `calibrate_camera.py`, 폰 고정 후 작업 시트 1장 → `compute_homography.py --aruco --debug-out` ([PR #1](https://github.com/robot-vision-arms/vision-arm/pull/1)) | `data/calib/intrinsics.npz`, `homography.npz` 생성. RMS(px), 시트 RMS·한 점씩 뺀 오차(mm)를 WEEK1에 기록 |
 | 작업 시트 마커 마스크 / 검출 ROI | 작업 시트 귀퉁이 ArUco 마커(검은 사각형)가 `vision_detector` 에 부품으로 잡히지 않게 한다. 호모그래피 역변환으로 마커 영역(mm 위치는 `aruco_calib.SHEET_MARKERS`)을 이미지에서 가리거나, 검출 ROI 를 시트 안쪽으로 제한 | 시트만 찍은 사진에서 검출 0개, 시트 위 부품 사진에서 마커 오검출 0개. 테스트 추가. 검출 로직(성민)과 인터페이스만 맞춘다 |
+|  ↳ 11-16 진행 | 구현: `workspace_roi.py` (시트 안쪽 − 마커 영역 마스크), `Calibrator.mm_to_px`, `process_frame(roi_mask=...)`, `vision_node` 파라미터 `sheet_roi`·`sheet_edge_margin_mm`(3)·`sheet_marker_margin_mm`(5). 디버그 영상에 노란 경계선 | 합성 사진 테스트 6개 통과: ROI 없이는 마커 4개·시트 밖 물체 오검출 → ROI 적용 시 0개, 시트 위 나사·너트는 mm 오차 1 mm 미만·각도 1.5° 미만. **실제 촬영으로 여백 조정 남음** |
 
 ### 3주차: GUI (`gui/main_window.py`, `gui/ros_worker.py`)
 
