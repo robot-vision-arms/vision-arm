@@ -30,6 +30,11 @@ class VisionNode(Node):
         self.declare_parameter('homography_path', 'data/calib/homography.npz')
         self.declare_parameter('blur_ksize', 5)
         self.declare_parameter('threshold', -1)
+        self.declare_parameter('segmentation_mode', 'gray')
+        self.declare_parameter('hsv_max_saturation', 70)
+        self.declare_parameter('hsv_max_dark_value', 70)
+        self.declare_parameter('close_ksize', 0)
+        self.declare_parameter('open_ksize', 0)
         self.declare_parameter('min_area_px', 500)
         self.declare_parameter('nut_max_aspect', 1.5)
         self.declare_parameter('publish_rate_hz', 10.0)
@@ -58,7 +63,8 @@ class VisionNode(Node):
             self.get_logger().warning('프레임을 읽지 못했습니다.', throttle_duration_sec=5.0)
             return
         options = {name: self.get_parameter(name).value for name in
-                   ('blur_ksize', 'threshold', 'min_area_px', 'nut_max_aspect')}
+                   ('blur_ksize', 'threshold', 'min_area_px', 'nut_max_aspect', 'segmentation_mode',
+                    'hsv_max_saturation', 'hsv_max_dark_value', 'close_ksize', 'open_ksize')}
         try:
             packet, debug = process_frame(frame, self.calibrator, self.seq, t_capture, **options)
         except (ValueError, RuntimeError, cv2.error) as exc:

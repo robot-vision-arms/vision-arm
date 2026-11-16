@@ -56,9 +56,13 @@ ros2 service call /sim/run_cycle std_srvs/srv/Trigger       # 터미널 4
 
 ## 상태
 
+전처리 단계별 변화를 직접 보려면 `source env.sh` 후 `python scripts/preview_steps.py`를 실행합니다.
+중간 영상·코드 비교, 파라미터 조절, 연산 끄기, 확대·축소와 단계 이미지 저장을 지원합니다.
+
 2026-11-13 기준 영상 입력·전처리, 검출·비율 분류, 보정 파일 생성·로딩과 px→mm 변환,
 ROS2 검출·디버그 영상 발행, 작업면→로봇 좌표·툴 자세 계산을 구현했습니다.
 Gazebo + MoveIt 지정 좌표 이동과 늦게 스폰한 부품의 attach→이동 추종→detach·낙하 시험을 통과했습니다.
-`colcon test` 결과는 35개 통과, 실패·오류·skip 0개입니다.
-MVTec test split의 정밀도 42.8%·재현율 63.4%이며, 실제 폰 보정·자체 촬영 데이터와 mm KPI는 아직 검증 전입니다.
+`colcon test` 결과는 47개 통과, 실패·오류·skip 0개입니다.
+MVTec 전용 색 기반 전처리로 test split의 정밀도 77.6%·재현율 83.4%를 확인했습니다.
+실제 폰 보정·자체 촬영 데이터와 mm KPI는 아직 검증 전입니다.
 전체 집기·분류 사이클, TCP·GUI·KPI 구현은 후속 작업입니다. 실행 방법과 한계는 [WEEK2.md](docs/WEEK2.md)에 기록했습니다.

@@ -19,7 +19,9 @@ from vision_pick_place.camera_stream import preprocess
 from vision_pick_place.vision_detector import angle_error_deg, find_objects
 
 
-def evaluate(annotations, images_dir, *, threshold=-1, blur_ksize=5, min_area_px=500, iou_threshold=0.5):
+def evaluate(annotations, images_dir, *, threshold=-1, blur_ksize=5, min_area_px=500, iou_threshold=0.5,
+             segmentation_mode='gray', hsv_max_saturation=70, hsv_max_dark_value=70,
+             close_ksize=0, open_ksize=0):
     by_image = defaultdict(list)
     for annotation in annotations['annotations']:
         by_image[annotation['image_id']].append(annotation)
@@ -30,7 +32,10 @@ def evaluate(annotations, images_dir, *, threshold=-1, blur_ksize=5, min_area_px
         frame = cv2.imread(str(path))
         if frame is None:
             raise ValueError(f'이미지를 읽지 못했습니다: {path}')
-        detections = find_objects(preprocess(frame, blur_ksize, threshold), min_area_px)
+        mask = preprocess(frame, blur_ksize, threshold, segmentation_mode=segmentation_mode,
+                          hsv_max_saturation=hsv_max_saturation, hsv_max_dark_value=hsv_max_dark_value,
+                          close_ksize=close_ksize, open_ksize=open_ksize)
+        detections = find_objects(mask, min_area_px)
         truth = []
         for annotation in by_image[record['id']]:
             row, col, width, height, phi = annotation['bbox']
@@ -61,13 +66,17 @@ def evaluate(annotations, images_dir, *, threshold=-1, blur_ksize=5, min_area_px
                 true_angle = rect[2] + (90 if height > width else 0)
                 angles.append(angle_error_deg(pred_angle, true_angle))
         tp += len(used_truth)
+    precision, recall = tp / predicted if predicted else 0, tp / expected if expected else 0
     return dict(images=len(annotations['images']), ground_truth=expected, predictions=predicted,
                 matched=tp, precision=tp / predicted if predicted else 0,
                 recall=tp / expected if expected else 0,
+                f1=2 * precision * recall / (precision + recall) if precision + recall else 0,
                 center_mae_px=float(np.mean(centers)) if centers else None,
                 angle_mae_deg=float(np.mean(angles)) if angles else None,
                 angle_samples=len(angles), iou_threshold=iou_threshold,
                 threshold=threshold, blur_ksize=blur_ksize, min_area_px=min_area_px,
+                segmentation_mode=segmentation_mode, hsv_max_saturation=hsv_max_saturation,
+                hsv_max_dark_value=hsv_max_dark_value, close_ksize=close_ksize, open_ksize=open_ksize,
                 matching='greedy rotated IoU; errors on matched objects only')
 
 
@@ -78,6 +87,11 @@ def main():
     parser.add_argument('--threshold', type=int, default=-1)
     parser.add_argument('--blur-ksize', type=int, default=5)
     parser.add_argument('--min-area-px', type=float, default=500)
+    parser.add_argument('--segmentation-mode', choices=['gray', 'metal_hsv'], default='gray')
+    parser.add_argument('--hsv-max-saturation', type=int, default=70)
+    parser.add_argument('--hsv-max-dark-value', type=int, default=70)
+    parser.add_argument('--close-ksize', type=int, default=0)
+    parser.add_argument('--open-ksize', type=int, default=0)
     parser.add_argument('--iou', type=float, default=0.5)
     parser.add_argument('--out')
     args = parser.parse_args()
@@ -86,7 +100,10 @@ def main():
     cv2.setNumThreads(1)
     report = evaluate(json.loads(Path(args.annotations).read_text()), args.images,
                       threshold=args.threshold, blur_ksize=args.blur_ksize,
-                      min_area_px=args.min_area_px, iou_threshold=args.iou)
+                      min_area_px=args.min_area_px, iou_threshold=args.iou,
+                      segmentation_mode=args.segmentation_mode, hsv_max_saturation=args.hsv_max_saturation,
+                      hsv_max_dark_value=args.hsv_max_dark_value, close_ksize=args.close_ksize,
+                      open_ksize=args.open_ksize)
     output = json.dumps(report, indent=2, ensure_ascii=False)
     print(output)
     if args.out:

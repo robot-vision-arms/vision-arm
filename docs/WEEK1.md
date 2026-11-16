@@ -37,7 +37,7 @@ source /home/user1/mini_projects3/vision-arm/env.sh
 | Conda·Python·venv | 확인 완료 | Conda `auto_activate: false`, 프로젝트 venv의 Python 3.12.3 |
 | ROS2·Python 라이브러리 | 확인 완료 | Jazzy 및 rclpy·cv_bridge·pymoveit2 import 정상. OpenCV 4.6.0, NumPy 1.26.4, PySide6 6.12.0 |
 | 시뮬레이터 의존성 | 확인 완료 | `rosdep check --from-paths src --ignore-src --rosdistro jazzy`: 모두 충족. MoveIt 2.12.4, UR 설정·드라이버 3.9.0 |
-| 빌드·테스트 | 확인 완료 | 기존 빌드 결과 두 패키지 exit 0. `colcon test-result`: 35개 통과, 오류·실패·skip 0개. 이번 재점검에서 영상 입력·보정 관련 테스트 15개 재실행 통과 |
+| 빌드·테스트 | 확인 완료 | 1주차 재점검 당시 전체 35개 및 영상 입력·보정 관련 15개 재실행 통과. 후속 2주차 개선 후 최신 전체 결과는 47개 통과, 오류·실패·skip 0개 ([WEEK2.md](WEEK2.md)) |
 | 이미지 입력·전처리 | 구현·테스트 완료 | `FrameSource`, 그레이스케일·Blur·이진화. 실제 스마트폰 수신은 별도 |
 | MVTec 데이터 | 확인 완료 | 이미지 384장과 전체·train·val·test 어노테이션 존재 |
 | Gazebo UR5e·MoveIt | 화면 없이 이동 검증 완료 | 2주차 진행 중 지정 좌표 이동·흡착 시험 성공. `logs/week2_sim_check.json`, [WEEK2.md](WEEK2.md) 참고 |

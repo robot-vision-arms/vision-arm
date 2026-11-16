@@ -16,12 +16,14 @@ from std_msgs.msg import String
 from vision_pick_place.vision_node import VisionNode
 
 
-@pytest.mark.parametrize('calibrated', [False, True])
-def test_publishes_pose_and_debug_image_with_real_ros(tmp_path, calibrated):
+@pytest.mark.parametrize('calibrated,mode', [(False, 'gray'), (True, 'gray'), (False, 'metal_hsv')])
+def test_publishes_pose_and_debug_image_with_real_ros(tmp_path, calibrated, mode):
     image_dir = tmp_path / 'images'
     image_dir.mkdir()
-    frame = np.full((120, 160, 3), 255, dtype=np.uint8)
-    cv2.rectangle(frame, (40, 50), (120, 70), (0, 0, 0), -1)
+    background = (30, 160, 220) if mode == 'metal_hsv' else (255, 255, 255)
+    foreground = (180, 180, 180) if mode == 'metal_hsv' else (0, 0, 0)
+    frame = np.full((120, 160, 3), background, dtype=np.uint8)
+    cv2.rectangle(frame, (40, 50), (120, 70), foreground, -1)
     cv2.imwrite(str(image_dir / 'frame.png'), frame)
     intrinsics, homography = tmp_path / 'i.npz', tmp_path / 'h.npz'
     if calibrated:
@@ -29,7 +31,9 @@ def test_publishes_pose_and_debug_image_with_real_ros(tmp_path, calibrated):
                  dist_coeffs=np.zeros(5), rms=0.)
         np.savez(homography, H=np.diag([2., 2., 1.]), reproj_err_mm=0.)
     rclpy.init(args=['--ros-args', '-p', f'image_dir:={image_dir}',
-                    '-p', f'intrinsics_path:={intrinsics}', '-p', f'homography_path:={homography}'])
+                    '-p', f'intrinsics_path:={intrinsics}', '-p', f'homography_path:={homography}',
+                    '-p', f'segmentation_mode:={mode}', '-p', 'hsv_max_saturation:=70',
+                    '-p', 'hsv_max_dark_value:=90', '-p', 'close_ksize:=3', '-p', 'open_ksize:=3'])
     executor = SingleThreadedExecutor()
     node = probe = None
     try:
