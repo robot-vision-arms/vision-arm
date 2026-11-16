@@ -1,4 +1,4 @@
-# ros2 launch 시 노드에 전달되는 파라미터. 경로는 워크스페이스 루트(~/study/robot_vision) 기준.
+# ros2 launch 시 노드에 전달되는 파라미터. 경로는 워크스페이스 루트(~/vision-arm) 기준.
 vision_node:
   ros__parameters:
     camera_url: "rtsp://172.20.10.1:8554/live"             # 스마트폰 IP 카메라 영상 주소 (예: http://192.168.0.23:8080/video). docs/SETUP.md Step 7

@@ -32,8 +32,8 @@
 | 전처리 | 그레이스케일, Gaussian Blur, Threshold(Otsu) | `vision_pick_place/camera_stream.py` | 필수 |
 | 검출 | findContours, minAreaRect, 모멘트 | `vision_pick_place/vision_detector.py` | 필수 |
 | 부품 분류 | 장축/단축 비 (나사·너트) → 형상 특징 분류기 (공구) | `vision_detector.classify_part` | 확장 |
-| 왜곡 보정 | Camera Calibration (체커보드) | `scripts/calibrate_camera.py` → `calibrator.py` | 필수 |
-| px → mm | Homography (기준점 4개 이상, 8개 이상 권장) | `scripts/compute_homography.py` → `calibrator.py` | 필수 |
+| 왜곡 보정 | Camera Calibration (ChArUco 보드, 기존 체커보드도 옵션으로 지원) | `scripts/calibrate_camera.py` → `calibrator.py` | 필수 |
+| px → mm | Homography. 작업 시트 네 귀퉁이 ArUco 마커 꼭짓점 16개를 자동 검출 (기존 수동 기준점 CSV 도 옵션) | `scripts/compute_homography.py --aruco` → `calibrator.py` | 필수 |
 | ROS2 발행 | rclpy 퍼블리셔 | `vision_pick_place/vision_node.py` | 필수 |
 | 로봇 송신 | TCP Socket, JSON 패킷, 통신 로그 | `robot_bridge.py`, `packet.py` | 필수 |
 | 가상 로봇 | TCP 서버, 수신 로그, (확장) ROS 재발행 | `robot_server.py` | 필수 |
@@ -75,10 +75,11 @@ KPI 를 재려면 "무엇을 정답으로 볼지" 가 먼저 정해져야 합니
 
 ### 3.1 로봇 작업 좌표계 (`work_plane`)
 
-- 작업 평면 = 격자(모눈) 종이 평면. 단위 mm.
-- **원점과 축 방향은 격자 종이 위에 표시**해서 고정한다 (예: 왼쪽 아래 교차점이 원점, 오른쪽이 +X, 위쪽이 +Y).
-- 호모그래피 기준점(`grid_points.csv`)의 `x_mm, y_mm` 이 이 좌표계로 적혀 있어야 한다.
-- 카메라나 종이가 움직이면 호모그래피를 다시 계산한다.
+- 작업 평면 = **작업 시트**(`data/calib/work_sheet_A4.pdf`, A4 가로) 평면. 단위 mm.
+- **원점 = 시트 왼쪽 아래 모서리, +X = 오른쪽(297 mm 방향), +Y = 위쪽(210 mm 방향).** 시트에 축 화살표가 인쇄돼 있다.
+- 네 귀퉁이 ArUco 마커(ID 40~43)의 mm 위치는 인쇄 위치로 정해져 있다 (`vision_pick_place/aruco_calib.py`). 자로 잴 필요 없이 100% 배율 인쇄만 확인한다.
+- Gazebo 의 `work_mat`(A4) 도 같은 원점·크기라서 3.4 의 `work_plane` 값을 그대로 쓴다.
+- 카메라나 시트가 움직이면 시트를 다시 찍어 호모그래피를 다시 계산한다 (명령 한 번).
 
 ### 3.2 회전각
 
@@ -98,7 +99,7 @@ KPI 를 재려면 "무엇을 정답으로 볼지" 가 먼저 정해져야 합니
 
 ### 3.4 작업 평면 → 로봇 베이스 (확장)
 
-비전이 내는 좌표는 격자 종이(`work_plane`) 기준이고, 로봇은 `base_link` 기준으로 움직인다. 둘 사이에 고정 변환 하나를 둔다.
+비전이 내는 좌표는 작업 시트(`work_plane`) 기준이고, 로봇은 `base_link` 기준으로 움직인다. 둘 사이에 고정 변환 하나를 둔다.
 
 - 실제 카메라가 본 종이를 Gazebo 안의 **가상 종이 자리**(`workcell.sdf` 의 `work_mat`)에 그대로 옮겨 놓았다고 본다.
   인식한 위치·각도에 가상 부품을 스폰하고, 로봇이 그걸 집는다 (실물 → 시뮬레이터 디지털 트윈).
@@ -179,11 +180,12 @@ robot_vision/                   ← git 저장소 = colcon 워크스페이스
 │   ├── SETUP.md                환경 구축
 │   └── DECISIONS.md            설계 결정 기록 (받은 역할 분담안 비교, 검증 상태)
 ├── scripts/                    ROS 없이 돌리는 오프라인 도구
-│   ├── calibrate_camera.py     체커보드 → intrinsics.npz
-│   ├── compute_homography.py   격자 기준점 → homography.npz
+│   ├── make_calib_sheets.py    인쇄물 PDF: ChArUco 보드, 작업 시트
+│   ├── calibrate_camera.py     ChArUco 보드 사진 → intrinsics.npz
+│   ├── compute_homography.py   작업 시트 사진 (ArUco 4개) → homography.npz
 │   └── evaluate_kpi.py         KPI 4종 (+ 선택 2종)
 ├── data/                       (git 제외, 폴더만 유지)
-│   ├── calib/                  체커보드·격자 사진, *.npz
+│   ├── calib/                  인쇄물 PDF, 보드·시트 사진, *.npz
 │   ├── captures/               자체 촬영 이미지
 │   ├── ground_truth/           실측 정답 CSV
 │   └── mvtec_screws/           참고용 MVTec Screws
@@ -198,6 +200,7 @@ robot_vision/                   ← git 저장소 = colcon 워크스페이스
     │       ├── camera_stream.py    프레임 읽기, Blur·Threshold
     │       ├── vision_detector.py  외곽선, minAreaRect, 각도 정규화, 부품 분류
     │       ├── calibrator.py       왜곡 보정, px→mm, 캘리브 상태
+    │       ├── aruco_calib.py      ChArUco 보드·작업 시트 정의, 마커 검출, 시트 호모그래피
     │       ├── packet.py           JSON 패킷 형식
     │       ├── vision_node.py      [노드] 검출 결과 발행
     │       ├── robot_bridge.py     [노드] 토픽 → TCP 송신, ACK·지연 기록
@@ -224,15 +227,15 @@ robot_vision/                   ← git 저장소 = colcon 워크스페이스
 ## 6. 데이터
 
 기본 입력은 거치대에 고정한 스마트폰의 실시간 영상입니다 (DECISIONS.md 7절).
-같은 폰·같은 위치로 모눈종이를 찍고, 격자 교차점의 px 좌표와 실측 mm 좌표를 대응시켜 호모그래피를 구합니다.
+같은 폰·같은 위치로 작업 시트를 찍으면 네 귀퉁이 ArUco 마커 꼭짓점을 자동으로 찾아 호모그래피를 구합니다.
 보유 MVTec 이미지는 물체 검출·중심점·장축 각도 계산 로직을 개발하고 검증하는 데이터입니다.
 사진 폴더·동영상 파일 입력(`image_dir`)은 폰 영상을 못 받을 때의 대체 입력입니다. 이때도 촬영 장치·해상도·카메라와 작업면의 상대 자세는 보정 때와 같아야 합니다.
 
 ### 6.1 자체 촬영과 좌표 보정 (메인)
 
-나사·너트(최종 목표에서는 공구까지)를 격자 종이 위에 놓고 촬영합니다. **좌표·각도 정답은 이 데이터로만 만듭니다.**
+나사·너트(최종 목표에서는 공구까지)를 작업 시트 위에 놓고 촬영합니다. **좌표·각도 정답은 이 데이터로만 만듭니다.**
 
-- 격자 종이에 목표 자세(중심점 + 각도선)를 미리 그려 두고 부품을 그 위에 맞춰 놓으면 실측값 = 그린 값이 됩니다.
+- 작업 시트의 10 mm 옅은 격자를 기준으로 목표 자세(중심점 + 각도선)를 미리 그려 두고 부품을 그 위에 맞춰 놓으면 실측값 = 그린 값이 됩니다.
 - 위치는 작업 영역 전체에 고르게, 각도는 0~180° 를 고르게 (예: 0, 15, 30, … 165°).
 - 최소 30 자세 이상 권장 (MAE 가 몇 개 샘플에 휘둘리지 않도록).
 - `data/ground_truth/poses.csv` 형식: `sample_id, image, x_mm, y_mm, angle_deg, part_type`
@@ -275,7 +278,7 @@ data/mvtec_screws/
 
 | 지표 | 측정 방법 | 기준 | 범위 | 결과 |
 |---|---|---|---|---|
-| 위치 오차 (MAE) | 격자 실측 대비 (x, y) 유클리드 거리 평균 | ≤ 2 mm | 필수 | 미측정 |
+| 위치 오차 (MAE) | 작업 시트 실측 대비 (x, y) 유클리드 거리 평균 | ≤ 2 mm | 필수 | 미측정 |
 | 각도 오차 (MAE) | [0°, 180°) 정의, 3.2 의 오차식. 장축 없는 부품 제외 | ≤ 3° | 필수 | 미측정 |
 | 송신 성공률 | 100회 연속 송신 중 ACK 수신 비율 | 100 % | 필수 | 미측정 |
 | 검출→송신 시간 | 3.3 구간, 100회 이상 측정한 P95 | ≤ 300 ms | 필수 | 미측정 |
@@ -300,7 +303,7 @@ Pick 성공률은 시뮬레이터 안의 결과라 비전 정확도와 별개로
 
 | 주차 | 할 일 | 끝났다는 기준 |
 |---|---|---|
-| **1주차** 환경·캘리브레이션·시뮬 구동 | 전원 SETUP.md 완료 (스마트폰 카메라, Gazebo·MoveIt 포함) · 체커보드 캘리브레이션 · 폰 고정 후 격자 호모그래피 · 로봇 좌표계(원점·축) 종이에 표시 · **UR5e 를 Gazebo 에 띄우고 MoveIt 으로 움직이기** | 3명 모두 `colcon build` 성공 · `intrinsics.npz`, `homography.npz` 생성 · 재투영 오차(mm) 기록 · **확인 ①** 통과 여부 기록 |
+| **1주차** 환경·캘리브레이션·시뮬 구동 | 전원 SETUP.md 완료 (스마트폰 카메라, Gazebo·MoveIt 포함) · ChArUco 보드 캘리브레이션 · 폰 고정 후 작업 시트(ArUco 4개) 호모그래피 · **UR5e 를 Gazebo 에 띄우고 MoveIt 으로 움직이기** | 3명 모두 `colcon build` 성공 · `intrinsics.npz`, `homography.npz` 생성 · 재투영 오차(mm) 기록 · **확인 ①** 통과 여부 기록 |
 | **2주차** 비전·ROS2 노드·로봇 이동 | MVTec 으로 검출·각도·분류 먼저 검증 · 자체 부품 촬영 · Blur/Threshold 조정 · `vision_node` 발행 · 코드(pymoveit2)로 작업 평면 위 지정 좌표 이동 · 손으로 스폰한 부품 attach/detach 시험 | `ros2 topic echo /vision/detections` 로 mm·각도·종류 확인 · `colcon test` 통과 · **확인 ②** 통과 여부 기록 |
 | **3주차** GUI·TCP·스폰 | 메인 윈도우 4화면 · QThread 로 ROS 구독 · `robot_server`, `robot_bridge` · `--publish-ros` · 인식 결과대로 Gazebo 에 부품 스폰 | GUI 실시간 표시 · TCP ACK 수신 · 카메라 앞 부품 위치대로 Gazebo 에 부품이 생김 |
 | **4주차** Pick & Place·KPI·시연 | 한 사이클 완성 · 실측 정답 30+ 자세 · 100회 송신 테스트 · `evaluate_kpi.py` | KPI 표 필수 4칸 + 측정 장비 표 채움 · 시연 (카메라 → GUI → TCP → Gazebo 분류) |
@@ -342,7 +345,7 @@ Pick 성공률은 시뮬레이터 안의 결과라 비전 정확도와 별개로
 | Wi-Fi 지연·끊김 | `camera_stream` 에서 재연결. 시연은 폰 핫스팟 등 안정된 네트워크로, 실패 대비 동영상 파일도 준비 |
 | 조명·그림자로 이진화 실패 | 배경을 부품과 대비되는 단색으로, 조명 고정. Otsu 로 시작 후 고정값 비교 |
 | 카메라가 비스듬해 mm 오차 증가 | 카메라를 작업면에 최대한 수직으로 고정, 호모그래피 기준점은 작업 영역 가장자리까지 넓게 |
-| 카메라·종이가 움직임 | 테이프로 고정, 움직였으면 호모그래피 재계산 (GUI 캘리브 상태에 계산 시각 표시) |
+| 카메라·시트가 움직임 | 테이프로 고정, 움직였으면 시트를 다시 찍어 호모그래피 재계산 (GUI 캘리브 상태에 계산 시각 표시) |
 | 원형·정사각형 부품 | 장축이 없어 각도가 불안정 → `angle_deg: null`, 각도 평가 대상에서 제외하고 문서에 명시 |
 | WSL2 에서 Gazebo 가 느리거나 화면이 깨짐 | 확인 ① 에서 일찍 발견. 소프트웨어 렌더링, Gazebo 창 끄고 RViz 만 보기, `max_velocity_scaling` 낮추기 |
 | Gazebo + MoveIt + RViz 메모리 부족 | WSL 메모리 8 GB 이상 (SETUP.md Step 5), 브라우저 등 정리 |
