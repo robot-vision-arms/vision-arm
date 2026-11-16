@@ -10,10 +10,13 @@ from vision_pick_place.vision_detector import classify_part, find_objects, norma
 
 
 def process_frame(frame, calibrator, seq, t_capture, *, blur_ksize=5, threshold=-1,
-                  min_area_px=500, nut_max_aspect=1.5):
+                  min_area_px=500, nut_max_aspect=1.5, segmentation_mode='gray',
+                  hsv_max_saturation=70, hsv_max_dark_value=70, close_ksize=0, open_ksize=0):
     if calibrator.image_size is not None and calibrator.image_size != (frame.shape[1], frame.shape[0]):
         raise ValueError('입력 영상과 보정 사진의 해상도가 다릅니다. 같은 해상도로 다시 보정하세요.')
-    mask = preprocess(frame, blur_ksize, threshold)
+    mask = preprocess(frame, blur_ksize, threshold, segmentation_mode=segmentation_mode,
+                      hsv_max_saturation=hsv_max_saturation, hsv_max_dark_value=hsv_max_dark_value,
+                      close_ksize=close_ksize, open_ksize=open_ksize)
     detections = find_objects(mask, min_area_px)
     debug = frame.copy()
     objects = []

@@ -2,7 +2,7 @@
 
 ## 팀원 2 (성민) 공유 기록 — 2026-11-13
 
-최신 공유 구현을 `/home/user1/vision-arm`에서 재현·검증했습니다. 아래 검출·분류 핵심 로직은 이번에 새로 작성한 것이 아니라 기존 공유 코드입니다.
+최신 공유 구현을 `~/vision-arm`에서 재현·검증했습니다. 아래 검출·분류 핵심 로직은 이번에 새로 작성한 것이 아니라 기존 공유 코드입니다.
 
 | 항목 | 결과 |
 |---|---|
@@ -23,7 +23,8 @@
 ## 현재 상태
 
 `colcon build --symlink-install`: 2개 패키지 성공.
-`colcon test`와 `colcon test-result --verbose`: **35 tests, 0 errors, 0 failures, 0 skipped**.
+`colcon test`와 `colcon test-result --verbose`: **47 tests, 0 errors, 0 failures, 0 skipped**.
+색 기반 전처리·단계별 미리보기와 ROS2 검증을 추가한 최신 결과다. 초기 구현 검증은 35개였다.
 
 | 작업 | 결과 |
 |---|---|
@@ -44,7 +45,7 @@
 
 ## 실행 순서
 
-저장소 루트에서 실행한다. 이 PC의 실제 경로는 `/home/user1/mini_projects3/vision-arm`이다.
+저장소 루트(`~/vision-arm`, 다른 곳에 clone 했다면 [WEEK1.md](WEEK1.md) 의 링크 방법 참고)에서 실행한다.
 
 ```bash
 source env.sh
@@ -67,7 +68,8 @@ ros2 topic echo /vision/detections --once
 ros2 topic info /vision/debug_image
 ```
 
-이 설정은 MVTec용이며 `calib_ok: false`가 정상이다. 기본 폰 카메라 설정의 Otsu 값은 바꾸지 않았다.
+이 설정은 MVTec용이며 `calib_ok: false`가 정상이다. 최신 설정은 `metal_hsv` 모드다.
+기본 폰 카메라 설정은 `gray` 모드·Otsu이며 형태 연산도 꺼져 있다.
 GUI·TCP 브리지는 후속 주차의 뼈대 상태이므로 이 확인에는 비전 노드를 단독 실행한다.
 
 실제 폰 영상과 mm 좌표 확인:
@@ -100,7 +102,7 @@ python scripts/check_sim_week2.py
 패드가 부품과 접촉하는 집기 위치·접근 궤적의 정확도를 검증한 것은 아니다.
 기존 `/sim/run_cycle`의 전체 집기·분류 사이클은 아직 구현 전이며 이 서비스는 그 점을 응답한다.
 
-## MVTec 검출 평가
+## MVTec 검출 평가 (초기 밝기 기준)
 
 데이터에 동봉된 README의 회전 박스 `(row, col, width, height, phi)` 정의를 사용했다.
 픽셀 좌표 원점의 0.5px 차이와 phi의 부호를 반영하고, 회전 IoU ≥ 0.5인 박스를 IoU 순으로 일대일 대응했다.
@@ -132,6 +134,89 @@ PYTHONPATH=src/vision_pick_place:$PYTHONPATH python scripts/evaluate_detector.py
 `logs/week2_detector_test.json`은 Otsu 결과, `logs/week2_detector_validation.json`은 이번 validation 비교 기록이다.
 logs와 원본 데이터는 git에 포함하지 않는다.
 
+## 색 기반 전처리 개선 (2026-11-13 후속 작업)
+
+현재 로컬과 원격 `main`이 일치함을 `git fetch origin` 후 확인하고 진행했다.
+원본 영상의 밝기만으로는 나무 무늬·그림자가 부품과 섞여 HSV의 채도와 명도를 함께 사용했다.
+`metal_hsv`는 **채도 ≤ 70 또는 명도 ≤ 90**인 픽셀을 선택하고, 3×3 close → 3×3 open을 적용한다.
+Blur 커널은 5, 최소 면적은 500px²다. 이 모드는 `threshold` 값을 사용하지 않는다.
+
+validation 55장(정답 647개)에서 12개 후보를 F1으로 비교했다.
+기존 gray와 close/open 조합 4개, HSV 채도·명도 조합 8개 중 선택한 설정의
+정밀도는 76.75%, 재현율은 79.60%, F1은 78.15%였다.
+최종 선택 후 같은 test 60장(정답 661개)을 평가했다. 초기 결과를 이미 확인한 데이터이므로
+아래 수치는 새로 수집한 독립 테스트셋의 성능을 의미하지 않는다. test 결과로 설정을 고르지는 않았다.
+
+| test 60장, 회전 IoU ≥ 0.5 | 기존 gray·임계값 100 | 새 metal_hsv |
+|---|---:|---:|
+| 검출 수 | 979 | 710 |
+| 정답 대응 수 | 419 | 551 |
+| 정밀도 | 42.80% | 77.61% |
+| 재현율 | 63.39% | 83.36% |
+| F1 | 51.10% | 80.38% |
+| 대응 물체 중심 오차 | 14.62px | 9.50px |
+| 대응 물체 장축 각도 오차 | 5.46° (314개) | 5.20° (322개) |
+
+선택된 설정은 `params_mvtec.yaml`에 반영했고 같은 파라미터를 ROS2 노드·평가·미리보기 도구에 연결했다.
+실제 ROS 송수신 테스트에서도 색 배경 위의 금속 부품이 검출·발행되는지 확인했다.
+폰 카메라의 기본 `gray` 설정은 유지했다. 흰 배경은 저채도이므로 `metal_hsv`에서 배경 전체가
+전경으로 선택될 수 있다. 금색 부품의 반사·그림자, 겹친 물체의 분리도 여전히 한계다.
+이 결과는 검출 평가이며 실제 나사·너트 분류 정확도나 mm KPI가 아니다.
+
+재현 명령 (저장소 루트):
+
+```bash
+# validation에서만 설정 선택. 결과에는 12개 후보와 선택된 설정을 모두 저장한다.
+PYTHONPATH=src/vision_pick_place:$PYTHONPATH python scripts/tune_detector.py \
+  --validation data/mvtec_screws/mvtec_screws_val.json --images data/mvtec_screws/images
+
+# 선택한 설정으로 test 평가
+PYTHONPATH=src/vision_pick_place:$PYTHONPATH python scripts/evaluate_detector.py \
+  --annotations data/mvtec_screws/mvtec_screws_test.json --images data/mvtec_screws/images \
+  --segmentation-mode metal_hsv --hsv-max-saturation 70 --hsv-max-dark-value 90 \
+  --close-ksize 3 --open-ksize 3 --out logs/week2_detector_test_hsv.json
+
+# 원본과 이진화 영상 비교
+python scripts/preview_camera.py --count 2 --segmentation-mode metal_hsv \
+  --hsv-max-saturation 70 --hsv-max-dark-value 90 --close-ksize 3 --open-ksize 3 \
+  --out data/preview_hsv
+```
+
+선택 기록은 `logs/week2_preprocessing_validation.json`, 결과 이미지는 `data/preview_hsv`에 저장한다.
+다음 실측 단계는 여전히 **폰 고정·체커보드/격자 보정 → 자체 나사·너트 촬영 → 좌표·각도·종류 검증**이다.
+
+## 단계별로 눈으로 확인하기
+
+ROS나 카메라 없이 실행하는 학습용 화면을 추가했다. 저장소 루트에서:
+
+```bash
+source env.sh
+python scripts/preview_steps.py
+```
+
+기본 입력은 보유 MVTec 사진이며 `이전 사진`·`다음 사진`으로 넘길 수 있다.
+`내 사진 열기`로 자체 촬영 사진도 선택할 수 있다. 흰 배경의 자체 사진은 `gray` 방식으로 시작한다.
+
+1. 왼쪽 목록에서 원본 → Blur → S·V 채널 → 이진화 → CLOSE → OPEN → 검출을 하나씩 선택한다.
+   S와 V는 Blur에서 각각 분리한 별도 채널이며 서로를 차례로 변환한 것이 아니다.
+2. 왼쪽 영상은 선택 단계의 입력, 오른쪽은 출력이다. 비교 기준을 원본 영상으로 바꿀 수도 있다.
+3. 채도·밝기·최소 면적 값을 바꾸면 즉시 다시 계산한다. Blur=1, CLOSE/OPEN=0으로 연산을 끄고 차이를 본다.
+4. 아래 코드·설명을 실제 화면과 함께 확인한다. 영상 위 휠로 확대하고 드래그로 이동한다. 더블클릭하면 전체 보기로 돌아간다.
+5. `현재 설정의 모든 단계 저장`을 누르면 `data/pipeline_steps/<사진 이름>/`에 PNG들과 `steps.txt`를 저장한다.
+
+화면은 `camera_stream.preprocess()`의 `on_step` 콜백으로 실제 중간 결과를 받아 사용한다.
+전처리 알고리즘을 GUI에 별도로 복사하지 않았다. 단계 출력과 일반 전처리의 최종 마스크가 동일한지 테스트한다.
+검출 화면은 동일한 `find_objects`·`classify_part` 함수를 사용한다. 실제 mm 보정 평가는 이 도구의 범위가 아니다.
+GUI는 창 없는 환경에서도 파라미터 변경·사진/방식/단계 전환·확대 유지·저장을 시험했다.
+한글 폰트가 없는 WSL에서는 설치된 Windows 맑은 고딕을 읽어 사용할 수 있다. 폰트 파일은 저장소에 복사하지 않는다.
+
+창 없이 단계 이미지들만 저장하거나 특정 사진을 열려면:
+
+```bash
+python scripts/preview_steps.py --export-only
+python scripts/preview_steps.py --image data/captures/part.png --mode gray
+```
+
 ## 시뮬레이터에서 수정한 문제
 
 - 흡착 패드가 추가된 URDF와 기본 SRDF의 로봇 이름을 `ur5e`로 일치시켰다.
@@ -146,3 +231,41 @@ logs와 원본 데이터는 git에 포함하지 않는다.
 Gazebo는 headless로 검증했다. GUI 화면·RViz 조작은 직접 확인하지 않았다.
 현재 Gazebo DART의 로봇 STL 충돌 메시 생성 경고와 MoveIt의 3D 센서 미설정 Octomap 오류가 남아 있다.
 이번 이동과 관절 기반 흡착 시험은 성공했지만, Gazebo에서 팔 메시의 물리 충돌과 작업 셀 벽을 포함한 계획 장면은 추가 검증 대상이다.
+
+## 팀원 1 (동경) 다음 작업 계획 — 2026-11-16 작성
+
+2주차 담당(`grasp.py`, `/sim/move_to_target`)은 완료. 아래는 1주차에서 넘어온 일과 3주차(2026-11-23 ~ 11-29) 담당 작업이다.
+
+### 1주차에서 넘어온 일 (3주차 전에 끝낼 것)
+
+| 작업 | 내용 | 완료 기준 |
+|---|---|---|
+| 실제 캘리브레이션 | 11-17 촬영 예정. ChArUco 보드 15~20장 → `calibrate_camera.py`, 폰 고정 후 작업 시트 1장 → `compute_homography.py --aruco --debug-out` ([PR #1](https://github.com/robot-vision-arms/vision-arm/pull/1)) | `data/calib/intrinsics.npz`, `homography.npz` 생성. RMS(px), 시트 RMS·한 점씩 뺀 오차(mm)를 WEEK1에 기록 |
+| 작업 시트 마커 마스크 / 검출 ROI | 작업 시트 귀퉁이 ArUco 마커(검은 사각형)가 `vision_detector` 에 부품으로 잡히지 않게 한다. 호모그래피 역변환으로 마커 영역(mm 위치는 `aruco_calib.SHEET_MARKERS`)을 이미지에서 가리거나, 검출 ROI 를 시트 안쪽으로 제한 | 시트만 찍은 사진에서 검출 0개, 시트 위 부품 사진에서 마커 오검출 0개. 테스트 추가. 검출 로직(성민)과 인터페이스만 맞춘다 |
+
+### 3주차: GUI (`gui/main_window.py`, `gui/ros_worker.py`)
+
+현재 두 파일은 뼈대(TODO)만 있다. 과제 필수 4화면 (PROJECT.md 2.2):
+
+| 화면 | 데이터 출처 | 표시 내용 |
+|---|---|---|
+| ① 영상 | `/vision/debug_image` (Image) | 검출 ROI·중심·장축 화살표가 그려진 영상 |
+| ② 좌표 표 | `/vision/detections` (String·JSON, `packet.py`) | id, part_type, u/v px, x/y mm, angle_deg. `calib_ok: false` 면 mm·각도 칸을 비우고 "미보정" 표시 |
+| ③ 송수신 기록 | `/robot/log` `{"seq","sent","acked","latency_ms","error"}`, `/sim/pick_log` `{"seq","obj","part_type","result","plan_ms","error"}` | 최근 N건, 실패는 색으로 구분, 지연 ms |
+| ④ 캘리브 상태 | 패킷 `calib_ok` + 보정 파일 | 내부 파라미터·호모그래피 로드 여부, RMS(px), 재투영 오차(mm), 보정 파일 생성 시각 (카메라가 움직였는지 판단용, PROJECT.md 11장) |
+
+구현 순서:
+
+1. `ros_worker.py`: QThread 안에서 `rclpy` 노드 생성 → 네 토픽 구독 → 콜백에서 Signal emit → `spin_once` 루프. `stop()` 은 플래그 → `rclpy.try_shutdown()` → `wait()`
+2. `main_window.py`: 위 4화면 배치, Signal → 위젯 갱신 슬롯 연결, 창 닫을 때 워커 정지
+3. 이미지 변환(BGR numpy → QImage)은 `gui/pipeline_inspector.py` 에 있는 방식과 맞춘다
+4. 테스트: 워커 없이 슬롯에 가짜 패킷·로그를 넣어 표·상태 갱신 확인 (`QT_QPA_PLATFORM=offscreen`), 실제 ROS 로 `vision_node` 발행 → GUI 수신 확인
+5. 문서: 실행 명령, 화면 캡처를 WEEK3 기록에 남김
+
+의존성: ③의 `/robot/log` 는 성민 님 3주차 `robot_bridge.py` 가 발행한다. 먼저 나오기 전까지는 가짜 발행(`ros2 topic pub`)으로 확인한다.
+
+완료 기준 (PROJECT.md 8장 3주차): GUI 에 영상·좌표·캘리브 상태가 실시간으로 갱신되고, 송수신 기록이 쌓인다.
+
+### 4주차 (참고)
+
+KPI 측정(`evaluate_kpi.py`), 100회 송신 테스트. 3주차 GUI 와 `robot_bridge` CSV 가 입력이다.

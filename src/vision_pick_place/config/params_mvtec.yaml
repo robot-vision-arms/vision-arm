@@ -6,6 +6,11 @@ vision_node:
     homography_path: ""
     blur_ksize: 5
     threshold: 100
+    segmentation_mode: "metal_hsv"
+    hsv_max_saturation: 70
+    hsv_max_dark_value: 90
+    close_ksize: 3
+    open_ksize: 3
     min_area_px: 500
     nut_max_aspect: 1.5
     publish_rate_hz: 10.0

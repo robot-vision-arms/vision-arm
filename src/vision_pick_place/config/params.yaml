@@ -1,13 +1,18 @@
-# ros2 launch 시 노드에 전달되는 파라미터. 경로는 워크스페이스 루트(~/study/robot_vision) 기준.
+# ros2 launch 시 노드에 전달되는 파라미터. 경로는 워크스페이스 루트(~/vision-arm) 기준.
 vision_node:
   ros__parameters:
-    camera_url: ""               # 스마트폰 IP 카메라 영상 주소 (예: http://192.168.0.23:8080/video). docs/SETUP.md Step 7
+    camera_url: "rtsp://172.20.10.1:8554/live"             # 스마트폰 IP 카메라 영상 주소 (예: http://192.168.0.23:8080/video). docs/SETUP.md Step 7
     camera_index: 0              # camera_url 이 비어 있을 때 쓰는 USB 카메라 번호 (/dev/video0)
     image_dir: ""                # 값이 있으면 카메라 대신 폴더 이미지·동영상 파일을 순서대로 재생 (대체 입력)
     intrinsics_path: "data/calib/intrinsics.npz"   # scripts/calibrate_camera.py 출력
     homography_path: "data/calib/homography.npz"   # scripts/compute_homography.py 출력
     blur_ksize: 5                # Gaussian Blur 커널(홀수). 초기값, 실험으로 조정
     threshold: -1                # -1 이면 Otsu 자동 임계값
+    segmentation_mode: "gray"   # 기본 단색 배경용. MVTec의 나무 배경은 params_mvtec.yaml의 metal_hsv 사용
+    hsv_max_saturation: 70      # metal_hsv: 저채도 금속 선택 (0~255)
+    hsv_max_dark_value: 70      # metal_hsv: 어두운 부품도 선택 (0~255)
+    close_ksize: 0              # 0이면 끔, 양의 홀수. 작은 틈 메우기
+    open_ksize: 0               # 0이면 끔, 양의 홀수. 작은 잡음 제거
     min_area_px: 500             # 이보다 작은 윤곽선은 노이즈로 버림. 초기값, 실험으로 조정
     nut_max_aspect: 1.5          # 장축/단축 비가 이 이하면 너트, 넘으면 나사. 초기값, MVTec 비율 분포 보고 조정
     publish_rate_hz: 10.0

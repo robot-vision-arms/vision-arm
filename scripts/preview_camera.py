@@ -24,6 +24,11 @@ def main():
     parser.add_argument('--count', type=int, default=4)
     parser.add_argument('--blur-ksize', type=int, default=5)
     parser.add_argument('--threshold', type=int, default=-1)
+    parser.add_argument('--segmentation-mode', choices=['gray', 'metal_hsv'], default='gray')
+    parser.add_argument('--hsv-max-saturation', type=int, default=70)
+    parser.add_argument('--hsv-max-dark-value', type=int, default=70)
+    parser.add_argument('--close-ksize', type=int, default=0)
+    parser.add_argument('--open-ksize', type=int, default=0)
     args = parser.parse_args()
     if args.count < 1:
         parser.error('--count는 1 이상이어야 합니다.')
@@ -35,7 +40,11 @@ def main():
                 frame = source.read()
                 if frame is None:
                     raise RuntimeError('읽을 수 있는 이미지가 없습니다.')
-                mask = preprocess(frame, args.blur_ksize, args.threshold)
+                mask = preprocess(frame, args.blur_ksize, args.threshold,
+                                  segmentation_mode=args.segmentation_mode,
+                                  hsv_max_saturation=args.hsv_max_saturation,
+                                  hsv_max_dark_value=args.hsv_max_dark_value,
+                                  close_ksize=args.close_ksize, open_ksize=args.open_ksize)
                 comparison = cv2.hconcat([frame, cv2.cvtColor(mask, cv2.COLOR_GRAY2BGR)])
                 path = args.out / f'preview_{i + 1:03d}.png'
                 if not cv2.imwrite(str(path), comparison):

@@ -21,14 +21,33 @@
 
 `sudo` 는 비밀번호를 묻기 때문에, 명령은 **각자 WSL 터미널에서 직접** 실행합니다.
 
+## 팀원 3 (가영) 공유 기록 — 2026-11-16
+
+1주차 영상 입력 담당 작업 결과입니다. 이 PC(유선 랜만 있고 Wi-Fi 어댑터 없음) 기준입니다.
+
+| 항목 | 결과 |
+|---|---|
+| 폰 카메라 앱 | 아이폰 RTSP 카메라 앱. 앱 설정에서 가로 모드로 송출 (1280×720) |
+| 네트워크 | PC 유선망(192.168.20.x)과 폰 Wi-Fi(192.168.200.x) 대역이 달라 직접 접속 불가 → **아이폰 USB 개인용 핫스팟**으로 연결. Windows에 Apple Devices 드라이버 필요, PC는 172.20.10.x를 받음 |
+| `camera_url` | `rtsp://172.20.10.1:8554/live` (`params.yaml`에 반영) |
+| 환경 점검 | `check_environment.py`: OK 63 / FAIL 0, `스마트폰 카메라 접속` OK |
+| OpenCV 직접 수신 | `cv2.VideoCapture(url, CAP_FFMPEG)` 30/30 프레임 수신 |
+| 프로젝트 코드 수신 | `params.yaml` 설정 그대로 `FrameSource` 열기 2.0초, 60/60 프레임 (720, 1280, 3), `preprocess` 마스크 (720, 1280) 정상, `release()` 후 `read()`는 `None` |
+| 실시간 뷰어 | `scripts/live_view.py` 추가 (아래 9단계 참고) |
+| 미완료 | 폰 고정 거치·해상도 고정 상태에서의 촬영(캘리브레이션과 함께), 동경·성민 PC의 환경 점검 결과 수집 |
+
+운용 시 주의: 아이폰 앱이 백그라운드로 가거나 화면이 잠기면 스트리밍이 멈춰 `Connection refused`가 난다.
+자동 잠금을 끄고 앱을 화면에 띄운 채 충전기를 연결해 둔다. 매번 USB 연결과 핫스팟 켜기가 필요하다.
+
 ## 최신 확인 결과 (2026-11-13)
 
 이 절이 아래 설치 당시 기록보다 최신이다. **개발 환경과 코드 기반은 준비됐지만 1주차 전체 완료는 아니다.**
-이 PC의 실제 저장소는 `/home/user1/mini_projects3/vision-arm`이며 `~/vision-arm` 링크는 현재 없다.
-이 문서의 `source ~/vision-arm/env.sh` 대신 다음 명령을 쓴다.
+문서의 명령은 모두 `~/vision-arm` 기준이다. 저장소를 다른 곳에 clone 했다면 링크를 한 번 걸어 두면 그대로 통한다
+(예: 11-13 확인 PC는 `/home/user1/mini_projects3/vision-arm`, 팀원 1 PC는 `~/study/robot_vision`).
 
 ```bash
-source /home/user1/mini_projects3/vision-arm/env.sh
+ln -s <실제 저장소 경로> ~/vision-arm   # 한 번만
+source ~/vision-arm/env.sh
 ```
 
 | 1주차 항목 | 확인 결과 | 근거·남은 일 |
@@ -37,12 +56,13 @@ source /home/user1/mini_projects3/vision-arm/env.sh
 | Conda·Python·venv | 확인 완료 | Conda `auto_activate: false`, 프로젝트 venv의 Python 3.12.3 |
 | ROS2·Python 라이브러리 | 확인 완료 | Jazzy 및 rclpy·cv_bridge·pymoveit2 import 정상. OpenCV 4.6.0, NumPy 1.26.4, PySide6 6.12.0 |
 | 시뮬레이터 의존성 | 확인 완료 | `rosdep check --from-paths src --ignore-src --rosdistro jazzy`: 모두 충족. MoveIt 2.12.4, UR 설정·드라이버 3.9.0 |
-| 빌드·테스트 | 확인 완료 | 기존 빌드 결과 두 패키지 exit 0. `colcon test-result`: 35개 통과, 오류·실패·skip 0개. 이번 재점검에서 영상 입력·보정 관련 테스트 15개 재실행 통과 |
-| 이미지 입력·전처리 | 구현·테스트 완료 | `FrameSource`, 그레이스케일·Blur·이진화. 실제 스마트폰 수신은 별도 |
+| 빌드·테스트 | 확인 완료 | 1주차 재점검 당시 전체 35개 및 영상 입력·보정 관련 15개 재실행 통과. 후속 2주차 개선 후 최신 전체 결과는 47개 통과, 오류·실패·skip 0개 ([WEEK2.md](WEEK2.md)) |
+| 이미지 입력·전처리 | 구현·테스트 완료 | `FrameSource`, 그레이스케일·Blur·이진화. 2026-11-16 실제 폰 RTSP 영상으로도 수신·전처리 확인 (가영 PC) |
 | MVTec 데이터 | 확인 완료 | 이미지 384장과 전체·train·val·test 어노테이션 존재 |
 | Gazebo UR5e·MoveIt | 화면 없이 이동 검증 완료 | 2주차 진행 중 지정 좌표 이동·흡착 시험 성공. `logs/week2_sim_check.json`, [WEEK2.md](WEEK2.md) 참고 |
 | 확인 ①의 GUI·RViz Plan & Execute | 미확인 | 화면 조작 기준까지 통과로 기록하지 않음 |
-| 스마트폰 앱·거치·영상 수신 | 미확인 | `params.yaml`의 `camera_url`이 비어 있고 `/dev/video*`도 없음. 실제 앱 설치·거치 상태는 이 PC에서 확인 못 함 |
+| 스마트폰 앱·영상 수신 | 확인 완료 (2026-11-16, 가영 PC) | 아이폰 RTSP + USB 핫스팟, `camera_url: rtsp://172.20.10.1:8554/live`. 위 팀원 3 기록 참고 |
+| 스마트폰 고정 거치 | 남음 | 캘리브레이션 촬영 위치에 고정·해상도 고정 필요 |
 | 실제 ChArUco·작업 시트 보정 | 남음 | `data/calib`, `data/captures`는 `.gitkeep`만 존재. 실측 `intrinsics.npz`, `homography.npz` 없음 |
 | 원점·축의 작업면 표시 | 인쇄물로 대체 | 작업 시트에 원점·축이 인쇄됨 (DECISIONS.md 9절). 시트를 작업대에 고정했는지는 확인 필요 |
 | 팀원 3명 환경 확인 | 미확인 | 아래 팀원별 체크표는 비어 있음. 현재 점검은 이 PC에 한함 |
@@ -73,6 +93,20 @@ source /home/user1/mini_projects3/vision-arm/env.sh
 2. 확인 ① (8-3단계): `source ~/vision-arm/env.sh && ros2 launch ur5e_pick_place sim.launch.py` → Gazebo 에 UR5e, RViz Plan & Execute 로 팔이 움직이는지 직접 봄
 3. 폰 IP 카메라 주소를 `params.yaml` 의 `camera_url` 에 넣고 9단계 확인 (점검 스크립트의 남은 FAIL 1개)
 4. 결과를 아래 "팀원별 진행 체크" 표와 10단계 기록 위치에 적고, 1주차 캘리브레이션(PROJECT.md 2.3 팀원 1)으로 넘어감
+
+### 2026-11-16 재점검 결과 (팀원 1 동경, `~/study/robot_vision` = `~/vision-arm` 링크)
+
+| 항목 | 결과 |
+|---|---|
+| WSL 메모리 | ✅ `free -h` Mem 9.7 GiB / Swap 8.0 GiB (`.wslconfig` 10GB / 8GB 적용됨) |
+| Conda | ✅ `auto_activate_base: False`, 새 셸 `python3` = `.venv` |
+| rosdep | ✅ `rosdep check` 의존성 모두 충족 |
+| 빌드·테스트 | ✅ `colcon build` 2 packages, `colcon test` 55개 실패 0 / skipped 0 |
+| ROS2 통신 | ✅ talker/listener 송수신 확인 |
+| `check_environment.py` | OK 62 / FAIL 1: `camera_url`(`rtsp://172.20.10.1:8554/live`)은 설정돼 있으나 접속 시간 초과. 폰 앱 서버 실행·같은 Wi-Fi·IP 변경 여부 확인 필요 |
+| 시뮬레이터 (headless) | ✅ `sim.launch.py gazebo_gui:=false launch_rviz:=false` 후 `check_sim_week2.py` 통과: 지정 이동, 늦은 스폰 흡착, 분리 낙하, 0.099 m 들어올림. 서비스가 뜬 직후(약 16초)에 호출하면 첫 계획이 OMPL `Unable to solve` 로 실패, 40초 기다린 뒤에는 첫 시도 성공 |
+| 확인 ① 화면 | ⬜ Gazebo·RViz 창을 띄워 Plan & Execute 로 팔이 움직이는지 사람이 직접 봐야 함 |
+| 폰 영상 수신 | ⬜ 폰 앱 서버를 켠 뒤 `check_environment.py` 재실행, `scripts/live_view.py` 로 프레임 확인 |
 
 ### 현재 PC 남은 작업
 
@@ -288,6 +322,19 @@ python -c "import cv2; c=cv2.VideoCapture('<camera_url>'); ok,f=c.read(); print(
 
 보유 MVTec 사진에는 실제 mm 정답이 없으므로 위치 KPI를 대신하지 않습니다.
 
+### 실시간 뷰어로 폰 영상 보기
+
+폰 앱 스트리밍을 켠 상태에서 VS Code 터미널(WSL)에서 실행합니다.
+
+```bash
+source ~/vision-arm/env.sh
+python scripts/live_view.py
+```
+
+- 키: `s` 현재 화면 저장(`data/captures/`), `r` 90° 회전 전환, `q`/ESC 종료
+- 기본 주소는 `rtsp://172.20.10.1:8554/live` (아이폰 USB 개인용 핫스팟). 다른 주소는 `python scripts/live_view.py <영상주소> [저장폴더]`
+- `Connection refused` 가 나오면 폰 앱 스트리밍이 꺼진 것입니다. 앱을 화면에 띄운 채 다시 시작합니다.
+
 ## 10. 결과 기록
 
 설치가 끝나면 아래를 채웁니다. 팀원 3명의 값이 다르면 그 차이가 나중에 "내 PC 에서는 되는데" 문제의 원인이 됩니다.
@@ -304,14 +351,14 @@ python -c "import cv2; c=cv2.VideoCapture('<camera_url>'); ok,f=c.read(); print(
 | 단계 | 팀원 1 (동경) | 팀원 2 (성민) | 팀원 3 (가영) |
 |---|---|---|---|
 | 1. WSL 메모리 | | | |
-| 2. 폰 카메라 앱 | | | |
+| 2. 폰 카메라 앱 | | | ✅ 11-16 아이폰 RTSP |
 | 3. conda 끄기 | | | |
 | 4. ROS2 Jazzy | | | |
 | 5. Python·venv | | | |
 | 6. rosdep | | | |
 | 7. 빌드·테스트 | | | |
 | 8. 확인 ① | | | |
-| 9. 폰 영상 수신 | | | |
+| 9. 폰 영상 수신 | | | ✅ 11-16 USB 핫스팟 |
 | 10. 기록 | | | |
 
 환경 설치가 끝나면 1주차 나머지 일(폰 고정, ChArUco 캘리브레이션, 작업 시트 호모그래피)로 넘어갑니다 (PROJECT.md 8장).
