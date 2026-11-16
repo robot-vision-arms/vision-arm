@@ -1,62 +1,94 @@
-"""Check a running integration.launch.py without commanding robot motion.
+"""Measure an existing vision → ROS → TCP → ACK → ROS pipeline.
 
-Checks actual ROS → TCP → ACK → ROS targets.
-Run in another terminal, using the same ROS_DOMAIN_ID as the launch.
+Default: 100 packets, no TCP failures, identical target packets and debug image.
+Always overwrites the result (including failure); never commands robot motion.
 """
 import argparse
+from datetime import datetime, timezone
 import json
+import math
+import os
 from pathlib import Path
+import tempfile
 import time
 
 import rclpy
 from std_msgs.msg import String
 from sensor_msgs.msg import Image
+from vision_pick_place.communication_check import CommunicationCheck
+
+
+def save_report(path, report):
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile('w', encoding='utf-8', dir=path.parent, delete=False) as stream:
+        temporary = Path(stream.name)
+        json.dump(report, stream, ensure_ascii=False, indent=2, allow_nan=False)
+        stream.write('\n')
+    os.replace(temporary, path)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--timeout', type=float, default=20)
+    parser.add_argument('--count', type=int, default=100)
+    parser.add_argument('--timeout', type=float, default=40)
+    parser.add_argument('--skip-image', action='store_true', help='Transport-only test without image source')
     parser.add_argument('--out', default='logs/team_integration_check.json')
     args = parser.parse_args()
-    rclpy.init(args=[])
-    node = rclpy.create_node('team_integration_observer')
-    packets, targets, logs, frames = {}, {}, [], []
-    def packet_callback(msg, store):
-        packet = json.loads(msg.data)
-        store[packet['seq']] = packet
-    subscriptions = [
-        node.create_subscription(String, '/vision/detections', lambda msg: packet_callback(msg, packets), 10),
-        node.create_subscription(String, '/robot/targets', lambda msg: packet_callback(msg, targets), 10),
-        node.create_subscription(String, '/robot/log', lambda msg: logs.append(json.loads(msg.data)), 10),
-        node.create_subscription(Image, '/vision/debug_image', lambda msg: frames.append(msg.width), 1),
-    ]
-    report = {}
+    if args.count < 1 or not math.isfinite(args.timeout) or args.timeout <= 0:
+        parser.error('count and timeout must be positive')
+    started = time.monotonic()
+    measured = CommunicationCheck(args.count, not args.skip_image)
+    stamp = datetime.now(timezone.utc).isoformat()
+    metadata = dict(started_at_utc=stamp, ros_domain_id=os.environ.get('ROS_DOMAIN_ID', '0'))
+    # A fresh run must never leave a previous PASS looking like its result.
+    save_report(args.out, dict(ok=False, status='running', **metadata))
+    node = None
+    context_started = False
+    interrupted = False
     try:
-        deadline = time.monotonic()+args.timeout
+        rclpy.init(args=[])
+        context_started = True
+        node = rclpy.create_node('team_integration_observer')
+        def receive(kind, msg):
+            try:
+                measured.receive(kind, json.loads(msg.data))
+            except (ValueError, TypeError) as exc:
+                measured.errors.append(f'{kind}: {exc}')
+        subscriptions = [
+            node.create_subscription(String, topic, lambda msg, kind=kind: receive(kind, msg), 100)
+            for topic, kind in [('/vision/detections', 'packet'), ('/robot/targets', 'target'),
+                                ('/robot/log', 'log')]]
+        def image_received(msg):
+            if msg.width > 0 and msg.height > 0 and msg.data:
+                measured.image_received = True
+        subscriptions.append(node.create_subscription(Image, '/vision/debug_image', image_received, 1))
+        deadline = started+args.timeout
         while time.monotonic() < deadline:
             rclpy.spin_once(node, timeout_sec=.05)
-            matched = set(packets) & set(targets)
-            acked = {entry['seq'] for entry in logs if entry['acked']}
-            delivered = matched & acked
-            if len(delivered) >= 5 and frames:
-                assert all(packets[seq] == targets[seq] for seq in delivered)
-                report = dict(ok=True, identical_packets=len(delivered),
-                              image_received=True,
-                              tcp_errors=[e for e in logs if e['error']],
-                              calib_ok_values=sorted({targets[s]['calib_ok'] for s in delivered}),
-                              robot_motion_commanded=False)
-                break
-        if not report:
-            raise RuntimeError(f'Integration timeout: packets={len(packets)}, targets={len(targets)}, '
-                               f'logs={len(logs)}, frames={len(frames)}')
-        out = Path(args.out)
-        out.parent.mkdir(parents=True, exist_ok=True)
-        out.write_text(json.dumps(report, ensure_ascii=False, indent=2)+'\n')
-        print(json.dumps(report, ensure_ascii=False, indent=2))
+            report = measured.report()
+            if report['observed_packets'] == args.count:
+                done = not report['missing_acks'] and not report['missing_or_changed_targets']
+                if done and (measured.image_received or args.skip_image):
+                    break
+        else:
+            measured.errors.append('Timed out before all required observations completed')
+    except KeyboardInterrupt:
+        interrupted = True
+        measured.errors.append('Interrupted')
+    except Exception as exc:
+        measured.errors.append(f'{type(exc).__name__}: {exc}')
     finally:
-        node.destroy_node()
-        rclpy.try_shutdown()
+        if node is not None:
+            node.destroy_node()
+        if context_started:
+            rclpy.try_shutdown()
+        report = dict(measured.report(), **metadata, elapsed_s=time.monotonic()-started)
+        report['status'] = 'passed' if report['ok'] else 'failed'
+        save_report(args.out, report)
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 130 if interrupted else (0 if report['ok'] else 1)
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

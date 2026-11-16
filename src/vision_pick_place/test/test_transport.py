@@ -133,3 +133,62 @@ def test_calibrated_packet_is_forwarded_without_coordinate_changes(server):
         assert forwarded == [packet]
     finally:
         client.close()
+
+
+def test_actual_server_restart_requires_new_frame_and_recovers(tmp_path):
+    first_packets, second_packets = [], []
+    first = PoseServer(('127.0.0.1', 0), first_packets.append, tmp_path)
+    address = first.server_address
+    thread = Thread(target=first.serve_forever, kwargs={'poll_interval': .01}, daemon=True)
+    thread.start()
+    client = PoseClient(*address, timeout=.3)
+    second = second_thread = None
+    try:
+        assert client.exchange(pose(1))['ack'] == 1
+        first.shutdown()
+        first.server_close()
+        thread.join(2)
+        with pytest.raises((OSError, ValueError)):
+            client.exchange(pose(2))
+        assert client.sock is None
+        second = PoseServer(address, second_packets.append, tmp_path)
+        second_thread = Thread(target=second.serve_forever, kwargs={'poll_interval': .01}, daemon=True)
+        second_thread.start()
+        assert client.exchange(pose(3))['ack'] == 3
+        deadline = time.monotonic()+2
+        while not second_packets and time.monotonic() < deadline:
+            time.sleep(.01)
+        assert [packet['seq'] for packet in second_packets] == [3]  # no replay of failed packet
+    finally:
+        client.close()
+        if second is not None:
+            second.shutdown()
+            second.server_close()
+            second_thread.join(2)
+        if thread.is_alive():
+            first.shutdown()
+            first.server_close()
+            thread.join(2)
+
+
+def test_ack_success_does_not_hide_forward_failure(server):
+    import csv
+    srv, _ = server
+    def fail_forward(packet):
+        raise RuntimeError('ROS publisher failed')
+    srv.on_packet = fail_forward
+    client = PoseClient(*srv.server_address)
+    try:
+        assert client.exchange(pose())['status'] == 'ok'
+        deadline = time.monotonic()+2
+        rows = []
+        while time.monotonic() < deadline:
+            with srv.log_path.open() as stream:
+                rows = list(csv.DictReader(stream))
+            if any(row['status'] == 'forward_error' for row in rows):
+                break
+            time.sleep(.01)
+        assert [row['status'] for row in rows] == ['ok', 'forward_error']
+        assert rows[-1]['error'] == 'ROS publisher failed'
+    finally:
+        client.close()
