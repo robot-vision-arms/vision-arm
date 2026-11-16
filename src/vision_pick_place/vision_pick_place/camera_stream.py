@@ -4,6 +4,7 @@
 ROS 에 의존하지 않으므로 노드 없이 단독으로 테스트할 수 있다.
 """
 from pathlib import Path
+import threading
 from typing import Callable
 
 import cv2
@@ -16,16 +17,29 @@ class FrameSource:
     우선순위: image_dir → camera_url → camera_index.
     image_dir 가 주어지면 폴더 안 이미지를 이름순으로 반복 재생한다 (카메라 없이 MVTec/촬영본 테스트용).
     camera_url 은 폰 IP 카메라 앱의 영상 주소로, cv2.VideoCapture 가 URL 을 그대로 연다.
+
+    카메라 입력은 백그라운드 스레드가 계속 읽어 **가장 최근 프레임 1장만** 들고 있는다.
+    폰은 초당 약 30장을 보내는데 노드는 10Hz 로만 읽기 때문에, 직접 cap.read() 를 부르면
+    읽지 못한 프레임이 버퍼에 쌓여 영상이 점점 늦어진다. read() 는 아직 돌려주지 않은
+    새 프레임이 올 때까지 최대 read_timeout_s 동안 기다리고, 끊기면 스레드가 다시 연결한다.
     """
 
-    def __init__(self, camera_index: int = 0, image_dir: str = '', camera_url: str = ''):
+    def __init__(self, camera_index: int = 0, image_dir: str = '', camera_url: str = '',
+                 read_timeout_s: float = 5.0):
         self.camera_index = camera_index
         self.camera_url = camera_url
         self.image_dir = Path(image_dir) if image_dir else None
+        self.read_timeout_s = read_timeout_s
         self._cap = None
         self._closed = False
         self._index = 0
         self._images = []
+        self._cond = threading.Condition()
+        self._stop = threading.Event()
+        self._latest = None
+        self._latest_seq = 0
+        self._returned_seq = 0
+        self._thread = None
         if self.image_dir is not None:
             if not self.image_dir.is_dir():
                 raise FileNotFoundError(f'이미지 폴더가 없습니다: {self.image_dir}')
@@ -38,6 +52,24 @@ class FrameSource:
                 raise ValueError(f'이미지 파일이 없습니다: {self.image_dir}')
         else:
             self._open_camera()
+            self._thread = threading.Thread(target=self._reader, name='FrameSource', daemon=True)
+            self._thread.start()
+
+    def _reader(self) -> None:
+        """카메라 프레임을 쉬지 않고 읽어 최신 1장만 남긴다. 실패하면 잠시 쉬고 다시 연결한다."""
+        while not self._stop.is_set():
+            ok, frame = self._cap.read()
+            if self._stop.is_set():
+                break
+            if not ok or frame is None:
+                if self._stop.wait(0.5):
+                    break
+                self._open_camera()
+                continue
+            with self._cond:
+                self._latest = frame
+                self._latest_seq += 1
+                self._cond.notify_all()
 
     def _open_camera(self) -> None:
         if self._cap is not None:
@@ -64,16 +96,23 @@ class FrameSource:
                 if frame is not None:
                     return frame
             return None
-        ok, frame = self._cap.read()
-        if not ok and self.camera_url:
-            self._open_camera()
-            ok, frame = self._cap.read()
-        return frame if ok else None
+        with self._cond:
+            self._cond.wait_for(lambda: self._closed or self._latest_seq > self._returned_seq,
+                                timeout=self.read_timeout_s)
+            if self._closed or self._latest_seq <= self._returned_seq:
+                return None
+            self._returned_seq = self._latest_seq
+            return self._latest
 
     def release(self) -> None:
+        self._stop.set()
+        with self._cond:
+            self._closed = True
+            self._cond.notify_all()
+        if self._thread is not None and self._thread is not threading.current_thread():
+            self._thread.join(timeout=self.read_timeout_s + 1.0)
         if self._cap is not None:
             self._cap.release()
-        self._closed = True
 
 
 def preprocess(frame_bgr: np.ndarray, blur_ksize: int = 5, threshold: int = -1, *,
