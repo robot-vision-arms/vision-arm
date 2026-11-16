@@ -53,12 +53,12 @@
 | 중심·장축 검출, 면적 필터, 나사·너트 비율 분류 | 구현. 회전 물체·빈 영상·너트 구멍·퇴화 윤곽선 테스트 통과 |
 | MVTec 정답 비교, Blur/Threshold 비교 | validation split에서 임계값 선택 후 test split 평가. 아래 수치 참고 |
 | 보정 파일 로딩, 왜곡 보정 후 px→mm | 구현. mm 좌표에서 장축 각도 계산. 미보정 상태는 `calib_ok: false`, mm·각도는 `null` |
-| 보정 파일 생성 스크립트 | 구현. 합성 체커보드 16장으로 실행 확인(RMS 0.4244px), 합성 기준점으로 호모그래피 CLI 검증. 실제 폰 보정은 미실시 |
+| 보정 파일 생성 스크립트 | 구현. 합성 체커보드 16장으로 실행 확인(RMS 0.4244px, ChArUco 전환 전), 합성 기준점으로 호모그래피 CLI 검증. 현재 기본은 ChArUco 보드·ArUco 작업 시트. 실제 폰 보정은 미실시 |
 | ROS2 `/vision/detections`, `/vision/debug_image` | 구현. 실제 ROS 퍼블리셔·구독자로 보정 유무 두 경우 수신 확인 |
 | 작업면→base_link, 툴 자세 | 구현. 단위·축 회전·쿼터니언 테스트 통과 |
 | 지정 좌표 이동 `/sim/move_to_target` | Gazebo + MoveIt에서 실제 실행 성공. 패드 끝 높이 0.25m → 0.35m |
 | 확인 ② 늦게 스폰한 부품 attach/detach | 통과. attached→detached→attached→detached 상태 확인. 붙은 부품 약 0.0992m 상승 후 분리·낙하 확인 |
-| 자체 부품 촬영·실제 mm/각도 확인 | 남음. 폰 영상 주소·고정 거치·체커보드 및 격자 촬영 필요 |
+| 자체 부품 촬영·실제 mm/각도 확인 | 남음. 폰 영상 주소·고정 거치·ChArUco 보드 및 작업 시트 촬영 필요 |
 | 부품 재생성 후 재흡착, 자동 스폰·접근·분류 사이클 | 미검증/후속 구현. 3~4주차 범위 |
 
 미보정 상태에서도 픽셀 검출과 디버그 영상은 확인할 수 있다. 보정 파일은 시작할 때 읽으므로 새 보정값을 만들면 노드를 재시작한다.
@@ -96,8 +96,9 @@ GUI·TCP 브리지는 후속 주차의 뼈대 상태이므로 이 확인에는 �
 
 실제 폰 영상과 mm 좌표 확인:
 
-1. 폰을 최종 위치에 고정하고 같은 해상도로 체커보드 15~20장, 격자 사진과 기준점 CSV를 준비한다.
-2. `scripts/calibrate_camera.py`, `scripts/compute_homography.py`의 사용 예대로 보정 파일을 생성한다.
+1. `PYTHONPATH=src/vision_pick_place python3 scripts/make_calib_sheets.py` 로 `data/calib/charuco_board_A4.pdf`, `data/calib/work_sheet_A4.pdf` 를 만들어 A4 가로 100% 로 인쇄하고, 100 mm 선을 자로 확인한다. ChArUco 보드는 단단한 판에 평평하게 붙인다.
+2. 같은 해상도·줌으로 ChArUco 보드를 손에 들고 15~20장 찍어 `data/calib/charuco/` 에 넣고 `python scripts/calibrate_camera.py --images data/calib/charuco` → `intrinsics.npz` (카메라 내부 파라미터·왜곡).
+   폰을 최종 위치에 고정하고 작업대에 붙인 작업 시트를 부품 없이 1장 찍어 `python scripts/compute_homography.py --aruco --image data/calib/sheet.png` → `homography.npz` (2D 호모그래피).
 3. `src/vision_pick_place/config/params.yaml`의 `camera_url`과 보정 경로를 설정한다.
 4. `ros2 run vision_pick_place vision_node --ros-args --params-file src/vision_pick_place/config/params.yaml` 실행.
 5. 토픽의 `calib_ok: true`와 실측 mm·각도를 비교한다. 보정점 재투영 오차만으로 위치 KPI 통과를 선언하지 않는다.
@@ -205,7 +206,7 @@ python scripts/preview_camera.py --count 2 --segmentation-mode metal_hsv \
 ```
 
 선택 기록은 `logs/week2_preprocessing_validation.json`, 결과 이미지는 `data/preview_hsv`에 저장한다.
-다음 실측 단계는 여전히 **폰 고정·체커보드/격자 보정 → 자체 나사·너트 촬영 → 좌표·각도·종류 검증**이다.
+다음 실측 단계는 여전히 **폰 고정·ChArUco 내부 파라미터 캘리브레이션·ArUco 작업 시트 호모그래피 → 자체 나사·너트 촬영 → 좌표·각도·종류 검증**이다.
 
 ## 단계별로 눈으로 확인하기
 
