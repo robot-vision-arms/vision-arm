@@ -7,13 +7,13 @@ import csv
 from datetime import datetime
 import json
 from pathlib import Path
-import time
 
 import rclpy
 from rclpy.node import Node
 from std_msgs.msg import String
 
 from vision_pick_place.transport import PoseClient
+from vision_pick_place.clock_measurement import ClockMeasurement
 
 
 class RobotBridge(Node):
@@ -28,24 +28,40 @@ class RobotBridge(Node):
         path = Path(self.get_parameter('log_dir').value)
         path.mkdir(parents=True, exist_ok=True)
         self.log_file = (path / f'comm_{datetime.now():%Y%m%d_%H%M%S_%f}.csv').open('w', newline='')
-        self.writer = csv.DictWriter(self.log_file, fieldnames=['seq', 'sent', 'acked', 'latency_ms', 'error'])
+        self.clock = ClockMeasurement()
+        fields = ['seq', 'sent', 'acked', 'latency_ms', 'error', 'attempted', 'validated',
+                  'connected', 'send_completed', 'stage', 'tcp_roundtrip_ms',
+                  'raw_latency_ms', 'latency_valid', 'clock_warning', 'clock_jump_ms',
+                  'clock_sample_span_ms', 'clock_scope']
+        self.writer = csv.DictWriter(self.log_file, fieldnames=fields)
         self.writer.writeheader()
         self.pub_log = self.create_publisher(String, '/robot/log', 10)
         self.sub = self.create_subscription(String, '/vision/detections', self.on_detections, 1)
 
     def on_detections(self, msg):
-        result = dict(seq=None, sent=False, acked=False, latency_ms=None, error='')
+        result = dict(seq=None, sent=False, acked=False, latency_ms=None, error='',
+                      attempted=True, validated=False, connected=False, send_completed=False,
+                      stage='decoding', tcp_roundtrip_ms=None)
+        packet = None
+        token = self.clock.begin()
+        self.client.last_transaction = {}
         try:
             packet = json.loads(msg.data)
             if isinstance(packet, dict):
                 result['seq'] = packet.get('seq')
-            # sent denotes an attempted transaction; success is acked.
+            # Retain legacy sent=attempted semantics. send_completed means that
+            # local sendall returned, not that the peer processed the data.
             result['sent'] = True
             self.client.exchange(packet)
             result['acked'] = True
-            result['latency_ms'] = (time.time()-packet['t_capture'])*1000
         except (ValueError, TypeError, OSError) as exc:
             result['error'] = str(exc)
+        result.update(self.client.last_transaction)
+        capture = packet.get('t_capture') if isinstance(packet, dict) else None
+        result.update(self.clock.finish(token, capture))
+        if not result['acked']:
+            result['latency_ms'] = None
+            result['latency_valid'] = False
         self.pub_log.publish(String(data=json.dumps(result, ensure_ascii=False)))
         self.writer.writerow(result)
         self.log_file.flush()

@@ -192,3 +192,39 @@ def test_ack_success_does_not_hide_forward_failure(server):
         assert rows[-1]['error'] == 'ROS publisher failed'
     finally:
         client.close()
+
+
+def test_transaction_stages_distinguish_validation_from_ack(server):
+    srv, _ = server
+    client = PoseClient(*srv.server_address)
+    try:
+        with pytest.raises(ValueError):
+            client.exchange({'seq': 'bad'})
+        assert client.last_transaction['stage'] == 'validating'
+        assert not client.last_transaction['send_completed']
+        client.exchange(pose())
+        result = client.last_transaction
+        assert result['stage'] == 'acked'
+        assert result['validated'] and result['connected'] and result['send_completed'] and result['acked']
+        assert result['tcp_roundtrip_ms'] >= 0
+    finally:
+        client.close()
+
+
+def test_failed_write_is_not_marked_as_send_completed(monkeypatch):
+    class BrokenSocket:
+        def settimeout(self, value):
+            pass
+        def sendall(self, data):
+            raise BrokenPipeError('write failed')
+        def close(self):
+            pass
+    monkeypatch.setattr(socket, 'create_connection', lambda *a, **kw: BrokenSocket())
+    client = PoseClient('127.0.0.1', 1234)
+    with pytest.raises(BrokenPipeError):
+        client.exchange(pose())
+    assert client.last_transaction['stage'] == 'sending'
+    assert client.last_transaction['connected']
+    assert not client.last_transaction['send_completed']
+    assert not client.last_transaction['acked']
+    assert client.sock is None

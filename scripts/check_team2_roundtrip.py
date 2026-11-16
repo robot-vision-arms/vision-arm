@@ -23,9 +23,17 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--domain', type=int, default=192)
     parser.add_argument('--out', default='logs/team2_roundtrip_check.json')
+    parser.add_argument('--duration', type=float, default=0, help='Normal traffic minimum duration in seconds')
+    parser.add_argument('--restart-cycles', type=int, default=1)
+    parser.add_argument('--interval', type=float, default=.05, help='Minimum seconds between normal frames')
     args = parser.parse_args()
     if not 1 <= args.domain <= 232:
         parser.error('Use an isolated ROS domain in 1..232')
+    import math
+    if (not math.isfinite(args.duration) or not 0 <= args.duration <= 3600
+            or not math.isfinite(args.interval) or not 0 <= args.interval <= 5
+            or not 1 <= args.restart_cycles <= 20):
+        parser.error('duration 0..3600, interval 0..5, restart-cycles 1..20 required')
     os.environ['ROS_DOMAIN_ID'] = str(args.domain)
     import rclpy
     from std_msgs.msg import String
@@ -43,6 +51,9 @@ def main():
     save_report(output, report)
     process_log = (log_dir/'process.log').open('w')
     phase = 'setup'
+    normal_started = time.monotonic()
+    progress_at = normal_started
+    restarts = []
 
     def start(module, *extra):
         child = subprocess.Popen([sys.executable, '-m', module, *extra],
@@ -110,27 +121,50 @@ def main():
             publisher.publish(String(data=json.dumps(value)))
             return value
         phase = 'normal'
-        for seq in range(100):
+        normal_started = time.monotonic()
+        progress_at = normal_started
+        seq = 0
+        while seq < 100 or time.monotonic()-normal_started < args.duration:
+            measured.count = max(100, seq+1)
+            sent_at = time.monotonic()
             send(seq, calibrated=(seq % 2 == 0))
             wait_for(lambda: seq in targets and seq in logs, timeout=3)
+            if not logs[seq]['acked'] or logs[seq]['error']:
+                raise RuntimeError(f'Normal traffic failed at seq {seq}')
+            seq += 1
+            while time.monotonic()-sent_at < args.interval:
+                rclpy.spin_once(node, timeout_sec=.005)
+            if time.monotonic()-progress_at >= 30:
+                print(f'Normal traffic: {seq} packets / {time.monotonic()-normal_started:.1f}s', flush=True)
+                progress_at = time.monotonic()
         normal = measured.report()
         if not normal['ok']:
-            raise RuntimeError(f'100-packet run failed: {normal}')
+            raise RuntimeError(f'Normal traffic check failed: {normal}')
+        normal_duration = time.monotonic()-normal_started
         phase = 'restart'
-        stop(server)
-        send(100)
-        wait_for(lambda: 100 in logs, timeout=3)
-        if logs[100]['acked'] or not logs[100]['error']:
-            raise RuntimeError('Server-down packet should have a failed ACK')
-        server = start_server()
-        wait_for(lambda: node.count_publishers('/robot/targets') == 1)
-        value = send(101)
-        wait_for(lambda: 101 in targets and 101 in logs)
-        if not logs[101]['acked'] or targets[101] != value or 100 in targets:
-            raise RuntimeError('Server restart recovery or no-replay check failed')
+        for cycle in range(args.restart_cycles):
+            stop(server)
+            failed_seq = seq
+            send(seq)
+            wait_for(lambda: seq in logs, timeout=3)
+            if logs[seq]['acked'] or not logs[seq]['error']:
+                raise RuntimeError('Server-down packet should have a failed ACK')
+            server = start_server()
+            wait_for(lambda: node.count_publishers('/robot/targets') == 1)
+            seq += 1
+            recovery_started = time.monotonic()
+            value = send(seq)
+            wait_for(lambda: seq in targets and seq in logs)
+            if not logs[seq]['acked'] or targets[seq] != value or failed_seq in targets:
+                raise RuntimeError('Server restart recovery or no-replay check failed')
+            restarts.append(dict(cycle=cycle+1, failure_recorded=True, failed_seq=failed_seq,
+                                 recovered_seq=seq, no_failed_packet_replay=True,
+                                 recovery_ms=(time.monotonic()-recovery_started)*1000))
+            print(f'Server restart {cycle+1}/{args.restart_cycles}: recovered', flush=True)
+            seq += 1
         report.update(ok=True, status='passed', normal=normal,
-                      restart=dict(failure_recorded=True, failed_seq=100,
-                                   recovered_seq=101, no_failed_packet_replay=True),
+                      normal_duration_s=normal_duration,
+                      restart_cycles=restarts,
                       calibration_accuracy_verified=False)
     except (Exception, KeyboardInterrupt) as exc:
         report.update(ok=False, status='failed', error=f'{type(exc).__name__}: {exc}',

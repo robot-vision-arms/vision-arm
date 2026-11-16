@@ -47,6 +47,7 @@ class PoseClient:
         self.host, self.port, self.timeout = host, port, timeout
         self.sock = None
         self.buffer = b''
+        self.last_transaction = {}
 
     def close(self):
         if self.sock is not None:
@@ -55,16 +56,23 @@ class PoseClient:
         self.buffer = b''
 
     def exchange(self, packet):
+        self.last_transaction = dict(stage='validating', validated=False, connected=False,
+                                     send_completed=False, acked=False, tcp_roundtrip_ms=None)
         validate_pose(packet)
         raw = encode(packet)
         if len(raw) > MAX_LINE:
             raise ValueError('packet too large')
+        self.last_transaction['validated'] = True
         deadline = time.monotonic() + self.timeout
         try:
+            self.last_transaction['stage'] = 'connecting'
             if self.sock is None:
                 self.sock = socket.create_connection((self.host, self.port), self.timeout)
+            self.last_transaction.update(connected=True, stage='sending')
             self.sock.settimeout(max(.001, deadline-time.monotonic()))
+            send_started = time.monotonic()
             self.sock.sendall(raw)
+            self.last_transaction.update(send_completed=True, stage='waiting_ack')
             while b'\n' not in self.buffer:
                 remaining = deadline-time.monotonic()
                 if remaining <= 0:
@@ -81,6 +89,8 @@ class PoseClient:
             if (not isinstance(ack, dict) or type(ack.get('ack')) is not int
                     or ack['ack'] != packet['seq'] or ack.get('status') != 'ok'):
                 raise ValueError('ACK sequence or status mismatch')
+            self.last_transaction.update(acked=True, stage='acked',
+                tcp_roundtrip_ms=(time.monotonic()-send_started)*1000)
             return ack
         except Exception:
             # No automatic replay: the server may already have accepted this packet.

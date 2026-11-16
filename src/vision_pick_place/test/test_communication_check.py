@@ -79,3 +79,19 @@ def test_failure_report_replaces_prior_pass(tmp_path):
     module.save_report(out, {'ok': False, 'status': 'failed', 'errors': ['timeout']})
     assert json.loads(out.read_text())['ok'] is False
     assert list(tmp_path.iterdir()) == [out]
+
+
+def test_clock_warning_does_not_turn_ack_success_into_tcp_failure():
+    check = CommunicationCheck(1)
+    fill(check)
+    check.logs[1].update(latency_ms=None, latency_valid=False,
+                         clock_warning='Wall clock changed', tcp_roundtrip_ms=2.5)
+    result = check.report()
+    assert result['communication_ok'] is True
+    assert result['ack_success_rate'] == 1
+    assert result['latency_ok'] is False
+    assert result['ok'] is False
+    assert result['latency_samples'] == 0
+    assert result['latency_p95_ms'] is None
+    assert result['tcp_roundtrip_p95_ms'] == 2.5
+    assert result['clock_warnings'] == [{'seq': 1, 'warning': 'Wall clock changed'}]
