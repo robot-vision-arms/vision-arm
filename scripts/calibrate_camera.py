@@ -7,6 +7,11 @@
     python scripts/calibrate_camera.py --images data/calib/charuco
     → data/calib/intrinsics.npz (camera_matrix, dist_coeffs, rms, image_size)
 
+우리 팀 실제 명령 (2026-11-17, DECISIONS.md 10절). 보드 사진은 live_view.py 의 회전(r)을 켠 채 저장돼 세로였고,
+실제 스트림은 가로 1280x720 이라 --rotate 로 돌려 맞춘다. 폰이 왜곡을 이미 펴서 보내므로 --dist-model none:
+
+    python scripts/calibrate_camera.py --images data/calib/charuco --rotate ccw --dist-model none
+
 예전 체커보드를 쓸 때 (--cols/--rows 는 '칸 수'가 아니라 '내부 코너 수', 10x7 칸 보드 → 9x6):
 
     python scripts/calibrate_camera.py --board chessboard --images data/calib/checkerboard --cols 9 --rows 6 --square-mm 25
@@ -44,8 +49,14 @@ MIN_GOOD_IMAGES = 10
 SUBPIX_CRITERIA = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.001)
 
 
-def iter_images(p, folder: str):
-    """(경로, 컬러, 흑백). 해상도가 섞이면 멈춘다: 해상도가 바뀌면 초점거리(픽셀 단위)도 바뀌어서 섞으면 엉터리가 된다."""
+ROTATIONS = {'none': None, 'cw': cv2.ROTATE_90_CLOCKWISE, 'ccw': cv2.ROTATE_90_COUNTERCLOCKWISE, '180': cv2.ROTATE_180}
+
+
+def iter_images(p, folder: str, rotate: str = 'none'):
+    """(경로, 컬러, 흑백). 해상도가 섞이면 멈춘다: 해상도가 바뀌면 초점거리(픽셀 단위)도 바뀌어서 섞으면 엉터리가 된다.
+
+    rotate: 사진을 실제 스트림 방향으로 돌린다. 보정 결과(image_size)는 실제로 검출할 영상과 같은 방향이어야 한다.
+    """
     paths = sorted(f for f in Path(folder).iterdir() if f.suffix.lower() in IMAGE_SUFFIXES)
     if not paths:
         p.error(f'사진이 없습니다: {folder}')
@@ -55,6 +66,8 @@ def iter_images(p, folder: str):
         if img is None:
             print(f'SKIP 읽을 수 없음: {path.name}')
             continue
+        if ROTATIONS[rotate] is not None:
+            img = cv2.rotate(img, ROTATIONS[rotate])
         current_size = (img.shape[1], img.shape[0])
         if size is not None and size != current_size:
             p.error(f'모든 캘리브레이션 사진의 해상도가 같아야 합니다: {path.name} {current_size} ≠ {size}')
@@ -67,10 +80,10 @@ def save_debug(debug_dir, path: Path, img):
         cv2.imwrite(str(Path(debug_dir) / path.name), img)
 
 
-def calibrate_charuco(p, images: str, debug_dir):
+def calibrate_charuco(p, images: str, debug_dir, rotate: str = 'none', flags: int = 0):
     board = aruco_calib.charuco_board()
     all_corners, all_ids, used, size = [], [], [], None
-    for path, img, gray in iter_images(p, images):
+    for path, img, gray in iter_images(p, images, rotate):
         corners, ids = aruco_calib.detect_charuco(gray, board)
         if ids is None or len(ids) < MIN_CHARUCO_CORNERS:
             # 흔한 원인: 흔들림, 반사광, 보드가 너무 작게 찍힘
@@ -86,7 +99,8 @@ def calibrate_charuco(p, images: str, debug_dir):
             save_debug(debug_dir, path, img)
     if len(used) < 3:
         p.error('보드 검출에 성공한 사진이 3장 이상 필요합니다. 실제 측정은 다양한 각도로 15~20장 권장.')
-    rms, matrix, distortion, per_view = aruco_calib.calibrate_charuco_extended(all_corners, all_ids, size, board)
+    rms, matrix, distortion, per_view = aruco_calib.calibrate_charuco_extended(all_corners, all_ids, size, board,
+                                                                               flags)
     return rms, matrix, distortion, size, used, per_view
 
 
@@ -111,14 +125,15 @@ def find_chessboard_corners(gray: np.ndarray, cols: int, rows: int) -> np.ndarra
     return cv2.cornerSubPix(gray, corners, (11, 11), (-1, -1), SUBPIX_CRITERIA)
 
 
-def calibrate_chessboard(p, images: str, cols: int, rows: int, square_mm: float, debug_dir):
+def calibrate_chessboard(p, images: str, cols: int, rows: int, square_mm: float, debug_dir,
+                         rotate: str = 'none', flags: int = 0):
     if cols is None or rows is None or square_mm is None:
         p.error('--board chessboard 에는 --cols, --rows, --square-mm 가 필요합니다.')
     if cols < 2 or rows < 2 or not np.isfinite(square_mm) or square_mm <= 0:
         p.error('내부 코너 수는 각각 2 이상, 칸 크기는 양수여야 합니다.')
     board = board_points_mm(cols, rows, square_mm)
     object_points, image_points, used, size = [], [], [], None
-    for path, img, gray in iter_images(p, images):
+    for path, img, gray in iter_images(p, images, rotate):
         corners = find_chessboard_corners(gray, cols, rows)
         if corners is None:
             # 흔한 원인: 보드 일부가 화면 밖으로 잘림, 흔들림, 반사광, cols/rows 를 칸 수로 잘못 넣음
@@ -134,7 +149,7 @@ def calibrate_chessboard(p, images: str, cols: int, rows: int, square_mm: float,
     if len(used) < 3:
         p.error('코너 검출에 성공한 사진이 3장 이상 필요합니다. 실제 측정은 다양한 각도로 15~20장 권장.')
     rms, matrix, distortion, _, _, _, _, per_view = cv2.calibrateCameraExtended(
-        object_points, image_points, size, None, None)
+        object_points, image_points, size, None, np.zeros(5), flags=flags)
     return rms, matrix, distortion, size, used, np.asarray(per_view).reshape(-1)
 
 
@@ -147,17 +162,22 @@ def main():
     p.add_argument('--square-mm', type=float, help='chessboard 전용: 칸 크기 (mm)')
     p.add_argument('--out', default='data/calib/intrinsics.npz')
     p.add_argument('--debug-dir', default=None, help='주면 코너를 그린 사진을 여기에 저장한다 (잘 찾았는지 눈으로 확인용)')
+    p.add_argument('--rotate', choices=tuple(ROTATIONS), default='none',
+                   help='사진을 돌려서 계산한다. 결과 해상도가 실제 스트림 방향(예: 가로 1280x720)과 같아야 한다')
+    p.add_argument('--dist-model', choices=tuple(aruco_calib.DIST_MODEL_FLAGS), default='full',
+                   help='렌즈 왜곡 모델. full=k1 k2 p1 p2 k3, k1=방사 1개, none=왜곡 0 고정 (폰이 이미 펴서 보낼 때)')
     args = p.parse_args()
     if args.debug_dir:
         Path(args.debug_dir).mkdir(parents=True, exist_ok=True)
 
     # 핵심 계산: 모든 사진의 (진짜 mm, 사진 px) 짝을 가장 잘 설명하는 카메라 행렬·왜곡 계수를 찾는다.
     # rms = 찾은 값으로 코너를 다시 그려 봤을 때 실제 코너와 평균 몇 픽셀 어긋나는지 (작을수록 좋음)
+    flags = aruco_calib.DIST_MODEL_FLAGS[args.dist_model]
     if args.board == 'charuco':
-        rms, K, dist, size, used, per_view = calibrate_charuco(p, args.images, args.debug_dir)
+        rms, K, dist, size, used, per_view = calibrate_charuco(p, args.images, args.debug_dir, args.rotate, flags)
     else:
         rms, K, dist, size, used, per_view = calibrate_chessboard(p, args.images, args.cols, args.rows,
-                                                                  args.square_mm, args.debug_dir)
+                                                                  args.square_mm, args.debug_dir, args.rotate, flags)
     if len(used) < MIN_GOOD_IMAGES:
         print(f'[주의] {len(used)}장으로 계산. {MIN_GOOD_IMAGES}장보다 적으면 결과가 불안정할 수 있으니 더 찍는 게 좋다')
 
@@ -173,7 +193,7 @@ def main():
     np.savez(output, camera_matrix=K, dist_coeffs=dist, rms=rms, image_size=np.array(size))
 
     # 대략적인 기준: 1px 아래면 쓸 만하고, 0.5px 아래면 좋은 편. 폰 사진 기준으로 검증한 값은 아니다.
-    print(f'\n{output}: {len(used)}장, RMS={rms:.4f} px  (1 px 아래면 쓸 만함)')
+    print(f'\n{output}: {len(used)}장, {size[0]}x{size[1]}, 왜곡 모델 {args.dist_model}, RMS={rms:.4f} px  (1 px 아래면 쓸 만함)')
     print(f'초점거리 fx={K[0, 0]:.1f}, fy={K[1, 1]:.1f}  중심 cx={K[0, 2]:.1f}, cy={K[1, 2]:.1f}')
     print(f'왜곡 계수 {np.round(dist.ravel(), 4).tolist()}')
 

@@ -100,3 +100,30 @@ def test_scripts_round_trip(tmp_path):
     truth = np.array([[148.5, 105.0], [80.0, 60.0], [220.0, 150.0]])
     pixels = cv2.perspectiveTransform(sheet_mm_to_image_px(truth, ppm).reshape(-1, 1, 2), homography)
     assert calibrator.px_to_mm(pixels.reshape(-1, 2)) == pytest.approx(truth, abs=1.0)
+
+
+def test_dist_model_none_keeps_zero_distortion():
+    """--dist-model none: 왜곡 계수는 0 으로 고정되고 초점거리만 구한다 (폰이 이미 왜곡을 펴서 보낼 때)."""
+    board = ac.render_charuco(2)
+    corners, ids = zip(*(ac.detect_charuco(view_of_plane(board, 2, *pose)[0]) for pose in POSES))
+    rms, matrix, dist = ac.calibrate_charuco(list(corners), list(ids), SIZE, flags=ac.DIST_MODEL_FLAGS['none'])
+    assert rms < 1.0
+    assert np.allclose(dist, 0)
+    assert matrix[0, 0] == pytest.approx(900, rel=0.03)
+
+
+def test_calibrate_script_rotate_matches_stream_orientation(tmp_path):
+    """세로로 저장된 보드 사진을 --rotate 로 돌리면 결과 image_size 가 가로 스트림 크기가 된다."""
+    board_dir = tmp_path / 'charuco'
+    board_dir.mkdir()
+    board = ac.render_charuco(2)
+    for index, pose in enumerate(POSES):
+        landscape = view_of_plane(board, 2, *pose)[0]
+        cv2.imwrite(str(board_dir / f'{index:02d}.png'), cv2.rotate(landscape, cv2.ROTATE_90_CLOCKWISE))
+    out = tmp_path / 'intrinsics.npz'
+    subprocess.run([sys.executable, str(SCRIPTS / 'calibrate_camera.py'), '--images', str(board_dir),
+                    '--rotate', 'ccw', '--dist-model', 'none', '--out', str(out)], check=True, capture_output=True)
+    data = np.load(out)
+    assert tuple(data['image_size']) == SIZE
+    assert np.allclose(data['dist_coeffs'], 0)
+    assert data['camera_matrix'][0, 2] == pytest.approx(640, abs=15)

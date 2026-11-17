@@ -95,18 +95,33 @@ def detect_charuco(gray: np.ndarray, board=None):
     return (corners, ids) if count and ids is not None else (None, None)
 
 
-def calibrate_charuco(all_corners: list, all_ids: list, image_size: tuple, board=None):
+# 렌즈 왜곡 모델 → cv2.calibrateCamera flags.
+#   full : k1 k2 p1 p2 k3 (OpenCV 기본)
+#   k1   : 방사 왜곡 1개만. 사진 구석 데이터가 적을 때 덜 튄다
+#   none : 왜곡 0 으로 고정하고 초점거리·중심만 구한다. 폰이 이미 왜곡을 펴서 보내는 경우 (DECISIONS.md 10절)
+DIST_MODEL_FLAGS = {
+    'full': 0,
+    'k1': cv2.CALIB_ZERO_TANGENT_DIST | cv2.CALIB_FIX_K2 | cv2.CALIB_FIX_K3,
+    'none': cv2.CALIB_ZERO_TANGENT_DIST | cv2.CALIB_FIX_K1 | cv2.CALIB_FIX_K2 | cv2.CALIB_FIX_K3,
+}
+
+
+def calibrate_charuco(all_corners: list, all_ids: list, image_size: tuple, board=None, flags: int = 0):
     """(rms, camera_matrix, dist_coeffs). image_size = (너비, 높이)."""
-    rms, matrix, distortion, _ = calibrate_charuco_extended(all_corners, all_ids, image_size, board)
+    rms, matrix, distortion, _ = calibrate_charuco_extended(all_corners, all_ids, image_size, board, flags)
     return rms, matrix, distortion
 
 
-def calibrate_charuco_extended(all_corners: list, all_ids: list, image_size: tuple, board=None):
-    """(rms, camera_matrix, dist_coeffs, 사진별 재투영 오차 (N,) px). 유독 큰 사진은 빼고 다시 돌려 볼 후보."""
+def calibrate_charuco_extended(all_corners: list, all_ids: list, image_size: tuple, board=None, flags: int = 0):
+    """(rms, camera_matrix, dist_coeffs, 사진별 재투영 오차 (N,) px). 유독 큰 사진은 빼고 다시 돌려 볼 후보.
+
+    flags: DIST_MODEL_FLAGS 값. FIX_K* 는 초기값을 고정하므로 왜곡 계수를 0 으로 시작해야 한다.
+    """
     board = board or charuco_board()
+    distortion0 = np.zeros(5)
     if hasattr(cv2.aruco, 'calibrateCameraCharucoExtended'):
         rms, matrix, distortion, _, _, _, _, per_view = cv2.aruco.calibrateCameraCharucoExtended(
-            all_corners, all_ids, board, image_size, None, None)
+            all_corners, all_ids, board, image_size, None, distortion0, flags=flags)
         return rms, matrix, distortion, np.asarray(per_view).reshape(-1)
     object_points, image_points = [], []
     for corners, ids in zip(all_corners, all_ids):
@@ -114,7 +129,7 @@ def calibrate_charuco_extended(all_corners: list, all_ids: list, image_size: tup
         object_points.append(obj)
         image_points.append(img)
     rms, matrix, distortion, _, _, _, _, per_view = cv2.calibrateCameraExtended(
-        object_points, image_points, image_size, None, None)
+        object_points, image_points, image_size, None, distortion0, flags=flags)
     return rms, matrix, distortion, np.asarray(per_view).reshape(-1)
 
 
