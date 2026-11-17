@@ -62,7 +62,7 @@ python scripts/compute_homography.py --aruco --image data/calib/sheet/landscape_
 | 프로젝트 코드 수신 | `params.yaml` 설정 그대로 `FrameSource` 열기 2.0초, 60/60 프레임 (720, 1280, 3), `preprocess` 마스크 (720, 1280) 정상, `release()` 후 `read()`는 `None` |
 | 실시간 뷰어 | `scripts/live_view.py` 추가 (아래 9단계 참고) |
 | 빌드·테스트 | 최신 `main`(`0af3e57`)에서 `colcon build` 2개 패키지 성공, `colcon test` **55 tests, 0 errors, 0 failures, 0 skipped** (보정 테스트 추가로 47 → 55) |
-| 미완료 | 폰 고정 거치·해상도 고정 상태에서의 촬영(캘리브레이션과 함께), 동경·성민 PC의 환경 점검 결과 수집 |
+| 미완료 | 11-17 갱신: 폰 고정 거치(가로 1280×720)·보정 촬영은 동경 확인 완료(아래 표), 동경·성민 환경 점검 1~7단계 수집 완료. 카메라 FPS 측정 완료 (RTSP 31.8 fps, 아래 10단계 상세). 가영 1주차 항목 완료 |
 
 운용 시 주의: 아이폰 앱이 백그라운드로 가거나 화면이 잠기면 스트리밍이 멈춰 `Connection refused`가 난다.
 자동 잠금을 끄고 앱을 화면에 띄운 채 충전기를 연결해 둔다. 매번 USB 연결과 핫스팟 켜기가 필요하다.
@@ -399,7 +399,7 @@ python scripts/live_view.py
 | OS | Windows 11 Pro / WSL2 Ubuntu 24.04.5 LTS (커널 6.18.33.2-microsoft-standard-WSL2) |
 | ROS·시뮬 | ROS 2 Jazzy, Gazebo Sim 8.15.0 (Harmonic), MoveIt 2.12.4 |
 | Python 패키지 | Python 3.12.3 (.venv), OpenCV 4.6.0, NumPy 1.26.4, PySide6 6.12.0 |
-| 카메라 | 아이폰 IP 카메라 앱, USB 개인용 핫스팟. 11-17 기준 HTTP MJPEG `http://172.20.10.1:8080/stream.mjpg` 1280×720 가로 (앱이 세로 720×1280 로 보낼 때는 `params.yaml` 의 `camera_rotate_deg: 270`). FPS 는 측정 시 송출이 꺼져 있어 미측정 |
+| 카메라 | 아이폰 IP 카메라 앱, USB 개인용 핫스팟. 11-17 기준 HTTP MJPEG `http://172.20.10.1:8080/stream.mjpg` 1280×720 가로 (앱이 세로 720×1280 로 보낼 때는 `params.yaml` 의 `camera_rotate_deg: 270`). FPS (11-17, 고정 거치 상태, 10 초 측정): **RTSP `rtsp://172.20.10.1:8554/live` 31.8 fps**, HTTP MJPEG 7.5 fps. `params.yaml` 은 RTSP 를 쓴다. 거치 화면 `data/captures/mount_20261117.png` (git 제외) |
 
 **8단계 확인 ① (가영 PC, 11-17):** `ros2 launch ur5e_pick_place sim.launch.py` (Gazebo·RViz 창, 진공 컵 두 개 헤드 URDF) → RViz MotionPlanning 패널에서 사용자가 직접 Plan & Execute.
 move_group 로그: `Plan and Execute request accepted` → `scaled_joint_trajectory_controller successfully finished` → `Completed trajectory execution with status SUCCEEDED` → `Plan and Execute request complete!`.
