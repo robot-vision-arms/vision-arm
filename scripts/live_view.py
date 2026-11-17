@@ -62,7 +62,8 @@ while True:
         rot = ROTS[(ROTS.index(rot) + 1) % 3]
         print('회전:', {None: '없음', cv2.ROTATE_90_CLOCKWISE: '시계 90', cv2.ROTATE_90_COUNTERCLOCKWISE: '반시계 90'}[rot], flush=True)
     if k == ord('s') and f is not None:
-        p = out / time.strftime('cap_%Y%m%d_%H%M%S.png')
+        now = time.time()  # 같은 초에 여러 번 눌러도 덮어쓰지 않도록 밀리초까지
+        p = out / (time.strftime('cap_%Y%m%d_%H%M%S', time.localtime(now)) + f'_{int(now * 1000) % 1000:03d}.png')
         cv2.imwrite(str(p), f)  # 글자 없는 원본 저장
         saved += 1
         print('저장:', p, flush=True)

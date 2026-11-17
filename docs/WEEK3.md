@@ -546,3 +546,23 @@ URDF 변경 영향 확인: 팀원 1 의 `scripts/check_sim_week2.py` 를 새 시
 - `check_sim_week2.py` 는 `logs/workcell_session.json` 을 읽지 않아, 새 sim.launch.py 에서는 `GZ_PARTITION` 을 직접 export 해야 Gazebo 상태를 받는다 (안 하면 대기 시간 초과).
 - 같은 스크립트는 obj_0 이 한 번도 없던 새 시뮬레이터에서만 통과한다 (DetachableJoint 는 처음 생긴 obj_k 만 자동 attach). 다른 확인으로 obj_0 을 만든 뒤 실행하면 "상태 대기 시간 초과" 가 난다. 스크립트 docstring 에 적힌 전제대로이며 오류가 아니다.
 - ±0.85 m 상자에 실제로 내려놓는 동작(`/sim/run_cycle`)은 이번에 확인하지 않았다.
+
+## 실제 폰 영상 → 스폰 노드 연결 확인 (11-17, 보정 전)
+
+보정 파일이 들어오면 바로 완료 기준("카메라 앞 부품 위치대로 Gazebo 에 부품이 생김")을 확인할 수 있도록, 실제 폰 영상으로 끝까지 이어지는지 먼저 확인했다. 캘리브레이션은 팀원 1(동경)이 진행한다.
+
+실행: `sim.launch.py`(창 없이) → `team2_link.launch.py`(robot_server·robot_bridge·object_spawner) → `vision_node`(`params.yaml`, `camera_url:=http://172.20.10.1:8080/stream.mjpg`). ROS_DOMAIN_ID 0.
+
+| 단계 | 결과 |
+|---|---|
+| 폰 영상 → `vision_node` | 수신. "미보정: px만 발행" 경고 (intrinsics·homography 없음) |
+| `/vision/detections` | 약 7.5 Hz, `calib_ok: false`, `x_mm`·`y_mm`·`angle_deg` null, `u_px`·`v_px` 있음 |
+| robot_bridge → TCP → robot_server | `/robot/log`: sent·acked·validated true, 지연 약 5.5 ms |
+| `/robot/targets` | 약 7.5 Hz, 검출 패킷과 같은 내용 |
+| `/sim/spawn_objects` | 거부: "calib_ok 가 false 인 패킷은 스폰하지 않습니다 (mm 좌표 없음)" (정상) |
+
+- 이번 장면에는 시트 위에 부품이 없었는데도 12 개(나사 6·너트 6)가 검출됐다. 마우스·케이블·ArUco 마커·책상 물건이 잡힌 오검출이다. 작업 시트 안쪽만 보는 `sheet_roi` 는 보정이 있어야 켜지므로 보정 후 다시 확인한다.
+- 스폰 노드는 패킷당 앞에서부터 최대 3 개(`max_objects`)만 스폰하므로, 오검출이 남아 있으면 진짜 부품이 밀려날 수 있다.
+- 폰 송출 앱이 화면 꺼짐·백그라운드 전환 때 여러 번 멈췄다 (포트는 열려 있는데 프레임 0, 또는 포트 닫힘). 앱을 완전히 종료 후 다시 켜면 복구. 촬영·시연 중에는 자동 잠금을 끈다.
+
+보정 후 할 일: `data/calib/intrinsics.npz`·`homography.npz` 가 생기면 같은 실행으로 부품 2~3 개를 시트 격자의 알려진 위치에 놓고 `/sim/spawn_objects` → Gazebo 위치와 놓은 위치(mm) 비교.
