@@ -378,16 +378,24 @@ python scripts/live_view.py
 
 | 단계 | 팀원 1 (동경) | 팀원 2 (성민) | 팀원 3 (가영) |
 |---|---|---|---|
-| 1. WSL 메모리 | ✅ 11-16 9.7GiB / swap 8GiB | | ✅ 9.7GiB / swap 8GiB |
+| 1. WSL 메모리 | ✅ 11-16 9.7GiB / swap 8GiB | ✅ 11-17 `free -h`: RAM 9.7GiB / swap 8.0GiB | ✅ 9.7GiB / swap 8GiB |
 | 2. 폰 카메라 앱 | 해당 없음 | 해당 없음 | ✅ 11-16 아이폰 RTSP |
-| 3. conda 끄기 | ✅ 11-16 | | ✅ |
+| 3. conda 끄기 | ✅ 11-16 | ✅ 11-17 자동 활성화 False, `env.sh` 적용 후 Conda 비활성·프로젝트 `.venv` Python 3.12.3 확인 | ✅ |
 | 4. ROS2 Jazzy | ✅ 11-16 talker/listener | ✅ 11-16 보고 (ROS·Gazebo·MoveIt 정상) | ✅ |
 | 5. Python·venv | ✅ 11-16 | ✅ 11-16 보고 | ✅ Python 3.12.3 |
 | 6. rosdep | ✅ 11-16 `rosdep check` 충족 | ✅ 11-16 보고 | ✅ |
 | 7. 빌드·테스트 | ✅ 11-16 빌드 성공, 55개 통과 (보고 기준) | ✅ 11-16 재점검: 빌드 성공, 65개 통과 (보고 기준) | ✅ 11-16 최신 `main`(작업 시트 ROI·RViz 수정 포함) 68개 통과 (ChArUco 머지 전 55, 직후 62) |
-| 8. 확인 ① | ✅ 11-16 Gazebo·RViz 화면 Plan & Execute로 팔 이동 확인 (headless `check_sim_week2.py`도 통과) | ⚠️ 11-13 UR 기본 예제 Plan & Execute 확인. 프로젝트 `sim.launch.py` 화면 확인 남음 | |
+| 8. 확인 ① | ✅ 11-16 Gazebo·RViz 화면 Plan & Execute로 팔 이동 확인 (headless `check_sim_week2.py`도 통과) | ⚠️ 11-17 프로젝트 Gazebo·RViz GUI 실행 및 서비스 기반 나사·너트 상자 투입 확인. 프로젝트 RViz 버튼 수동 Plan & Execute 확인·복귀 안정성은 남음 (아래 상세) | |
 | 9. 폰 영상 수신 | 해당 없음 (`check_environment.py` FAIL 1은 카메라 접속) | 해당 없음 (`check_environment.py` FAIL 1은 카메라 접속) | ✅ 11-16 USB 핫스팟 |
 | 10. 기록 | ✅ 11-17 캘리브레이션 결과 (위 팀원 1 기록, DECISIONS.md 10절) | | |
+
+### 성민 PC 1·3·8단계 확인 상세 — 2026-11-17
+
+- **1단계:** `/home/user1/vision-arm`에서 `free -h` 실행. Ubuntu가 인식한 총 RAM은 9.7GiB, swap은 8.0GiB다. 현재 적용 용량을 확인한 것이며 Windows 설정 파일을 이번에 변경하지 않았다.
+- **3단계:** `/home/user1/anaconda3/bin/conda config --show auto_activate_base` 결과 `auto_activate: False`. 별도 셸에서 `source ~/vision-arm/env.sh` 적용 후 `CONDA_PREFIX`·`CONDA_DEFAULT_ENV`는 미설정, `VIRTUAL_ENV=/home/user1/vision-arm/.venv`, `python=/home/user1/vision-arm/.venv/bin/python`, Python 3.12.3 확인. Anaconda 삭제가 아니라 프로젝트 작업 시 Conda를 끄고 `.venv`를 사용하는 상태다.
+- **8단계 확인한 것:** 프로젝트 `sim.launch.py`의 Gazebo·RViz GUI 프로세스를 실행하고, 서비스로 팔을 움직여 나사·너트를 각각 중심 Y=+0.85m·-0.85m 상자에 투입했다. GUI 재시연 기록에서 두 `drops[].success`와 `parameters_restored`는 true다. 창 없는 별도 투입 시험은 `ok=true`로 끝났다.
+- **8단계 남은 것:** 최근 GUI 시연은 RViz 버튼을 사용한 수동 Plan & Execute 시험이 아니다. 사용자가 프로젝트 화면을 직접 확인했다는 응답도 아직 받지 않았다. GUI 재시연은 마지막 빈 공구 복귀 계획이 3회 실패(code 99999)하여 전체 `ok=false`다. 따라서 확인 ① 전체를 완료로 표시하지 않았다. 기본 UR 예제의 수동 조작 확인은 기존 11-13 기록으로 유지한다.
+- **근거:** `logs/team2_bin_drop_retry/reach.json`(headless 투입 통과), `logs/team2_gui_demo/retry.json`(GUI에서 두 부품 투입 성공·최종 복귀 실패). 로그는 git 제외이며 상세 과정과 재현 명령은 [팀원 2 작업 기록](TEAM2_PROGRESS.md)에 있다.
 
 폰 카메라는 가영 PC에서만 연결하기로 했다 (동경 11-16 전달). 그래서 동경·성민 PC의 2·9단계는 해당 없음이다. 두 PC의 `check_environment.py` FAIL 1은 `camera_url`(`172.20.10.1`, 가영 PC의 아이폰 USB 핫스팟 주소)에 접속할 수 없어서 생기며 환경 문제가 아니다. 다른 PC에서 폰 영상이 필요해지면 그 PC에 아이폰을 USB 핫스팟으로 연결하거나 자기 폰 앱 주소로 `camera_url`을 바꾼다(바꾼 주소는 커밋하지 않음).
 테스트 수는 같은 날에도 코드 버전에 따라 다르다: 55개(ChArUco 머지 전), 62개(머지 직후), 68개(작업 시트 ROI `bf7c306`·RViz 수정 `b0d63a7` 포함, 가영 PC 재실행). 성민 보고 65개는 어느 버전인지 미확인.

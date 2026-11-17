@@ -2,6 +2,7 @@
 
 Default: 100 packets, no TCP failures, identical target packets and debug image.
 Always overwrites the result (including failure); never commands robot motion.
+--settle-s explicitly measures after all topic matches; default includes startup.
 """
 import argparse
 from datetime import datetime, timezone
@@ -33,14 +34,20 @@ def main():
     parser.add_argument('--count', type=int, default=100)
     parser.add_argument('--timeout', type=float, default=40)
     parser.add_argument('--skip-image', action='store_true', help='Transport-only test without image source')
+    parser.add_argument('--settle-s', type=float, default=0,
+                        help='Explicitly exclude discovery startup; wait this many seconds after all topic matches')
     parser.add_argument('--out', default='logs/team_integration_check.json')
     args = parser.parse_args()
-    if args.count < 1 or not math.isfinite(args.timeout) or args.timeout <= 0:
-        parser.error('count and timeout must be positive')
+    if (args.count < 1 or not math.isfinite(args.timeout) or args.timeout <= 0
+            or not math.isfinite(args.settle_s) or not 0 <= args.settle_s < args.timeout):
+        parser.error('count and timeout must be positive; settle-s must be finite and in [0, timeout)')
     started = time.monotonic()
     measured = CommunicationCheck(args.count, not args.skip_image)
     stamp = datetime.now(timezone.utc).isoformat()
-    metadata = dict(started_at_utc=stamp, ros_domain_id=os.environ.get('ROS_DOMAIN_ID', '0'))
+    metadata = dict(started_at_utc=stamp, ros_domain_id=os.environ.get('ROS_DOMAIN_ID', '0'),
+                    settle_s=args.settle_s, startup_excluded=args.settle_s > 0,
+                    warmup_messages=0, warmup_errors=[])
+    measuring = args.settle_s == 0
     # A fresh run must never leave a previous PASS looking like its result.
     save_report(args.out, dict(ok=False, status='running', **metadata))
     node = None
@@ -51,6 +58,16 @@ def main():
         context_started = True
         node = rclpy.create_node('team_integration_observer')
         def receive(kind, msg):
+            # 선택한 준비 구간은 측정에서 제외하되, 메시지 수와 오류는 보고서에 남긴다.
+            if not measuring:
+                metadata['warmup_messages'] += 1
+                try:
+                    value = json.loads(msg.data)
+                    if kind == 'log' and (value.get('error') or value.get('acked') is not True):
+                        metadata['warmup_errors'].append(value)
+                except (ValueError, TypeError, AttributeError) as exc:
+                    metadata['warmup_errors'].append(str(exc))
+                return
             try:
                 measured.receive(kind, json.loads(msg.data))
             except (ValueError, TypeError) as exc:
@@ -60,12 +77,25 @@ def main():
             for topic, kind in [('/vision/detections', 'packet'), ('/robot/targets', 'target'),
                                 ('/robot/log', 'log')]]
         def image_received(msg):
-            if msg.width > 0 and msg.height > 0 and msg.data:
+            if measuring and msg.width > 0 and msg.height > 0 and msg.data:
                 measured.image_received = True
         subscriptions.append(node.create_subscription(Image, '/vision/debug_image', image_received, 1))
         deadline = started+args.timeout
+        matched_since = None
         while time.monotonic() < deadline:
             rclpy.spin_once(node, timeout_sec=.05)
+            if not measuring:
+                required = subscriptions[:3] if args.skip_image else subscriptions
+                # 토픽별 발견 시점이 다르므로 모든 구독 연결이 준비된 뒤부터 N개를 센다.
+                if all(sub.get_publisher_count() > 0 for sub in required):
+                    if matched_since is None:
+                        matched_since = time.monotonic()
+                    if time.monotonic() - matched_since >= args.settle_s:
+                        measuring = True
+                        metadata['measurement_started_after_s'] = time.monotonic() - started
+                else:
+                    matched_since = None
+                continue
             report = measured.report()
             if report['observed_packets'] == args.count:
                 done = not report['missing_acks'] and not report['missing_or_changed_targets']

@@ -3,6 +3,7 @@ vision_node:
   ros__parameters:
     camera_url: "rtsp://172.20.10.1:8554/live"             # 스마트폰 IP 카메라 영상 주소 (예: http://192.168.0.23:8080/video). docs/SETUP.md Step 7
     camera_index: 0              # camera_url 이 비어 있을 때 쓰는 USB 카메라 번호 (/dev/video0)
+    camera_rotate_deg: 0         # 카메라 영상 회전 (시계 방향 0·90·180·270). 폰 앱이 세로 720x1280 로 보내면 270 → 가로 1280x720. 보정 사진도 같은 회전으로
     image_dir: ""                # 값이 있으면 카메라 대신 폴더 이미지·동영상 파일을 순서대로 재생 (대체 입력)
     intrinsics_path: "data/calib/intrinsics.npz"   # scripts/calibrate_camera.py 출력
     homography_path: "data/calib/homography.npz"   # scripts/compute_homography.py 출력

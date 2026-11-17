@@ -9,16 +9,36 @@ Gazebo 구동은 설치된 ur_sim_control 런치를 쓰고, MoveIt은 패드가 
 """
 import math
 import os
+import json
+from pathlib import Path
+import uuid
 
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import AppendEnvironmentVariable, DeclareLaunchArgument, GroupAction, IncludeLaunchDescription
+from launch.actions import (AppendEnvironmentVariable, DeclareLaunchArgument, GroupAction,
+                            IncludeLaunchDescription, LogInfo, OpaqueFunction,
+                            SetEnvironmentVariable, SetLaunchConfiguration)
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 
 UR_TYPE = 'ur5e'
+
+
+def configure_world(context):
+    """Use one absolute SDF for Gazebo and MoveIt; identify this Gazebo session."""
+    world = str(Path(LaunchConfiguration('world_file').perform(context)).resolve(strict=True))
+    partition = LaunchConfiguration('gz_partition').perform(context)
+    if not partition:
+        raise ValueError('gz_partition must not be empty')
+    session = Path('logs/workcell_session.json')
+    session.parent.mkdir(parents=True, exist_ok=True)
+    session.write_text(json.dumps(dict(world_file=world, gz_partition=partition,
+                                      ros_domain_id=os.environ.get('ROS_DOMAIN_ID', '0')), indent=2)+'\n')
+    return [SetEnvironmentVariable('GZ_PARTITION', partition),
+            SetLaunchConfiguration('world_file', world),
+            LogInfo(msg=f'Workcell SDF: {world}; GZ_PARTITION={partition}')]
 
 
 def generate_launch_description():
@@ -35,7 +55,7 @@ def generate_launch_description():
         launch_arguments={
             'ur_type': UR_TYPE,
             'description_file': os.path.join(share, 'urdf', 'ur5e_vacuum.urdf.xacro'),
-            'world_file': os.path.join(share, 'worlds', 'workcell.sdf'),
+            'world_file': LaunchConfiguration('world_file'),
             'gazebo_gui': LaunchConfiguration('gazebo_gui'),
             'launch_rviz': 'false',   # RViz 는 MoveIt 쪽에서 MotionPlanning 패널과 함께 띄운다
         }.items())
@@ -58,11 +78,17 @@ def generate_launch_description():
                    '--yaw', str(math.radians(p['work_plane_yaw_deg'])),
                    '--frame-id', 'base_link', '--child-frame-id', 'work_plane'])
 
-    pick_place = Node(package='ur5e_pick_place', executable='pick_place_node', parameters=[params_file])
+    pick_place = Node(package='ur5e_pick_place', executable='pick_place_node',
+                      parameters=[params_file, {'world_file': LaunchConfiguration('world_file')}])
 
     return LaunchDescription([
         DeclareLaunchArgument('gazebo_gui', default_value='true', description='false 면 Gazebo 창 없이 서버만'),
         DeclareLaunchArgument('launch_rviz', default_value='true', description='RViz 실행 여부'),
+        DeclareLaunchArgument('world_file', default_value=p.get('world_file') or os.path.join(share, 'worlds', 'workcell.sdf')),
+        DeclareLaunchArgument('gz_partition', default_value=os.environ.get(
+            'GZ_PARTITION') or f'vision_arm_{uuid.uuid4().hex[:12]}',
+            description='Gazebo server/GUI/bridge partition; fresh by default unless GZ_PARTITION is set'),
+        OpaqueFunction(function=configure_world),
         AppendEnvironmentVariable('GZ_SIM_RESOURCE_PATH', os.path.join(share, 'models')),
         GroupAction([ur_sim], scoped=True),
         moveit,

@@ -27,6 +27,7 @@ class VisionNode(Node):
         self.declare_parameter('camera_url', '')
         self.declare_parameter('camera_index', 0)
         self.declare_parameter('image_dir', '')
+        self.declare_parameter('camera_rotate_deg', 0)
         self.declare_parameter('intrinsics_path', 'data/calib/intrinsics.npz')
         self.declare_parameter('homography_path', 'data/calib/homography.npz')
         self.declare_parameter('blur_ksize', 5)
@@ -54,7 +55,8 @@ class VisionNode(Node):
             raise ValueError('publish_rate_hz는 양수여야 합니다.')
         self.source = FrameSource(camera_index=self.get_parameter('camera_index').value,
                                   camera_url=self.get_parameter('camera_url').value,
-                                  image_dir=self.get_parameter('image_dir').value)
+                                  image_dir=self.get_parameter('image_dir').value,
+                                  rotate_deg=self.get_parameter('camera_rotate_deg').value)
         if not self.calibrator.status.ready:
             self.get_logger().warning('미보정: px만 발행합니다. mm 좌표와 각도는 null입니다.')
         self.roi_mask = None
