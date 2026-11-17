@@ -259,7 +259,7 @@ python scripts/check_team2_roundtrip.py --domain 97 \
 | 항목 | 내용 |
 |---|---|
 | 패킷 → 스폰 목록 (`plan_spawns`) | `calib_ok: false` 는 거부. `part_types` 에 없는 종류(unknown)·mm 가 null 인 물체는 건너뛰고 이유를 남김. 남은 물체를 순서대로 `obj_0`~`obj_{max_objects-1}` 에 배정. `grasp.work_to_base` 로 base_link(=world) 좌표, yaw = 각도 + 작업 평면 yaw (너트처럼 각도 null 이면 0°). 바닥과 겹치지 않게 1 mm 위에 놓음 |
-| Gazebo 통신 (`GzSpawner`) | `ros2 run` 프로세스 대신 gz-transport 로 직접 `/world/workcell/create`·`/remove` 요청, `/vacuum/obj_k/state` 구독, `/vacuum/obj_k/detach` 발행 (ros_gz_bridge 불필요) |
+| Gazebo 통신 (`GzSpawner`) | gz-transport 로 `/vacuum/obj_k/state`·`/world/workcell/pose/info` 구독, `/vacuum/obj_k/detach` 발행 (ros_gz_bridge 불필요). `/world/workcell/create`·`/remove` 요청만 `gz service` 명령으로 보냄 (아래 '알게 된 것') |
 | DetachableJoint 처리 | 처음 쓰는 슬롯은 스폰 즉시 자동으로 붙으므로 "attached" 를 기다렸다가 detach → "detached" 확인. 이미 한 번 뗀 슬롯은 기다리지 않음. 붙은 채 지우지 않도록 삭제 전에 떼어 둠 |
 | 단독 실행 노드 | `python3 -m ur5e_pick_place.object_spawner`. `/robot/targets` 최신 패킷을 `/sim/spawn_objects` (Trigger) 호출 때 스폰(이전 obj_k 는 먼저 삭제), `/sim/clear_objects` 로 전부 삭제. 작업 평면·`max_objects`·`part_types` 는 `config/sim.yaml` 의 `pick_place_node` 값을 그대로 읽음 (`base_link→work_plane` TF 와 같은 값). `ros2 run` 용 entry point 는 `setup.py`(공유 파일)를 안 건드리려고 추가하지 않음 |
 
@@ -289,7 +289,7 @@ gz-sim8 `DetachableJoint.cc` 소스와 실기로 확인:
 ### 가까이 집어 옮기기 시연 (11-17, Gazebo 창 켜고 2회 반복)
 
 위 시험은 패드를 부품 0.15 m 위에 둔 채 attach 해서, 부품이 패드에 닿지 않고 그 거리만큼 떨어진 채 따라왔다 (DetachableJoint 는 attach 순간의 상대 위치를 그대로 고정한다).
-실제 흡착처럼 보이도록 스폰한 부품 바로 위까지 내려가 집어 옮겼다. 팔은 `/sim/move_to_target` 의 목표 파라미터를 바꿔 가며 단계별로 움직였다 (확인용 임시 스크립트, 저장소에 넣지 않음).
+실제 흡착처럼 보이도록 스폰한 부품 바로 위까지 내려가 집어 옮겼다. 팔은 `/sim/move_to_target` 의 목표 파라미터를 바꿔 가며 단계별로 움직였다. 같은 확인을 `scripts/check_spawn_week3.py` 로 정리했다 (아래 '확인 스크립트').
 
 순서: 부품 위 80 mm 접근 → 패드 끝을 부품 바로 위까지 하강 → attach → 100 mm 로 들어 올림 → 옆으로 이동 → 하강 → detach → 위로 빠짐. 나사는 장축 각도(30°)에 패드를 맞췄다.
 
@@ -312,6 +312,13 @@ python3 -m ur5e_pick_place.object_spawner                                       
 ros2 service call /sim/spawn_objects std_srvs/srv/Trigger                         # 터미널 3: 최신 /robot/targets 패킷대로 스폰
 ros2 service call /sim/clear_objects std_srvs/srv/Trigger
 ```
+
+### 확인 스크립트
+
+시뮬레이터를 띄운 뒤 `python scripts/check_spawn_week3.py` (스폰 노드가 없으면 스크립트가 직접 띄웠다 끈다).
+스폰 위치(+TF·마커) → 미보정 거부 → 팔이 지나가도 부품 그대로 → 나사·너트 바로 위에서 집어 옮기기(+TF 높이) → 같은 이름 재스폰 → 삭제 시 마커 제거 를 차례로 확인하고, 하나라도 어긋나면 그 자리에서 멈춘다. 결과는 `logs/week3_spawn_check.json`. 팔을 움직이고 부품을 남긴다.
+
+11-17 headless 실행: **통과**. 팔 통과 시 부품 이동 0.0 mm, 나사 들어 올림 88 mm·놓인 위치 오차 0.6 mm, 너트 90 mm·0.8 mm, 재스폰 성공.
 
 ## 남은 일 (팀원 3)
 
@@ -402,3 +409,27 @@ ros2 service call /sim/clear_objects std_srvs/srv/Trigger "{}"
 이 테스트는 타 담당 파일이므로 요청 범위를 지키기 위해 수정·skip하지 않았다. 해당 담당자가 기대값을 현재 설정 또는 고정 fixture 기준으로 갱신해야 한다. 전체 테스트가 통과했다고 기록하지 않는다.
 
 새 코드와 이번 기록은 로컬 변경 상태다. 커밋·푸시는 아직 진행하지 않았다.
+- ~~TF~~ 11-17 완료 (아래).
+
+## TF·RViz 표시 (11-17)
+
+스폰 노드가 Gazebo 의 실제 부품 위치를 ROS 로 내보낸다. 수정 파일은 `object_spawner.py`, `test_object_spawner.py`, `scripts/check_spawn_week3.py`.
+
+| 항목 | 내용 |
+|---|---|
+| TF `base_link → obj_k` | `/world/workcell/pose/info` 의 obj_k 위치·자세를 10 Hz (`tf_rate_hz`) 로 발행. 흡착해서 들면 따라 움직이고, 부품을 지우면 0.5초 안에 그 슬롯 발행을 멈춤. `sim.launch.py` 의 `base_link → work_plane` 과 합쳐 `work_plane → obj_k` 를 바로 읽을 수 있음 |
+| 마커 `/sim/object_markers` | `visualization_msgs/MarkerArray`. obj_k 프레임에 붙인 원기둥(나사 지름 8×길이 40 mm 를 장축 방향으로 눕힘, 너트 지름 13×두께 6 mm). 모양·색은 `models/<type>/model.sdf` 의 visual 에서 읽음 (종류 추가 시 코드 수정 없음). 지우면 DELETE |
+| 시계 | `sim.yaml` 의 `use_sim_time` 을 따라 /clock 기준 시각으로 발행 (RViz·MoveIt 과 같은 시계) |
+| RViz 에서 보기 | Add → TF (obj_0~2 표시), Add → MarkerArray → Topic `/sim/object_markers` |
+| 테스트 | 3개 추가: RPY→쿼터니언, 나사·너트 model.sdf 에서 모양 읽기, box·모르는 형상(mesh) 처리 → 전체 **115 tests, 0 failures** |
+
+확인 스크립트에 TF 단계를 넣고 headless 로 실행 → **통과**:
+- 스폰 직후 TF `work_plane → obj_k` = (100.0, 105.0) mm 30.0°, (200.0, 150.0) mm 0.0°, (230.0, 50.0) mm 135.0° — 패킷 mm·각도와 일치
+- 들어 올렸을 때 TF 높이 = Gazebo 높이 (나사 88.8 mm, 너트 89.9 mm)
+- 지우면 마커 3개 모두 DELETE
+
+### 알게 된 것
+
+- **gz-transport Python 요청이 들쭉날쭉 시간 초과:** 위치 구독을 넣은 뒤 스폰 노드의 삭제 요청이 응답을 못 받는 일이 생겼다 (없는 이름 `foo` 도 실패, 같은 프로세스의 다른 노드도 실패/성공이 섞임). 같은 요청을 `gz service` 명령으로는 매번 0.3초에 성공. 원인은 못 좁혔고, 요청만 `gz service` 별도 프로세스로 보내도록 바꿔 해결 (스폰 3개 + 삭제 3개에 약 2초). 실패하면 한 번 더 보냄.
+- **시뮬레이터 직후 팔 이동 실패:** 확인 중 한 번, `/sim/move_to_target` 의 계획 재시도 3회가 모두 `99999` 로 실패 (동경 기록의 OMPL 초기 실패와 같은 현상). 확인 스크립트는 이동을 한 번 더 부르도록 함. `pick_place_node.py` 는 수정하지 않음.
+- 확인 스크립트가 통과해도 종료 시 gz·tf 백그라운드 스레드 때문에 core dump(종료 코드 134)가 나서, 결과 저장 뒤 `os._exit` 로 끝낸다.

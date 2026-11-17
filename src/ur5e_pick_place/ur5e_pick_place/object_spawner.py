@@ -13,7 +13,7 @@ DetachableJoint 동작 (gz-sim8 소스와 11-17 실기로 확인, docs/DECISIONS
   attach 를 보내면 지워진 옛 모델 대신 새 모델을 다시 찾아 붙인다.
 - 붙어 있지 않을 때 detach 를 보내면 무시된다 (다음 attach 에 영향 없음). 그래서 안전하게 한 번 더 보낼 수 있다.
 
-Gazebo 와는 gz-transport 로 직접 통신한다 (ros_gz_bridge·ros2 run 불필요, 부품마다 프로세스를 띄우지 않음):
+Gazebo 와는 gz-transport 로 직접 통신한다 (ros_gz_bridge 불필요). 스폰·삭제 요청만 `gz service` 명령으로 보낸다 (_request 참고):
     스폰  /world/<world>/create   gz.msgs.EntityFactory → Boolean
     삭제  /world/<world>/remove   gz.msgs.Entity        → Boolean
     상태  /vacuum/obj_k/state     gz.msgs.StringMsg ("attached" / "detached")
@@ -25,12 +25,20 @@ Gazebo 와는 gz-transport 로 직접 통신한다 (ros_gz_bridge·ros2 run 불�
     ros2 service call /sim/clear_objects std_srvs/srv/Trigger   # obj_0 ~ obj_{n-1} 삭제
 작업 평면 위치·max_objects·part_types 는 config/sim.yaml 의 pick_place_node 값을 그대로 읽는다
 (sim.launch.py 의 base_link→work_plane TF 와 같은 값을 쓰기 위함).
+
+TF·RViz 표시 (노드가 하는 일):
+    TF      base_link → obj_k   Gazebo 의 실제 부품 위치 (/world/<world>/pose/info) 를 10 Hz 로 옮긴다.
+                                흡착해서 들면 TF 도 따라 움직이고, 부품을 지우면 그 슬롯 TF 발행을 멈춘다.
+    마커    /sim/object_markers  visualization_msgs/MarkerArray. obj_k 프레임에 붙인 부품 모양(원기둥 등).
+                                모양은 models/<part_type>/model.sdf 의 visual 에서 읽는다 (종류가 늘어도 코드 수정 없음).
+    RViz 에서 TF 표시와 MarkerArray(/sim/object_markers) 를 추가하면 Gazebo 와 같은 자리에 부품이 보인다.
 """
 from __future__ import annotations
 
 import math
 import threading
 import time
+import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -46,6 +54,57 @@ def model_file(models_dir: Path, part_type: str) -> Path:
 
 def slot_name(k: int) -> str:
     return f'obj_{k}'
+
+
+def rpy_to_quaternion(roll: float, pitch: float, yaw: float) -> tuple[float, float, float, float]:
+    """고정축 roll→pitch→yaw (SDF <pose> 규칙) 를 쿼터니언 (x, y, z, w) 로."""
+    cr, sr = math.cos(roll / 2), math.sin(roll / 2)
+    cp, sp = math.cos(pitch / 2), math.sin(pitch / 2)
+    cy, sy = math.cos(yaw / 2), math.sin(yaw / 2)
+    return (sr * cp * cy - cr * sp * sy, cr * sp * cy + sr * cp * sy,
+            cr * cp * sy - sr * sp * cy, cr * cp * cy + sr * sp * sy)
+
+
+@dataclass(frozen=True)
+class MarkerShape:
+    """RViz 마커로 그릴 부품 모양. 위치·자세는 모델 원점(obj_k 프레임) 기준."""
+    shape: str                                   # 'cylinder' / 'box' / 'sphere'
+    scale: tuple[float, float, float]            # RViz Marker.scale (m). 원기둥은 (지름, 지름, 길이)
+    xyz: tuple[float, float, float]
+    quat: tuple[float, float, float, float]      # (x, y, z, w)
+    rgba: tuple[float, float, float, float]
+
+
+def marker_shape(sdf_path: Path) -> MarkerShape | None:
+    """model.sdf 의 첫 link 와 첫 visual 에서 모양·크기·위치·색을 읽는다. 모르는 형상이면 None.
+
+    링크 <pose> 와 visual <pose> 를 합친다 (둘 중 하나만 있어도 됨, 단순화를 위해 visual 쪽은 위치만 더한다).
+    """
+    def pose_of(elem):
+        text = elem.findtext('pose') if elem is not None else None
+        values = [float(v) for v in text.split()] if text else [0.0] * 6
+        return values + [0.0] * (6 - len(values))
+
+    link = ET.parse(sdf_path).getroot().find('./model/link')
+    visual = link.find('visual') if link is not None else None
+    geometry = visual.find('geometry') if visual is not None else None
+    if geometry is None:
+        return None
+    lp, vp = pose_of(link), pose_of(visual)
+    if (g := geometry.find('cylinder')) is not None:
+        d, length = 2 * float(g.findtext('radius')), float(g.findtext('length'))
+        shape, scale = 'cylinder', (d, d, length)
+    elif (g := geometry.find('box')) is not None:
+        shape, scale = 'box', tuple(float(v) for v in g.findtext('size').split())
+    elif (g := geometry.find('sphere')) is not None:
+        d = 2 * float(g.findtext('radius'))
+        shape, scale = 'sphere', (d, d, d)
+    else:
+        return None
+    color = visual.findtext('material/diffuse') or visual.findtext('material/ambient') or '0.7 0.7 0.7 1'
+    rgba = tuple(float(v) for v in color.split())
+    return MarkerShape(shape, scale, (lp[0] + vp[0], lp[1] + vp[1], lp[2] + vp[2]),
+                       rpy_to_quaternion(*lp[3:6]), rgba)
 
 
 @dataclass(frozen=True)
@@ -122,11 +181,26 @@ class GzSpawner:
         self._states: dict[str, list[str]] = {slot_name(k): [] for k in range(max_objects)}
         self._detach = {}
         self._empty = Empty
+        self._poses = {}   # obj_k → (받은 시각 monotonic, (x, y, z), (qx, qy, qz, qw))
+        from gz.msgs10.pose_v_pb2 import Pose_V
+        self._node.subscribe(Pose_V, f'/world/{world}/pose/info', self._on_poses)
         for k in range(max_objects):
             name = slot_name(k)
             self._node.subscribe(StringMsg, f'/vacuum/{name}/state',
                                  lambda msg, name=name: self._on_state(name, msg.data))
             self._detach[name] = self._node.advertise(f'/vacuum/{name}/detach', Empty)
+
+    def _on_poses(self, msg) -> None:
+        now = time.monotonic()
+        for pose in msg.pose:
+            if pose.name in self._states:   # obj_0 ~ obj_{n-1} 모델만
+                p, q = pose.position, pose.orientation
+                self._poses[pose.name] = (now, (p.x, p.y, p.z), (q.x, q.y, q.z, q.w))
+
+    def object_poses(self, max_age_s: float = 0.5) -> dict:
+        """지금 Gazebo 에 있는 obj_k 의 world(=base_link) 위치·자세. 지워진 슬롯은 곧 목록에서 빠진다."""
+        now = time.monotonic()
+        return {name: (xyz, quat) for name, (t, xyz, quat) in list(self._poses.items()) if now - t <= max_age_s}
 
     def _on_state(self, name: str, state: str) -> None:
         with self._cond:
@@ -138,9 +212,24 @@ class GzSpawner:
             return self._cond.wait_for(lambda: state in self._states[name][since:], timeout=timeout_s)
 
     def _request(self, service: str, request, reply_type) -> bool:
-        ok, reply = self._node.request(service, request, type(request), reply_type,
-                                       int(self.timeout_s * 1000))
-        return bool(ok and reply.data)
+        """gz 서비스 요청. 응답 data 가 true 면 True.
+
+        같은 프로세스에서 gz-transport 구독(위치·상태)과 Python request() 를 함께 쓰면 응답을 못 받고
+        시간 초과되는 일이 들쭉날쭉 생겼다 (11-17, 같은 요청을 gz CLI 로는 매번 0.3초에 성공).
+        그래서 요청만 `gz service` 별도 프로세스로 보낸다. 스폰·삭제는 드물어서 0.3초 정도 걸려도 괜찮다.
+        """
+        import subprocess
+        from google.protobuf import text_format
+
+        command = ['gz', 'service', '-s', service,
+                   '--reqtype', request.DESCRIPTOR.full_name, '--reptype', reply_type.DESCRIPTOR.full_name,
+                   '--timeout', str(int(self.timeout_s * 1000)),
+                   '--req', text_format.MessageToString(request, as_one_line=True)]
+        try:
+            out = subprocess.run(command, capture_output=True, text=True, timeout=self.timeout_s + 5).stdout
+        except subprocess.TimeoutExpired:
+            return False
+        return 'data: true' in out
 
     def spawn(self, req: SpawnRequest) -> None:
         """부품을 만들고 DetachableJoint 가 붙인 것을 떼어 작업 평면 위에 남긴다. 실패하면 RuntimeError."""
@@ -197,7 +286,7 @@ class GzSpawner:
         msg = Entity()
         msg.name = name
         msg.type = Entity.MODEL
-        return self._request(f'/world/{self.world}/remove', msg, Boolean)
+        return any(self._request(f'/world/{self.world}/remove', msg, Boolean) for _ in range(2))   # 한 번 더 시도
 
     def clear(self) -> None:
         """obj_0 ~ obj_{n-1} 을 모두 지운다 (없는 슬롯도 오류 아님)."""
@@ -218,10 +307,14 @@ def main(args=None):
 
     import rclpy
     from ament_index_python.packages import get_package_share_directory
+    from geometry_msgs.msg import TransformStamped
     from rclpy.executors import ExternalShutdownException
     from rclpy.node import Node
+    from rclpy.parameter import Parameter
     from std_msgs.msg import String
     from std_srvs.srv import Trigger
+    from tf2_ros import TransformBroadcaster
+    from visualization_msgs.msg import Marker, MarkerArray
 
     share = Path(get_package_share_directory('ur5e_pick_place'))
 
@@ -230,13 +323,21 @@ def main(args=None):
             super().__init__('object_spawner')
             self.declare_parameter('config_file', str(share / 'config' / 'sim.yaml'))
             self.declare_parameter('targets_topic', '/robot/targets')
+            self.declare_parameter('tf_rate_hz', 10.0)
             p = load_sim_params(Path(self.get_parameter('config_file').value))
+            # pick_place_node·RViz 와 같은 시계를 쓴다 (시뮬레이터는 /clock). 다르면 RViz 가 TF 를 오래된 값으로 버린다
+            self.set_parameters([Parameter('use_sim_time', value=bool(p.get('use_sim_time', False)))])
             self.plane = plane_from_params(p)
             self.part_types = list(p['part_types'])
             self.max_objects = int(p['max_objects'])
             self.spawner = GzSpawner(share / 'models', p['world_name'], self.max_objects)
             self.latest = None
             self.lock = threading.Lock()
+            self.slot_types = {}   # obj_k → part_type (이 노드가 스폰한 것만 마커 모양을 안다)
+            self.shapes = {t: marker_shape(model_file(share / 'models', t)) for t in self.part_types}
+            self.tf = TransformBroadcaster(self)
+            self.pub_markers = self.create_publisher(MarkerArray, '/sim/object_markers', 10)
+            self.create_timer(1.0 / self.get_parameter('tf_rate_hz').value, self.publish_tf)
             topic = self.get_parameter('targets_topic').value
             self.create_subscription(String, topic, self.on_targets, 10)
             self.create_service(Trigger, '/sim/spawn_objects', self.on_spawn)
@@ -259,7 +360,9 @@ def main(args=None):
             with self.lock:
                 try:
                     requests, skipped = plan_spawns(packet, self.plane, self.part_types, self.max_objects)
+                    self.slot_types = {}
                     self.spawner.spawn_all(requests)
+                    self.slot_types = {r.name: r.part_type for r in requests}
                 except (ValueError, RuntimeError) as e:
                     response.success, response.message = False, f'seq={packet.get("seq")}: {e}'
                     return response
@@ -275,12 +378,49 @@ def main(args=None):
         def on_clear(self, request, response):
             with self.lock:
                 try:
+                    self.slot_types = {}
                     self.spawner.clear()
                 except RuntimeError as e:
                     response.success, response.message = False, str(e)
                     return response
             response.success, response.message = True, f'obj_0 ~ obj_{self.max_objects - 1} 삭제'
             return response
+
+        def publish_tf(self):
+            """Gazebo 의 obj_k 위치를 TF 와 마커로 내보낸다. 사라진 슬롯의 마커는 지운다."""
+            stamp = self.get_clock().now().to_msg()
+            poses = self.spawner.object_poses()
+            markers = MarkerArray()
+            for k in range(self.max_objects):
+                name = slot_name(k)
+                marker = Marker()
+                marker.header.frame_id, marker.header.stamp = name, stamp
+                marker.ns, marker.id = 'objects', k
+                shape = self.shapes.get(self.slot_types.get(name))
+                if name not in poses or shape is None:
+                    marker.action = Marker.DELETE
+                    markers.markers.append(marker)
+                    if name not in poses:
+                        continue
+                else:
+                    marker.type = {'cylinder': Marker.CYLINDER, 'box': Marker.CUBE,
+                                   'sphere': Marker.SPHERE}[shape.shape]
+                    marker.action = Marker.ADD
+                    marker.frame_locked = True   # obj_k TF 가 움직이면 마커도 따라간다
+                    p, o = marker.pose.position, marker.pose.orientation
+                    p.x, p.y, p.z = shape.xyz
+                    o.x, o.y, o.z, o.w = shape.quat
+                    marker.scale.x, marker.scale.y, marker.scale.z = shape.scale
+                    marker.color.r, marker.color.g, marker.color.b, marker.color.a = shape.rgba
+                    markers.markers.append(marker)
+                (x, y, z), (qx, qy, qz, qw) = poses[name]
+                t = TransformStamped()
+                t.header.stamp, t.header.frame_id, t.child_frame_id = stamp, 'base_link', name
+                t.transform.translation.x, t.transform.translation.y, t.transform.translation.z = x, y, z
+                r = t.transform.rotation
+                r.x, r.y, r.z, r.w = qx, qy, qz, qw
+                self.tf.sendTransform(t)
+            self.pub_markers.publish(markers)
 
     rclpy.init(args=args)
     node = ObjectSpawnerNode()
