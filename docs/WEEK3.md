@@ -318,3 +318,87 @@ ros2 service call /sim/clear_objects std_srvs/srv/Trigger
 - 실제 보정 패킷으로 "카메라 앞 부품 위치대로 Gazebo 에 부품이 생김" 확인 (동경 보정 후, 팀원 2 `tcp.launch.py` 의 `/robot/targets` 사용).
 - TF: 스폰한 obj_k 를 RViz 에서 보이게 할지 결정 (`work_plane` static TF 는 이미 sim.launch.py 에 있음).
 - `pick_place_node` 의 `/sim/run_cycle` 2단계에서 `plan_spawns`·`GzSpawner.spawn_all` 을 부르도록 연결 — `pick_place_node.py` 담당자와 협의 필요.
+
+## 팀원 2 ↔ 최신 팀원 3 스폰 코드 연결 (2026-11-17)
+
+다른 팀원의 object_spawner.py, camera_stream.py, 보정·GUI·로봇 제어 원본은 수정하지 않았다. 팀원 2용 연결 런치·세션 확인 모듈·검사 스크립트만 추가했다.
+
+### 연결 보완의 이유
+
+현재 sim.launch.py는 실행마다 새 GZ_PARTITION을 쓴다. 별도 터미널에서 팀원 3 스폰 노드를 그대로 실행하면 Gazebo가 있는 partition을 모를 수 있다. ROS /robot/targets는 받아도 Gazebo 삭제·생성 서비스에 연결되지 않는 원인이 된다.
+`team2_link.launch.py`는 최신 logs/workcell_session.json에서 실행 중 월드·partition을 읽고, 동일한 환경으로 기존 팀원 3 스폰 모듈을 실행한다. 기존 tcp.launch.py도 함께 실행한다.
+ROS 도메인이 다르거나 Gazebo가 이미 종료됐으면 시작 단계에서 설명과 함께 실패한다. 다른 팀원 코드를 복사·재작성하지 않았다.
+
+### 실제 입력으로 사용하는 순서
+
+터미널 1 (기존 동일 시뮬레이션은 Ctrl+C로 종료):
+
+```bash
+source ~/vision-arm/env.sh
+unset GZ_PARTITION
+ros2 launch ur5e_pick_place sim.launch.py
+```
+
+터미널 2:
+
+```bash
+source ~/vision-arm/env.sh
+ros2 launch vision_pick_place team2_link.launch.py
+```
+
+위 명령은 TCP 서버·브리지와 수정하지 않은 기존 object_spawner를 함께 실행한다. tcp.launch.py, integration.launch.py, 기존 단독 스폰 노드를 추가로 중복 실행하지 않는다. GUI와 카메라·자동 집기는 시작하지 않는다.
+
+터미널 3 (영상·보정 담당이 준비한 실제 설정):
+
+```bash
+source ~/vision-arm/env.sh
+ros2 run vision_pick_place vision_node --ros-args \
+  --params-file src/vision_pick_place/config/params.yaml
+```
+
+터미널 4:
+
+```bash
+source ~/vision-arm/env.sh
+ros2 topic echo /robot/targets --once
+ros2 service call /sim/spawn_objects std_srvs/srv/Trigger "{}"
+# 필요할 때 삭제
+ros2 service call /sim/clear_objects std_srvs/srv/Trigger "{}"
+```
+
+스폰하려면 실제 내부 보정·ArUco 작업 평면 보정과 영상 입력이 준비되어 calib_ok=true여야 한다. 기본 MVTec 입력은 미보정이므로 스폰 거부가 정상이다. 통과시키려고 임의로 calib_ok만 true로 바꾸지 않는다.
+
+### 실제 Gazebo 연동 검증 결과
+
+전용 ROS_DOMAIN_ID=108에서 새로운 Gazebo와 team2_link.launch.py를 띄웠다. 기존 사용자의 실행은 종료하지 않았다.
+
+- SDF/Gazebo/MoveIt 상자 위치: screw (0,+0.85,0)m, nut (0,-0.85,0)m 모두 일치.
+- 합성 미보정 패킷: ACK 후 스폰 거부, mm 없는 좌표로 물체 생성 안 함.
+- 합성 보정 패킷: TCP ACK 성공, /robot/targets가 입력과 동일.
+- 나사 (100,105)mm, 30° → obj_0 실제 XY 약 (0.400,-0.045)m.
+- 너트 (200,150)mm, angle=null → obj_1 실제 XY 약 (0.500,0.000)m.
+- unknown 객체 1개는 건너뜀.
+- 두 번의 스폰/재스폰 후 최신 Gazebo pose stream에서 실제 위치 확인. 삭제 서비스 후 scene/info에 모델이 없는 것까지 확인.
+- 실제 폰 보정값·방향 정확도·흡착 이동·±0.85m 상자 투입·전체 집기 사이클은 이번 검증에 포함하지 않았다. 팔 이동 명령은 보내지 않았다.
+- 증거: logs/team2_spawn_link_check.json, logs/workcell_layout_check.json (git 제외).
+
+재현 검사: 위 실행이 준비된 상태에서 `python scripts/check_team2_spawn_link.py`. 실제로 받은 최신 보정 패킷의 물체를 생성·재생성·삭제하므로 빈 시험 장면에서 사용한다.
+합성 시험은 전용 nonzero ROS_DOMAIN_ID에서만 `--demo`를 붙여 사용한다. 다른 영상 발행자가 있으면 demo를 거부한다. 합성 시험 통과는 실제 카메라 보정 정확도 검증이 아니다.
+
+### 오류 설명과 남은 테스트 불일치
+
+| 오류/증상 | 원인·대응 |
+|---|---|
+| 세션 파일 없음 | 새 sim.launch.py부터 실행. 경로는 프로젝트 루트 기준 |
+| ROS_DOMAIN_ID mismatch | 시뮬레이터와 연결 터미널의 ROS 도메인을 같게 설정 |
+| Recorded Gazebo session is not responding | Gazebo 종료 또는 오래된 세션 기록. launch 전체 재시작 |
+| /sim/spawn_objects 없음 | 연결 런치의 object_spawner 시작 로그 확인. 기존 노드 중복 실행 금지 |
+| calib_ok false | 실제 보정·영상 준비 필요. TCP 오류가 아니라 올바른 스폰 거부 |
+| 삭제/스폰 요청 실패 | Gazebo 서버·partition·중복 obj_k 확인 |
+| 테스트 expected Y=0.45, actual Y=0.85 | 상자 배치 변경에 비해 기존 test_workcell_scene.py 기대 좌표가 오래됨 |
+
+현재 전체 테스트 결과는 **113개 중 112개 통과, 1개 실패**다.
+실패는 `test_workcell_has_floor_and_both_bins`에서 옛 ±0.45m를 하드코딩했기 때문이며 실제 장면은 ±0.85m다.
+이 테스트는 타 담당 파일이므로 요청 범위를 지키기 위해 수정·skip하지 않았다. 해당 담당자가 기대값을 현재 설정 또는 고정 fixture 기준으로 갱신해야 한다. 전체 테스트가 통과했다고 기록하지 않는다.
+
+새 코드와 이번 기록은 로컬 변경 상태다. 커밋·푸시는 아직 진행하지 않았다.

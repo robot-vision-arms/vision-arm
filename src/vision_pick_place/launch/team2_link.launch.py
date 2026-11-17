@@ -1,0 +1,50 @@
+"""Team 2 TCP → existing team 3 spawner. Start sim.launch.py first.
+
+Does not edit/start the camera or GUI, does not trigger spawning or robot motion.
+"""
+import os
+from pathlib import Path
+import sys
+
+from ament_index_python.packages import get_package_share_directory
+from launch import LaunchDescription
+from launch.actions import (DeclareLaunchArgument, ExecuteProcess, GroupAction,
+                            IncludeLaunchDescription, LogInfo, OpaqueFunction, SetEnvironmentVariable)
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch.substitutions import LaunchConfiguration
+
+from vision_pick_place.team2_session import load_session, check_gazebo
+
+
+def start_link(context):
+    import yaml
+    session_file = LaunchConfiguration('session_file').perform(context)
+    config = str(Path(LaunchConfiguration('sim_params').perform(context)).resolve(strict=True))
+    session = load_session(session_file, os.environ.get('ROS_DOMAIN_ID', '0'))
+    params = yaml.safe_load(Path(config).read_text())['pick_place_node']['ros__parameters']
+    if params['world_name'] != session['world_name']:
+        raise ValueError('Spawner config world_name differs from running simulation')
+    env = dict(os.environ, GZ_PARTITION=session['gz_partition'])
+    check_gazebo(session, env)
+    share = get_package_share_directory('vision_pick_place')
+    return [LogInfo(msg=f"Team 2 link: domain={session.get('ros_domain_id', '0')}, "
+                    f"GZ_PARTITION={session['gz_partition']}; spawning remains service-triggered"),
+        GroupAction([
+            SetEnvironmentVariable('GZ_PARTITION', session['gz_partition']),
+            IncludeLaunchDescription(PythonLaunchDescriptionSource(os.path.join(share, 'launch', 'tcp.launch.py')),
+                launch_arguments={'port': LaunchConfiguration('port'),
+                                  'log_dir': LaunchConfiguration('log_dir')}.items()),
+            ExecuteProcess(cmd=[sys.executable, '-m', 'ur5e_pick_place.object_spawner',
+                '--ros-args', '-p', f'config_file:={config}'], output='screen'),
+        ], scoped=True)]
+
+
+def generate_launch_description():
+    return LaunchDescription([
+        DeclareLaunchArgument('session_file', default_value='logs/workcell_session.json'),
+        DeclareLaunchArgument('sim_params', default_value=os.path.join(
+            get_package_share_directory('ur5e_pick_place'), 'config', 'sim.yaml')),
+        DeclareLaunchArgument('port', default_value='9000'),
+        DeclareLaunchArgument('log_dir', default_value='logs'),
+        OpaqueFunction(function=start_link),
+    ])
