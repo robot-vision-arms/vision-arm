@@ -22,13 +22,22 @@ class FrameSource:
     폰은 초당 약 30장을 보내는데 노드는 10Hz 로만 읽기 때문에, 직접 cap.read() 를 부르면
     읽지 못한 프레임이 버퍼에 쌓여 영상이 점점 늦어진다. read() 는 아직 돌려주지 않은
     새 프레임이 올 때까지 최대 read_timeout_s 동안 기다리고, 끊기면 스레드가 다시 연결한다.
+
+    rotate_deg (0·90·180·270, 시계 방향) 는 카메라 입력만 돌린다. 폰 앱이 세로(720x1280)로 보낼 때
+    270 으로 가로(1280x720)로 만든다. 보정 사진도 같은 회전으로 찍어야 px→mm 가 맞는다.
+    이미지 폴더 입력은 이미 저장된 사진이라 돌리지 않는다.
     """
+
+    ROTATIONS = {0: None, 90: cv2.ROTATE_90_CLOCKWISE, 180: cv2.ROTATE_180, 270: cv2.ROTATE_90_COUNTERCLOCKWISE}
 
     def __init__(self, camera_index: int = 0, image_dir: str = '', camera_url: str = '',
                  read_timeout_s: float = 5.0, reconnect_delay_s: float = 0.5,
-                 reconnect_max_delay_s: float = 5.0):
+                 reconnect_max_delay_s: float = 5.0, rotate_deg: int = 0):
         if not 0 < reconnect_delay_s <= reconnect_max_delay_s:
             raise ValueError('0 < reconnect_delay_s <= reconnect_max_delay_s 여야 합니다.')
+        if rotate_deg not in self.ROTATIONS:
+            raise ValueError(f'rotate_deg 는 0, 90, 180, 270 중 하나여야 합니다: {rotate_deg}')
+        self._rotation = self.ROTATIONS[rotate_deg]
         self.camera_index = camera_index
         self.camera_url = camera_url
         self.image_dir = Path(image_dir) if image_dir else None
@@ -79,6 +88,8 @@ class FrameSource:
                 self._open_camera()
                 continue
             delay = self.reconnect_delay_s
+            if self._rotation is not None:
+                frame = cv2.rotate(frame, self._rotation)
             with self._cond:
                 self._latest = frame
                 self._latest_seq += 1
