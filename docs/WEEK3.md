@@ -289,7 +289,7 @@ gz-sim8 `DetachableJoint.cc` 소스와 실기로 확인:
 ### 가까이 집어 옮기기 시연 (11-17, Gazebo 창 켜고 2회 반복)
 
 위 시험은 패드를 부품 0.15 m 위에 둔 채 attach 해서, 부품이 패드에 닿지 않고 그 거리만큼 떨어진 채 따라왔다 (DetachableJoint 는 attach 순간의 상대 위치를 그대로 고정한다).
-실제 흡착처럼 보이도록 스폰한 부품 바로 위까지 내려가 집어 옮겼다. 팔은 `/sim/move_to_target` 의 목표 파라미터를 바꿔 가며 단계별로 움직였다 (확인용 임시 스크립트, 저장소에 넣지 않음).
+실제 흡착처럼 보이도록 스폰한 부품 바로 위까지 내려가 집어 옮겼다. 팔은 `/sim/move_to_target` 의 목표 파라미터를 바꿔 가며 단계별로 움직였다. 같은 확인을 `scripts/check_spawn_week3.py` 로 정리했다 (아래 '확인 스크립트').
 
 순서: 부품 위 80 mm 접근 → 패드 끝을 부품 바로 위까지 하강 → attach → 100 mm 로 들어 올림 → 옆으로 이동 → 하강 → detach → 위로 빠짐. 나사는 장축 각도(30°)에 패드를 맞췄다.
 
@@ -312,6 +312,13 @@ python3 -m ur5e_pick_place.object_spawner                                       
 ros2 service call /sim/spawn_objects std_srvs/srv/Trigger                         # 터미널 3: 최신 /robot/targets 패킷대로 스폰
 ros2 service call /sim/clear_objects std_srvs/srv/Trigger
 ```
+
+### 확인 스크립트
+
+시뮬레이터를 띄운 뒤 `python scripts/check_spawn_week3.py` (스폰 노드가 없으면 스크립트가 직접 띄웠다 끈다).
+스폰 위치 → 미보정 거부 → 팔이 지나가도 부품 그대로 → 나사·너트 바로 위에서 집어 옮기기 → 같은 이름 재스폰 을 차례로 확인하고, 하나라도 어긋나면 그 자리에서 멈춘다. 결과는 `logs/week3_spawn_check.json`. 팔을 움직이고 부품을 남긴다.
+
+11-17 headless 실행: **통과**. 팔 통과 시 부품 이동 0.0 mm, 나사 들어 올림 88 mm·놓인 위치 오차 0.6 mm, 너트 90 mm·0.8 mm, 재스폰 성공.
 
 ## 남은 일 (팀원 3)
 
