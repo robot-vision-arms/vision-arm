@@ -6,6 +6,8 @@ import time
 from vision_pick_place.packet import decode, encode
 
 MAX_LINE = 1024 * 1024
+# 서버의 5초 유휴 제한 전에 연결을 교체한다. 영상 중단 후 첫 좌표도 새 연결로 보낸다.
+IDLE_RECONNECT_S = 4.0
 
 
 def validate_pose(packet):
@@ -48,12 +50,14 @@ class PoseClient:
         self.sock = None
         self.buffer = b''
         self.last_transaction = {}
+        self.last_ack_at = None
 
     def close(self):
         if self.sock is not None:
             self.sock.close()
         self.sock = None
         self.buffer = b''
+        self.last_ack_at = None
 
     def exchange(self, packet):
         self.last_transaction = dict(stage='validating', validated=False, connected=False,
@@ -63,6 +67,9 @@ class PoseClient:
         if len(raw) > MAX_LINE:
             raise ValueError('packet too large')
         self.last_transaction['validated'] = True
+        # 아직 보내지 않은 새 프레임만 새 연결로 보낸다. ACK가 불명확한 프레임은 재전송하지 않는다.
+        if self.last_ack_at is not None and time.monotonic() - self.last_ack_at >= IDLE_RECONNECT_S:
+            self.close()
         deadline = time.monotonic() + self.timeout
         try:
             self.last_transaction['stage'] = 'connecting'
@@ -91,6 +98,7 @@ class PoseClient:
                 raise ValueError('ACK sequence or status mismatch')
             self.last_transaction.update(acked=True, stage='acked',
                 tcp_roundtrip_ms=(time.monotonic()-send_started)*1000)
+            self.last_ack_at = time.monotonic()
             return ack
         except Exception:
             # No automatic replay: the server may already have accepted this packet.

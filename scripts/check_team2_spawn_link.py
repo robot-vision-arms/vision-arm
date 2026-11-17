@@ -2,7 +2,8 @@
 
 Default: passively waits for a calibrated source packet, then spawns/clears it.
 --demo: explicitly inject synthetic calibrated test poses in a dedicated domain.
-No arm motion or attachment command is issued by this script.
+No arm motion or direct attachment command is issued by this script.
+--demo additionally checks vacuum OFF and rejects vacuum ON after clearing all objects.
 Existing obj_k models are replaced by the spawner; run in a fresh test scene.
 """
 import argparse
@@ -35,7 +36,7 @@ def main():
         import rclpy
         from ament_index_python.packages import get_package_share_directory
         from std_msgs.msg import String
-        from std_srvs.srv import Trigger
+        from std_srvs.srv import SetBool, Trigger
         from gz.transport13 import Node as GzNode
         from gz.msgs10.pose_v_pb2 import Pose_V
         from ur5e_pick_place.object_spawner import load_sim_params, plane_from_params, plan_spawns
@@ -62,22 +63,27 @@ def main():
         publisher = node.create_publisher(String, '/vision/detections', 10)
         spawn = node.create_client(Trigger, '/sim/spawn_objects')
         clear = node.create_client(Trigger, '/sim/clear_objects')
+        # 새 흡착 판정은 팀원 3 서비스에 맡긴다. 이 도구는 attach 토픽으로 조건을 우회하지 않는다.
+        vacuum = node.create_client(SetBool, '/sim/vacuum')
         def wait(condition, timeout=15):
             deadline = time.monotonic()+timeout
             while time.monotonic()<deadline:
                 rclpy.spin_once(node, timeout_sec=.05)
                 if condition(): return
             raise RuntimeError('Timed out waiting for team link. Check tcp.launch, object_spawner and matching domain/partition.')
-        def call(client):
+        def call(client, request=None):
             if not client.wait_for_service(timeout_sec=10):
                 raise RuntimeError('Missing service: '+client.srv_name)
-            future = client.call_async(Trigger.Request())
+            future = client.call_async(Trigger.Request() if request is None else request)
             rclpy.spin_until_future_complete(node, future, timeout_sec=25)
             if not future.done() or future.result() is None:
                 raise RuntimeError('Service timed out: '+client.srv_name)
             return future.result()
         if not spawn.wait_for_service(timeout_sec=15):
             raise RuntimeError('/sim/spawn_objects absent. Start team2_link.launch.py after Gazebo.')
+        if not vacuum.wait_for_service(timeout_sec=10):
+            raise RuntimeError('/sim/vacuum absent. Rebuild with the latest team 3 spawner, then restart team2_link.launch.py.')
+        report['vacuum_service_available'] = True
         if args.demo:
             wait(lambda: publisher.get_subscription_count()>0 and node.count_publishers('/robot/targets')>0)
             if node.count_publishers('/vision/detections') != 1:
@@ -154,6 +160,14 @@ def main():
             return [model.name for model in scene.model if model.name in [r.name for r in requests]]
         if remaining_objects():
             raise RuntimeError('Clear service succeeded but objects remain in Gazebo')
+        if args.demo:
+            # 빈 시험 장면에서만 호출한다. 부품 없는 ON을 거부하는지까지 확인하며 팔은 움직이지 않는다.
+            off = call(vacuum, SetBool.Request(data=False))
+            empty = call(vacuum, SetBool.Request(data=True))
+            if not off.success or empty.success or '부품이 없음' not in empty.message:
+                raise RuntimeError(f'Unexpected empty-scene vacuum result: OFF={off.message}, ON={empty.message}')
+            report['vacuum_off_success'] = off.success
+            report['empty_scene_vacuum_rejected'] = empty.message
         report.update(ok=True, seq=packet['seq'], acked=True, targets_equal_source=True if args.demo else None,
                       expected_objects=len(requests), skipped=skipped, spawn_and_respawn=results,
                       clear_service_success=True, gz_partition=session['gz_partition'],

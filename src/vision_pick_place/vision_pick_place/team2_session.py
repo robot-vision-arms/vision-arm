@@ -6,6 +6,7 @@ import xml.etree.ElementTree as ET
 
 
 def load_session(path, ros_domain_id='0'):
+    # 팀원 1의 TF/이동과 팀원 3의 스폰이 동일한 월드·ROS 도메인을 사용하도록 연결 경계를 검사한다.
     data = json.loads(Path(path).read_text())
     partition = data.get('gz_partition')
     if not isinstance(partition, str) or not partition:

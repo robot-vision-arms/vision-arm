@@ -25,6 +25,7 @@ def start_link(context):
     if params['world_name'] != session['world_name']:
         raise ValueError('Spawner config world_name differs from running simulation')
     env = dict(os.environ, GZ_PARTITION=session['gz_partition'])
+    # ROS 도메인만 같아도 Gazebo는 다른 서버일 수 있다. 기록된 partition의 실제 응답까지 확인한다.
     check_gazebo(session, env)
     share = get_package_share_directory('vision_pick_place')
     return [LogInfo(msg=f"Team 2 link: domain={session.get('ros_domain_id', '0')}, "
@@ -36,6 +37,7 @@ def start_link(context):
                                   'log_dir': LaunchConfiguration('log_dir')}.items()),
             ExecuteProcess(cmd=[sys.executable, '-m', 'ur5e_pick_place.object_spawner',
                 '--ros-args', '-p', f'config_file:={config}'], output='screen'),
+            # 최신 팀원 3 노드가 /sim/vacuum도 제공한다. 중복 노드나 별도 attach 우회 경로를 만들지 않는다.
         ], scoped=True)]
 
 

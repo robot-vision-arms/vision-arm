@@ -236,3 +236,108 @@ python scripts/check_team2_repeat_motion.py --execute --cycles 5
 RViz 수동 조작에서는 목표를 현재 자세로 갱신한 뒤 이와 같은 빈 공간에서 작은 이동으로 시작한다. 충돌하는 목표가 실패하는 것은 유지해야 하는 정상 동작이며 충돌 검사를 끄지 않는다.
 
 새 검증 도구와 문서 변경은 아직 커밋·푸시하지 않았다.
+
+## 최신 진공 컵 코드와 팀원 2 연결 보완 — 2026-11-17
+
+이번 변경은 팀원 2의 transport.py, 연결 런치·세션 모듈, 스폰 연결 검사와 통신 테스트에 한정했다. 팀원 3의 object_spawner.py·URDF와 팀원 1의 GUI·pick_place_node.py는 수정하지 않았다. 앞서 별도로 커밋한 박스 위치 테스트 수정도 유지했다.
+
+### 수정 내용과 핵심 주석
+
+- `transport.py`: 영상이 끊긴 사이 서버의 5초 유휴 제한으로 TCP가 닫히면 재개 첫 패킷이 실패했다. 마지막 ACK 이후 4초 이상 지났으면 **새 프레임을 보내기 전에** 기존 연결을 닫고 다시 연결한다. monotonic 시계를 사용한다. 이미 전송하고 ACK가 불명확한 패킷을 자동 재전송하지 않는 정책은 그대로다. 갑작스러운 서버 종료·네트워크 오류까지 모두 예방하는 것은 아니다.
+- `test_transport.py`: 실제 서버에 패킷을 보낸 뒤 5.3초 쉬고 다음 패킷이 첫 시도에 ACK를 받는지 검사한다. 서버에 각 seq가 정확히 한 번 전달됐는지도 확인한다.
+- `team2_session.py`·`team2_link.launch.py`: 동일 ROS 도메인·Gazebo partition을 사용하는 이유와, 최신 팀원 3 스폰 노드가 `/sim/vacuum`까지 제공한다는 연결 경계에 한국어 주석을 추가했다.
+- `check_team2_spawn_link.py`: `/sim/vacuum` 존재를 확인한다. `--demo`는 전용 도메인에서 미보정 거부 → TCP/타깃 일치 → 스폰·재스폰 → 삭제 후 빈 장면 확인 → 진공 OFF 성공·빈 장면 ON 거부까지 검사한다. 조건을 우회하는 attach 토픽이나 팔 이동 명령은 보내지 않는다.
+
+### 확인 결과
+
+- 빌드: 2개 패키지 성공.
+- 전체 테스트: **130개 통과, errors/failures/skipped 모두 0**. 박스 기대 좌표 ±0.85m 수정 포함.
+- 합성 패킷 100개: ACK 100/100, 타깃 원본 일치 100/100. 서버 재시작 3회 복구, 실패 프레임 재전송 없음. `logs/team2_roundtrip_updated.json`.
+- 최신 두 컵 URDF로 띄운 별도 headless Gazebo: 부품 2개 생성·재생성·삭제, 미보정 패킷 거부, `/sim/vacuum` OFF 성공·빈 장면 ON 거부 확인. `logs/team2_integration_updated/spawn.json`.
+- 입력 전환 검사에서 기존 `server disconnected before ACK`는 사라졌다. 그러나 영상 노드를 새로 띄운 순간 ROS discovery 전에 발행된 seq 16·17은 브리지 기록에 없어서 최초 관측 100개 중 98개만 일치했다. `logs/team2_integration_updated/images.json`은 이 이유로 FAIL이며 덮어쓰지 않았다. 시작 직후부터 모든 프레임을 보존한다고 보장하지 않는다.
+
+### 실행과 담당 간 경계
+
+1. 터미널 1: `source ~/vision-arm/env.sh` 후 `ros2 launch ur5e_pick_place sim.launch.py`.
+2. 터미널 2: 환경을 불러온 뒤 `ros2 launch vision_pick_place team2_link.launch.py`. 별도 tcp.launch.py 또는 스폰 노드를 중복 실행하지 않는다.
+3. 영상 담당의 기존 vision_node를 실행한다. 보유 이미지 시험은 `ros2 run vision_pick_place vision_node --ros-args --params-file src/vision_pick_place/config/params_mvtec.yaml`.
+4. ROS 노드가 서로 발견하고 실제 `/robot/log`에 ACK가 나오는지 확인한 뒤 `python scripts/check_team_integration.py`로 이후 100개를 검사한다. 준비 전 프레임까지 포함한 최초 시작 검사는 별도이며 위에서 실패로 기록했다.
+5. 실제 스폰에는 실제 보정이 필요하다. MVTec 시험의 `calib_ok=false`를 강제로 true로 바꾸지 않는다. `--demo`는 격리된 nonzero ROS 도메인의 빈 시험 장면에서만 쓴다.
+
+GUI ROS 워커는 여전히 다른 담당의 미구현 상태이며, 이번에 GUI 표시를 구현하거나 완료로 판정하지 않았다. `/sim/run_cycle`도 미구현이다. 실제 진공 흡착 이동·너트 링 컵의 12mm 오프셋을 적용한 자동 사이클·±0.85m 상자 투입·실제 폰 보정 정확도는 이번 검증 범위에 포함하지 않았다.
+
+### 검사 노드 시작 시 관측 누락 구분
+
+준비 후 실행한 검사에서도 `logs/team2_integration_ready/images.json`은 ACK 로그 8개(seq 64~71)를 관측하지 못해 FAIL이었다. 같은 실행의 브리지 CSV에는 해당 8개 모두 `acked=True`였고, 타깃도 100/100 일치했다. 이는 통신 실패보다 검사 노드의 `/robot/log` 연결이 다른 토픽보다 늦게 준비된 상황과 일치한다.
+
+`check_team_integration.py --settle-s 2` 옵션을 추가했다. 모든 필수 토픽의 발행자 연결을 확인한 뒤 2초간 준비하고 이후 최초 100개를 검사한다. 기본값은 0이므로 기존 시작 직후 검사 동작은 유지한다. 제외한 준비 시간과 메시지 수·오류를 JSON의 `startup_excluded`, `settle_s`, `measurement_started_after_s`, `warmup_messages`, `warmup_errors`에 기록한다. 준비 구간을 제외한 통과를 시작 직후 무손실로 해석하면 안 된다.
+
+최종 재검증: 최신 두 컵 URDF·MoveIt·팀원 3 스폰 노드와 팀원 2 연결 런치를 같은 격리 도메인(201)에서 실행했다. 스폰·재스폰·삭제·진공 서비스 검사는 통과했다. 보유 이미지 입력으로 `python scripts/check_team_integration.py --settle-s 2`를 실행한 결과, 토픽 준비 후 **100/100 ACK·타깃 일치**, 디버그 영상 수신, 오류·시계 경고 0이었다. frame-to-ACK P95 17.50ms, TCP 왕복 P95 0.70ms. 준비 시간은 시작 후 4.41초였고 제외 메시지 92개, 준비 구간에 관측된 오류 0개다. 증거: `logs/team2_integration_settled/images.json`, `spawn.json`. 검사에서 시작한 프로세스만 종료했고 기존 workcell_session.json은 복원했다.
+
+이번 수정과 이 절은 아직 커밋·푸시하지 않았다.
+
+## ±0.85m 상자 도달·실제 Gazebo 투입 확인 — 2026-11-17
+
+사용자 요청으로 상자 위치는 유지한 채 별도의 headless Gazebo·MoveIt과 최신 두 컵 헤드를 실행했다. 다른 팀원 원본은 수정하지 않고 팀원 2 검사 도구 `scripts/check_team2_bin_reach.py`만 추가했다. 기존 미커밋 연결 보완도 보존했다.
+
+### 결과
+
+- 배치 확인: SDF·Gazebo·MoveIt 모두 screw_bin=(0,+0.85,0)m, nut_bin=(0,-0.85,0)m 일치. 충돌 물체 검사를 끄지 않았다.
+- 빈 공구 도달: 컵 끝 높이 0.15m, tool0 높이 0.20m, yaw=0°로 양쪽 상자 중심까지 실제 이동 성공. TF 위치 오차 나사 상자 약 0.86mm, 너트 상자 약 0.89mm. 증거 `logs/team2_bin_reach_trial/reach.json`.
+- 실제 투입 시험: 합성 보정 형식 패킷을 `/vision/detections` → TCP ACK → `/robot/targets`로 보낸 뒤 팀원 3 서비스로 나사·너트를 스폰했다. 실제 폰 보정 검증은 아니다.
+- 나사: 5mm 컵으로 흡착 → 상승 → (0,+0.85)m 상자 위 15cm → 진공 OFF → 낙하·안정화. 최종 모델 위치 (0.000747,0.849736,0.005000)m, 상자 중심 대비 XY 오차 **0.79mm**.
+- 너트: 링 컵으로 흡착 → 상승 → (0,-0.85)m 상자 위 15cm → 진공 OFF → 낙하·안정화. 최종 모델 위치 (0.000039,-0.850034,0.005000)m, 상자 중심 대비 XY 오차 **0.05mm**.
+- 두 부품 모두 상자 바닥(z≈5mm)에 남았다. 놓은 뒤 3초 기다리고, 이어서 약 1초 동안 위치 10개를 받아 상자 내부 및 위치 변화 5mm 미만을 확인했다. 각 부품 1회 성공이다. 반복 성공률·실물 로봇 정밀도를 뜻하지 않는다.
+- 너트 링 컵은 tool0 +X 12mm이므로 yaw=0°에서 집기·투입 공구 목표를 부품 목표보다 X=-12mm 보정했다. 이때 너트 투입 tool0 목표는 (-0.012,-0.85,0.20)m다.
+- 실제 투입 실행의 팔 이동 11단계 모두 성공. 첫 작업 영역 이동은 내부 계획 3회째 성공했고 이후 상자·집기·투입 이동은 모두 1회째 성공했다. 검사 속도 비율 0.10, 계획 시간 10초/회, 계획 최대 3회였다. 모든 임시 파라미터는 종료 때 복원했다.
+- 최종 증거: `logs/team2_bin_drop_retry/reach.json` (`ok=true`, `actual_part_drop_verified=true`, `parameters_restored=true`), 같은 폴더의 `layout.json`, `reach.log`, `sim.log`.
+
+### 발견한 한계·실패 기록
+
+첫 투입 시도(`logs/team2_bin_drop_trial/reach.json`)는 상자 목표를 시험하기 전, 기존 작업 영역 (0.4,-0.05,컵 끝 0.25)m로 가는 초기 계획이 3회 실패(code 99999)해 중단했다. 상자 도달 불가로 판정하지 않았다. 다음 시도에서 검사에 한해 계획 시간을 5초→10초로 늘려 완료했다. `pick_place_node.py`나 영구 설정은 바꾸지 않았다. 따라서 초기 OMPL 계획 안정성 문제까지 해결됐다고 보지 않는다.
+
+현재 위치는 **이 시뮬레이션·공구·높이·자세에서 실제 투입 가능**으로 확인했다. 더 낮은 높이로 상자 안까지 하강하거나 다른 공구 자세로 접근하는 모든 경우를 보장하지 않는다. `/sim/run_cycle` 구현 완료도 아니다. Gazebo의 흡착 기하 판정과 고정 연결을 사용한 결과이며 실제 진공 누설·접촉 물리는 별도다.
+
+### 다시 확인하는 방법
+
+기존 작업과 분리한 비어 있는 시험 도메인을 사용한다. 아래 73은 다른 프로그램이 사용하지 않을 때의 예시다. `--drop`은 나사·너트를 생성하고 시뮬레이션 팔을 자동으로 움직인다.
+
+터미널 1:
+
+```bash
+source ~/vision-arm/env.sh
+export ROS_DOMAIN_ID=73
+unset GZ_PARTITION
+ros2 launch ur5e_pick_place sim.launch.py
+```
+
+터미널 2:
+
+```bash
+source ~/vision-arm/env.sh
+export ROS_DOMAIN_ID=73
+ros2 launch vision_pick_place team2_link.launch.py
+```
+
+터미널 3:
+
+```bash
+source ~/vision-arm/env.sh
+export ROS_DOMAIN_ID=73
+python scripts/check_team2_bin_reach.py --execute --drop
+```
+
+상자 위치를 바꾸지 않고 빈 공구 도달만 검사하려면 `--drop`을 빼고 실행한다. 기본 결과는 `logs/team2_bin_reach_check.json`에 저장된다. 실패 시 JSON의 `error`·각 단계 `message`를 확인한다. 컨트롤러 실패나 응답 시간 초과는 추가 이동 없이 중단한다.
+
+이번 새 검사 도구와 기록은 아직 커밋·푸시하지 않았다.
+
+## Gazebo·RViz 화면 시연 — 2026-11-17
+
+사용자 요청으로 GUI가 있는 별도 시연 스택(ROS_DOMAIN_ID=205, GZ_PARTITION=vision_arm_aaec475d4e09)을 실행했다. GUI 프로세스는 실행 확인했으며 화면을 사용자가 직접 봤다는 확인은 아직 받지 않았다. 종료하지 않고 상자와 부품을 볼 수 있도록 열어 두었다.
+
+- 첫 GUI 시연: 나사 투입 성공 뒤 너트를 집으러 가는 낮은 접근 목표의 계획이 3회 실패했다. `logs/team2_gui_demo/reach.json`은 실패 그대로 보존했다.
+- 팀원 2 검사에 다음 부품으로 넘어갈 때의 높은 안쪽 경유점 (0.20, ±0.55, 컵 끝 0.25)m을 추가하고 같은 스택에서 재시연했다. 다른 담당 원본은 수정하지 않았다.
+- 재시연: 나사 투입 성공 → 안쪽 경유점 성공 → 너트 접근·흡착·투입 성공. 나사 최종 (0.000846,0.850523,0.005000)m, 너트 최종 (-0.000285,-0.849400,0.005000)m. 둘 다 상자 안에서 안정화했다.
+- 다만 마지막 너트 투입 뒤 빈 공구 대기점 복귀에서 계획 실패(code 99999, 3회)가 발생했다. 따라서 재시연 전체 결과 `logs/team2_gui_demo/retry.json`은 `ok=false`이며 이를 통과로 바꾸지 않았다. 두 `drops[].success`는 true, 임시 파라미터 복원도 true다. 부품은 상자 안에 있고 팔은 정지한 상태다.
+- 현재 검사 도구는 경유점을 **다음 부품이 있을 때만** 사용하도록 정리했다. 마지막 투입 이후 빈 공구 복귀는 별도 검사로 남긴다. 완료 전 JSON은 `status=running`·`ok=false`로 유지하도록 정리했다. 이 마지막 제어 흐름 정리는 문법 검사만 했으며 전체 GUI 시연을 다시 반복하지 않았다.
+- GUI 실행에서의 계획 재시도·복귀 실패까지 해결된 것으로 기록하지 않는다. 실물 로봇 시험도 아니다.

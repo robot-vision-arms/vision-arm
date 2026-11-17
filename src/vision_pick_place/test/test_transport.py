@@ -53,6 +53,22 @@ def test_100_acknowledgements(server):
         client.close()
 
 
+def test_first_frame_after_server_idle_timeout_is_delivered_once(server):
+    srv, forwarded = server
+    client = PoseClient(*srv.server_address)
+    try:
+        assert client.exchange(pose(1))['ack'] == 1
+        # 실제 서버의 5초 제한을 넘겨 영상 중단·재개 상황을 재현한다.
+        time.sleep(5.3)
+        assert client.exchange(pose(2))['ack'] == 2
+        deadline = time.monotonic() + 2
+        while len(forwarded) < 2 and time.monotonic() < deadline:
+            time.sleep(.01)
+        assert [packet['seq'] for packet in forwarded] == [1, 2]
+    finally:
+        client.close()
+
+
 def test_bad_ack_disconnects_and_next_frame_reconnects():
     listener = socket.create_server(('127.0.0.1', 0))
     listener.settimeout(2)
