@@ -13,16 +13,75 @@
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="$(arg ur_type)">
   <xacro:include filename="$(find ur_simulation_gz)/urdf/ur_gz.urdf.xacro"/>
 
-  <!-- 길쭉한 흡착 패드: 긴 변이 tool0 +X. 나사 장축에 맞춰 돌려서 집는다. 길이는 config/sim.yaml 의 tool_length_m 과 맞출 것 -->
+  <!--
+    진공 컵 두 개 헤드 (11-17 가영, 성민 님 파일을 사용자 승인으로 수정): 원래 40x12 mm 직육면체 패드 → 둥근 진공 컵 2개.
+    큰 컵은 tool0 에서 아래로  홀더(지름 16 mm) → 공기 관(지름 3 mm) → 주름형 진공 컵(지름 5 mm, 높이 6 mm). 나사용.
+    링 컵은 홀더 아래 팔로 tool0 +X 12 mm. M8 너트용. 입술 두 겹(안 지름 9 mm, 바깥 12 mm) 사이 고리에만 진공.
+    가운데 센터링 핀(지름 7.6 mm, 스프링)이 너트 구멍에 들어가 너트를 가운데로 맞춘다.
+    핀은 모양만 보이고 충돌은 없음 (Gazebo 너트 모델에 구멍이 없어서). 두 컵 입술 끝 높이는 같다.
+    전체 길이 pad_length 는 그대로 50 mm (config/sim.yaml 의 tool_length_m 과 맞출 것).
+    컵 크기·위치는 object_spawner.SuctionLimits 의 cup_diameter, ring_*, pin_diameter 와 맞출 것.
+    링크 이름 vacuum_pad 는 SRDF 충돌 설정 때문에 유지.
+  -->
   <xacro:property name="pad_length" value="0.05"/>
+  <xacro:property name="holder_length" value="0.036"/>
+  <xacro:property name="cup_height" value="0.006"/>
+  <xacro:property name="cup_radius" value="0.0025"/>
+  <xacro:property name="ring_outer_radius" value="0.006"/>
+  <xacro:property name="ring_offset" value="0.012"/>
+  <xacro:property name="pin_radius" value="0.0038"/>
   <link name="vacuum_pad">
     <visual>
-      <origin xyz="0 0 ${pad_length / 2}"/>
-      <geometry><box size="0.04 0.012 ${pad_length}"/></geometry>
+      <origin xyz="0 0 ${holder_length / 2}"/>
+      <geometry><cylinder radius="0.008" length="${holder_length}"/></geometry>
+    </visual>
+    <visual>
+      <origin xyz="0 0 ${(holder_length + pad_length - cup_height) / 2}"/>
+      <geometry><cylinder radius="0.0015" length="${pad_length - cup_height - holder_length}"/></geometry>
+    </visual>
+    <visual>
+      <origin xyz="0 0 ${pad_length - cup_height / 2}"/>
+      <geometry><cylinder radius="${cup_radius}" length="${cup_height}"/></geometry>
+    </visual>
+    <visual>  <!-- 링 컵 = 홀더 옆 팔 → 관 → 링 컵 -->
+      <origin xyz="0.010 0 ${holder_length - 0.002}"/>
+      <geometry><box size="0.008 0.004 0.004"/></geometry>
+    </visual>
+    <visual>
+      <origin xyz="${ring_offset} 0 ${(holder_length + pad_length - cup_height) / 2}"/>
+      <geometry><cylinder radius="0.0015" length="${pad_length - cup_height - holder_length}"/></geometry>
+    </visual>
+    <visual>
+      <origin xyz="${ring_offset} 0 ${pad_length - cup_height / 2}"/>
+      <geometry><cylinder radius="${ring_outer_radius}" length="${cup_height}"/></geometry>
+    </visual>
+    <visual>  <!-- 센터링 핀 (입술 아래로 2 mm, 스프링으로 들어감). 충돌 없음 -->
+      <origin xyz="${ring_offset} 0 ${pad_length + 0.001}"/>
+      <geometry><cylinder radius="${pin_radius}" length="0.002"/></geometry>
     </visual>
     <collision>
-      <origin xyz="0 0 ${pad_length / 2}"/>
-      <geometry><box size="0.04 0.012 ${pad_length}"/></geometry>
+      <origin xyz="0 0 ${holder_length / 2}"/>
+      <geometry><cylinder radius="0.008" length="${holder_length}"/></geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 ${(holder_length + pad_length - cup_height) / 2}"/>
+      <geometry><cylinder radius="0.0015" length="${pad_length - cup_height - holder_length}"/></geometry>
+    </collision>
+    <collision>
+      <origin xyz="0 0 ${pad_length - cup_height / 2}"/>
+      <geometry><cylinder radius="${cup_radius}" length="${cup_height}"/></geometry>
+    </collision>
+    <collision>  <!-- 링 컵 = 홀더 옆 팔 → 관 → 링 컵 -->
+      <origin xyz="0.010 0 ${holder_length - 0.002}"/>
+      <geometry><box size="0.008 0.004 0.004"/></geometry>
+    </collision>
+    <collision>
+      <origin xyz="${ring_offset} 0 ${(holder_length + pad_length - cup_height) / 2}"/>
+      <geometry><cylinder radius="0.0015" length="${pad_length - cup_height - holder_length}"/></geometry>
+    </collision>
+    <collision>
+      <origin xyz="${ring_offset} 0 ${pad_length - cup_height / 2}"/>
+      <geometry><cylinder radius="${ring_outer_radius}" length="${cup_height}"/></geometry>
     </collision>
     <inertial>
       <origin xyz="0 0 ${pad_length / 2}"/>
