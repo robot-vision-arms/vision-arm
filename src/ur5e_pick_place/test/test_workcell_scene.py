@@ -20,8 +20,8 @@ def test_workcell_has_floor_and_both_bins():
     assert not any(name.startswith('work_mat') for name in boxes)
     wall = boxes['screw_bin/wall_px']
     assert wall.size == (0.005, 0.15, 0.06)
-    assert np.allclose(wall.position, (0.0725, 0.45, 0.03))
-    assert np.allclose(boxes['nut_bin/floor'].position, (0.0, -0.45, 0.0025))
+    assert np.allclose(wall.position, (0.0725, 0.85, 0.03))
+    assert np.allclose(boxes['nut_bin/floor'].position, (0.0, -0.85, 0.0025))
 
 
 def test_floor_plane_sits_just_below_robot_base():
