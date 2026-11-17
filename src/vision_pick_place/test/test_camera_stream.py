@@ -143,3 +143,43 @@ def test_live_source_read_times_out_when_no_frames(monkeypatch):
     source = FrameSource(camera_url='rtsp://fake/live', read_timeout_s=0.3)
     assert source.read() is None
     source.release()
+
+
+def test_live_source_reconnect_backoff_grows_then_recovers(monkeypatch):
+    """스트림이 꺼져 있으면 재연결 간격이 2배씩 늘어 최대값에서 멈추고, 다시 켜지면 노드 재시작 없이 복구된다."""
+    import time
+    opened_at = []
+    state = {'live': False}
+
+    def factory(*args, **kwargs):
+        opened_at.append(time.monotonic())
+        return _FakeCapture(fail_after=None if state['live'] else 0)
+
+    monkeypatch.setattr(cv2, 'VideoCapture', factory)
+    source = FrameSource(camera_url='rtsp://fake/live', read_timeout_s=0.3,
+                         reconnect_delay_s=0.05, reconnect_max_delay_s=0.2)
+    time.sleep(1.0)
+    gaps = [b - a for a, b in zip(opened_at, opened_at[1:])]
+    # 0.05 → 0.1 → 0.2 → 0.2 ... : 고정 0.05초였다면 1초 동안 약 20번 접속했을 것
+    assert 4 <= len(opened_at) <= 9
+    assert gaps[0] < 0.09
+    assert gaps[1] > 0.09
+    assert all(g < 0.35 for g in gaps)  # 최대값에서 멈춘다
+    assert all(g > 0.18 for g in gaps[2:])
+
+    state['live'] = True  # 폰 앱을 다시 켬
+    deadline = time.monotonic() + 1.0
+    frame = None
+    while frame is None and time.monotonic() < deadline:
+        frame = source.read()
+    assert frame is not None
+    assert source._thread.is_alive()
+    source.release()
+
+
+@pytest.mark.parametrize('kwargs', [
+    {'reconnect_delay_s': 0}, {'reconnect_delay_s': 2.0, 'reconnect_max_delay_s': 1.0},
+])
+def test_invalid_reconnect_settings(kwargs):
+    with pytest.raises(ValueError):
+        FrameSource(camera_url='rtsp://fake/live', **kwargs)

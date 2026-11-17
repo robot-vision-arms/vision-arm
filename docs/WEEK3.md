@@ -248,3 +248,73 @@ python scripts/check_team2_roundtrip.py --domain 97 \
 합성 패킷의 프레임→ACK P95 1.80ms, TCP 왕복 P95 0.59ms였다 (실제 영상 처리 성능이 아님).
 서버 재시작 5회 모두 의도된 실패를 기록한 뒤 새 패킷으로 복구했고, 실패 패킷의 자동 재전송은 없었다.
 보고서 recovery_ms는 새 서버 discovery 확인 후 복구 패킷 송신부터 타깃·로그 수신까지 약 62~73ms이며 전체 서버 재시작 소요 시간이 아니다.
+
+# 3주차 팀원 3 (가영) — 스폰·흡착
+
+2026-11-17, 가영 PC에서 구현·검증. 담당 파일 `ur5e_pick_place/object_spawner.py` 만 수정했고 테스트 `test/test_object_spawner.py` 를 새로 추가했다.
+`pick_place_node.py`·`sim.yaml`·`setup.py`·URDF 등 다른 팀원 파일은 바꾸지 않았다.
+
+## 구현
+
+| 항목 | 내용 |
+|---|---|
+| 패킷 → 스폰 목록 (`plan_spawns`) | `calib_ok: false` 는 거부. `part_types` 에 없는 종류(unknown)·mm 가 null 인 물체는 건너뛰고 이유를 남김. 남은 물체를 순서대로 `obj_0`~`obj_{max_objects-1}` 에 배정. `grasp.work_to_base` 로 base_link(=world) 좌표, yaw = 각도 + 작업 평면 yaw (너트처럼 각도 null 이면 0°). 바닥과 겹치지 않게 1 mm 위에 놓음 |
+| Gazebo 통신 (`GzSpawner`) | `ros2 run` 프로세스 대신 gz-transport 로 직접 `/world/workcell/create`·`/remove` 요청, `/vacuum/obj_k/state` 구독, `/vacuum/obj_k/detach` 발행 (ros_gz_bridge 불필요) |
+| DetachableJoint 처리 | 처음 쓰는 슬롯은 스폰 즉시 자동으로 붙으므로 "attached" 를 기다렸다가 detach → "detached" 확인. 이미 한 번 뗀 슬롯은 기다리지 않음. 붙은 채 지우지 않도록 삭제 전에 떼어 둠 |
+| 단독 실행 노드 | `python3 -m ur5e_pick_place.object_spawner`. `/robot/targets` 최신 패킷을 `/sim/spawn_objects` (Trigger) 호출 때 스폰(이전 obj_k 는 먼저 삭제), `/sim/clear_objects` 로 전부 삭제. 작업 평면·`max_objects`·`part_types` 는 `config/sim.yaml` 의 `pick_place_node` 값을 그대로 읽음 (`base_link→work_plane` TF 와 같은 값). `ros2 run` 용 entry point 는 `setup.py`(공유 파일)를 안 건드리려고 추가하지 않음 |
+
+## DetachableJoint 동작 확인 (DECISIONS.md 4장 "지웠다 다시 만든 같은 이름 모델을 잡는지")
+
+gz-sim8 `DetachableJoint.cc` 소스와 실기로 확인:
+- 시뮬레이터 시작 때 붙이기 요청이 켜져 있어, 슬롯마다 **처음** 나타난 obj_k 만 자동으로 붙는다.
+- 한 번 detach 한 뒤에는 같은 이름 모델을 지웠다 다시 만들어도 **자동으로 붙지 않는다**.
+- 그 상태에서 attach 를 보내면 지워진 옛 모델 대신 **새 모델을 찾아 붙인다** (실기: 다시 만든 obj_0 이 팔과 함께 0.100 m 상승, detach 후 바닥으로).
+- 붙어 있지 않을 때 detach 는 무시된다 (다음 attach 에 영향 없음).
+
+## 실기 결과 (headless Gazebo + MoveIt, 보정된 형식의 합성 패킷)
+
+| 시험 | 결과 |
+|---|---|
+| 새 슬롯 스폰: 나사(100, 50 mm, 30°)·unknown·너트(200, 150 mm)·나사(250, 40 mm, 135°) | 3개 스폰, unknown 건너뜀. Gazebo 위치 (0.400, −0.100)·(0.500, 0.000)·(0.550, −0.110) m, 각도 30°·0°·135° = 계산값과 일치. 0.7초 |
+| 스폰 후 팔 이동 (`/sim/move_to_target`) | 부품 최대 이동 **0.0 m** → 패드에서 제대로 떨어져 있음 |
+| 스폰 노드 재시작 후 같은 이름 재스폰 | 성공. 이전 상태를 모르는 슬롯마다 최대 2초 대기 → 4.6초 |
+| 같은 노드로 재스폰 | 0.5~0.6초 |
+| 다시 만든 obj_0 attach → 팔 0.10 m 상승 → detach | 0.100 m 따라 올라갔다가 바닥으로 떨어짐 |
+| `calib_ok: false` 패킷 | 거부 메시지, 스폰 안 함 |
+| 삭제 | obj_0~obj_2 모두 사라짐 |
+| colcon test | **112 tests, 0 failures** (`test_object_spawner.py` 6개 추가: 좌표·각도 변환, 회전된 평면, 미보정 거부, 건너뛰기·슬롯 배정, 빈 패킷, sim.yaml·모델·URDF 슬롯 수 일치) |
+
+실제 폰·보정 패킷으로는 아직 안 해 봤다 (동경 보정 대기). 스폰은 부품을 인식 위치에 놓는 것까지이며 집기 사이클은 아니다.
+
+### 가까이 집어 옮기기 시연 (11-17, Gazebo 창 켜고 2회 반복)
+
+위 시험은 패드를 부품 0.15 m 위에 둔 채 attach 해서, 부품이 패드에 닿지 않고 그 거리만큼 떨어진 채 따라왔다 (DetachableJoint 는 attach 순간의 상대 위치를 그대로 고정한다).
+실제 흡착처럼 보이도록 스폰한 부품 바로 위까지 내려가 집어 옮겼다. 팔은 `/sim/move_to_target` 의 목표 파라미터를 바꿔 가며 단계별로 움직였다 (확인용 임시 스크립트, 저장소에 넣지 않음).
+
+순서: 부품 위 80 mm 접근 → 패드 끝을 부품 바로 위까지 하강 → attach → 100 mm 로 들어 올림 → 옆으로 이동 → 하강 → detach → 위로 빠짐. 나사는 장축 각도(30°)에 패드를 맞췄다.
+
+| 부품 | 하강 높이 (패드 끝) | 들어 올렸을 때 부품 높이 | 내려놓은 위치 (m) | 목표 (m) |
+|---|---|---|---|---|
+| 나사 30° (100, 105 mm) | 12 mm | 89 mm / 88 mm (패드 끝 100 mm 바로 아래) | (0.461, −0.090) / (0.460, −0.091) | (0.460, −0.090) |
+| 너트 (200, 150 mm) | 10 mm | 90 mm / 91 mm | (0.450, 0.010) / (0.449, 0.010) | (0.450, 0.010) |
+
+모든 이동이 첫 시도에 계획·실행 성공. MoveIt 은 스폰한 부품을 충돌 물체로 모르므로 하강 높이는 부품 높이(나사 8 mm, 너트 6 mm)보다 조금 높게 잡았다.
+자동 집기 사이클(`/sim/run_cycle`)이 아니라 이동·흡착·해제가 이어서 동작하는지 본 확인이다.
+
+- Gazebo 창을 닫으면 Gazebo 서버도 함께 꺼지지만 MoveIt·브리지 노드는 남는다. 이 상태에서 스폰은 "삭제 요청 실패", 이동은 `CONTROL_FAILED` 로 실패하므로 launch 전체를 다시 띄운다.
+- 부품이 작아 기본 시점에서는 잘 안 보인다. 작업 시트 쪽을 마우스 휠로 확대하거나 Entity Tree 에서 `obj_0` → Move to 로 본다 (`/gui/move_to/pose` 로 카메라를 옮기는 요청은 실패해서 쓰지 않았다).
+
+## 실행
+
+```bash
+ros2 launch ur5e_pick_place sim.launch.py gazebo_gui:=false launch_rviz:=false   # 터미널 1
+python3 -m ur5e_pick_place.object_spawner                                         # 터미널 2 (env.sh, install/setup.bash source 후)
+ros2 service call /sim/spawn_objects std_srvs/srv/Trigger                         # 터미널 3: 최신 /robot/targets 패킷대로 스폰
+ros2 service call /sim/clear_objects std_srvs/srv/Trigger
+```
+
+## 남은 일 (팀원 3)
+
+- 실제 보정 패킷으로 "카메라 앞 부품 위치대로 Gazebo 에 부품이 생김" 확인 (동경 보정 후, 팀원 2 `tcp.launch.py` 의 `/robot/targets` 사용).
+- TF: 스폰한 obj_k 를 RViz 에서 보이게 할지 결정 (`work_plane` static TF 는 이미 sim.launch.py 에 있음).
+- `pick_place_node` 의 `/sim/run_cycle` 2단계에서 `plan_spawns`·`GzSpawner.spawn_all` 을 부르도록 연결 — `pick_place_node.py` 담당자와 협의 필요.

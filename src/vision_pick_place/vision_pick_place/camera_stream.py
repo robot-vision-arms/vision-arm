@@ -25,11 +25,16 @@ class FrameSource:
     """
 
     def __init__(self, camera_index: int = 0, image_dir: str = '', camera_url: str = '',
-                 read_timeout_s: float = 5.0):
+                 read_timeout_s: float = 5.0, reconnect_delay_s: float = 0.5,
+                 reconnect_max_delay_s: float = 5.0):
+        if not 0 < reconnect_delay_s <= reconnect_max_delay_s:
+            raise ValueError('0 < reconnect_delay_s <= reconnect_max_delay_s 여야 합니다.')
         self.camera_index = camera_index
         self.camera_url = camera_url
         self.image_dir = Path(image_dir) if image_dir else None
         self.read_timeout_s = read_timeout_s
+        self.reconnect_delay_s = reconnect_delay_s
+        self.reconnect_max_delay_s = reconnect_max_delay_s
         self._cap = None
         self._closed = False
         self._index = 0
@@ -56,16 +61,24 @@ class FrameSource:
             self._thread.start()
 
     def _reader(self) -> None:
-        """카메라 프레임을 쉬지 않고 읽어 최신 1장만 남긴다. 실패하면 잠시 쉬고 다시 연결한다."""
+        """카메라 프레임을 쉬지 않고 읽어 최신 1장만 남긴다. 실패하면 잠시 쉬고 다시 연결한다.
+
+        재연결 대기는 reconnect_delay_s 에서 시작해 실패할 때마다 2배로 늘리고
+        reconnect_max_delay_s 에서 멈춘다. 스트림이 꺼져 있는 동안 FFmpeg 접속 오류 로그가
+        0.5초마다 쏟아지지 않게 하기 위함이다. 프레임을 한 장이라도 받으면 처음 값으로 되돌린다.
+        """
+        delay = self.reconnect_delay_s
         while not self._stop.is_set():
             ok, frame = self._cap.read()
             if self._stop.is_set():
                 break
             if not ok or frame is None:
-                if self._stop.wait(0.5):
+                if self._stop.wait(delay):
                     break
+                delay = min(delay * 2, self.reconnect_max_delay_s)
                 self._open_camera()
                 continue
+            delay = self.reconnect_delay_s
             with self._cond:
                 self._latest = frame
                 self._latest_seq += 1
