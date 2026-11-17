@@ -23,7 +23,7 @@ pick_place_node:
     # 상자는 로봇 베이스 둘레 반경 약 0.45 m 에 둔다 (작업 평면과 겹치지 않고 UR5e 가 위에서 닿는 거리)
     part_types: ["screw", "nut"]
     bin_x: [0.0, 0.0]
-    bin_y: [0.45, -0.45]
+    bin_y: [0.55, -0.55]
     bin_drop_z: 0.15               # 상자 위 놓는 높이 (패드 끝 기준)
     max_velocity_scaling: 0.3      # 시뮬레이션이 느린 WSL2 에서 궤적 추종 오차를 줄이려고 낮춘 초기값
     # 2주차 지정 좌표 이동. /sim/move_to_target (std_srvs/srv/Trigger) 호출 시 적용
