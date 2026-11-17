@@ -32,6 +32,23 @@ TF·RViz 표시 (노드가 하는 일):
     마커    /sim/object_markers  visualization_msgs/MarkerArray. obj_k 프레임에 붙인 부품 모양(원기둥 등).
                                 모양은 models/<part_type>/model.sdf 의 visual 에서 읽는다 (종류가 늘어도 코드 수정 없음).
     RViz 에서 TF 표시와 MarkerArray(/sim/object_markers) 를 추가하면 Gazebo 와 같은 자리에 부품이 보인다.
+
+진공 흡착 (현실 조건 검사, /sim/vacuum std_srvs/SetBool):
+    DetachableJoint 는 명령만 받으면 거리와 상관없이 그 순간의 상대 위치로 붙여 버린다 (현실에 없는 동작).
+    그래서 '진공 켜기' 요청이 오면 패드 아래 부품이 실제 진공 컵으로 잡힐 조건인지 먼저 검사하고, 통과한 부품 하나만 attach 한다.
+    그리퍼는 컵 두 개 헤드 (urdf/ur5e_vacuum.urdf.xacro). 둥근 컵이라 방향(yaw)은 맞출 필요 없다.
+        지름 5 mm 주름형 컵 (tool0 바로 아래): 나사용. 흡착력 1.18 N
+        링 컵 (tool0 +X 로 12 mm): 너트용. 입술 두 겹(안 지름 9 mm, 바깥 12 mm) 사이 고리에만 진공, 가운데는 막혀 있고
+            끝이 뾰족한 센터링 핀(지름 7.6 mm, 스프링)이 구멍에 들어가 너트를 가운데로 맞춘다 (±pin_capture).
+            흡착력 60 kPa × 고리 면적 = 2.97 N. 바깥 지름 12 mm 라 지름 8 mm 나사 위에는 못 올라간다
+        실제 다중 컵 헤드처럼 컵마다 밸브가 따로 있다고 보고, 조건을 통과한 컵 하나만 켠다.
+        1. 컵이 아래를 본다 (tool0 Z 축이 연직 아래에서 vacuum_max_tilt_deg 이내)
+        2. 컵 전체가 부품 면 위: 가장자리·구멍 밖으로 나가지 않고, 둥근 면(나사)은 높이 차 ≤ vacuum_lip_compliance
+           너트는 구멍(지름 8 mm)이 5 mm 컵보다 커서 그 컵으로는 못 잡고, 링 컵의 핀을 구멍에 넣어 잡는다 (HOLE_RADIUS_M)
+        3. 밀착: 컵 끝 ~ 부품 면 간격이 -vacuum_max_press ~ +vacuum_seal_gap
+        4. 흡착력 (vacuum_vacuum_kpa × 컵 면적) ≥ vacuum_safety_factor × 무게 (model.sdf 질량)
+    통과하지 못하면 아무것도 붙이지 않고 이유를 돌려준다. data=false 면 붙어 있던 부품을 뗀다 (중력으로 떨어짐).
+    공기 흐름·누설·흡착력은 계산하지 않는다 (Gazebo 에 없음). 위 조건은 그 대신 쓰는 기하 검사다.
 """
 from __future__ import annotations
 
@@ -39,7 +56,7 @@ import math
 import threading
 import time
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 
 from ur5e_pick_place.grasp import PlanePose, work_to_base
@@ -63,6 +80,143 @@ def rpy_to_quaternion(roll: float, pitch: float, yaw: float) -> tuple[float, flo
     cy, sy = math.cos(yaw / 2), math.sin(yaw / 2)
     return (sr * cp * cy - cr * sp * sy, cr * sp * cy + sr * cp * sy,
             cr * cp * sy - sr * sp * cy, cr * cp * cy + sr * sp * sy)
+
+
+def rotate(q: tuple[float, float, float, float], v: tuple[float, float, float]) -> tuple[float, float, float]:
+    """쿼터니언 q=(x, y, z, w) 로 벡터 v 를 회전."""
+    x, y, z, w = q
+    vx, vy, vz = v
+    # v' = v + 2w(q×v) + 2 q×(q×v)
+    cx, cy, cz = y * vz - z * vy, z * vx - x * vz, x * vy - y * vx
+    return (vx + 2 * (w * cx + y * cz - z * cy),
+            vy + 2 * (w * cy + z * cx - x * cz),
+            vz + 2 * (w * cz + x * cy - y * cx))
+
+
+@dataclass(frozen=True)
+class SuctionLimits:
+    """둥근 진공 컵이 부품을 잡는다고 볼 조건. 컵 크기·위치는 urdf/ur5e_vacuum.urdf.xacro 의 cup_radius,
+    ring_outer_radius, ring_inner_radius, pin_radius, ring_offset 과 맞출 것."""
+    cup_diameter: float = 0.005    # 주름형(벨로즈) 컵 지름. M8 나사(지름 8 mm, 20 g)용
+    ring_outer_diameter: float = 0.012  # 링 컵 바깥 입술 지름. M8 너트(맞변 13 mm, 5 g)용
+    ring_inner_diameter: float = 0.009  # 링 컵 안쪽 입술 지름 (구멍 지름 8 mm 보다 커야 테두리에 닿는다)
+    pin_diameter: float = 0.0076        # 센터링 핀 지름 (구멍보다 0.4 mm 작음 → 맞춘 뒤 남는 어긋남 최대 0.2 mm)
+    pin_capture: float = 0.0015         # 핀 끝 경사로 구멍에 끌려 들어가는 최대 어긋남
+    ring_offset: float = 0.012          # 링 컵이 5 mm 컵에서 tool0 +X 로 떨어진 거리
+    seal_gap: float = 0.002        # 컵 끝이 부품 면에서 이만큼 떨어져 있어도 빨아들여 붙는다고 본다
+    max_press: float = 0.003       # 주름 컵이 눌릴 수 있는 깊이 (더 누르면 충돌로 봄)
+    lip_compliance: float = 0.002  # 컵 입술이 메울 수 있는 면 높이 차. 주름(1.5단) 컵이 줄어들 수 있는 정도
+    max_tilt_deg: float = 10.0     # 컵이 연직 아래에서 기울어진 허용 각도
+    vacuum_kpa: float = 60.0       # 진공도 (대기압과의 차). 소형 이젝터 기준
+    safety_factor: float = 2.0     # 흡착력 / 무게 최소 비율 (들어 올릴 때 가속·흔들림 여유)
+
+
+# 부품 가운데 구멍 반지름 (m). model.sdf 의 Gazebo 모양에는 구멍이 없어 여기서 따로 정한다.
+# M8 너트 구멍 지름 약 8 mm (맞변 13 mm). 구멍 위로는 공기가 새서 진공이 생기지 않는다.
+HOLE_RADIUS_M = {'nut': 0.004}
+SUCTION_KEYS = ('cup_diameter', 'ring_outer_diameter', 'ring_inner_diameter', 'pin_diameter', 'pin_capture',
+                'ring_offset', 'seal_gap', 'max_press', 'lip_compliance', 'max_tilt_deg', 'vacuum_kpa',
+                'safety_factor')
+
+
+def cup_tips(tool_xyz, tool_quat, tool_length: float, lim: SuctionLimits = SuctionLimits()):
+    """헤드의 컵 두 개: [(이름, 컵 끝 위치, 링 컵 여부)]. 5 mm 컵은 tool0 Z 로 tool_length,
+    링 컵은 거기서 tool0 +X 로 ring_offset (두 컵 입술 끝 높이는 같다)."""
+    out = []
+    for name, offset, ring in (('5 mm 컵', 0.0, False), ('링 컵', lim.ring_offset, True)):
+        d = rotate(tool_quat, (offset, 0.0, tool_length))
+        out.append((name, tuple(tool_xyz[i] + d[i] for i in range(3)), ring))
+    return out
+
+
+def part_mass(sdf_path: Path) -> float:
+    """model.sdf 의 첫 link 질량 (kg). 없으면 0."""
+    text = ET.parse(sdf_path).getroot().findtext('./model/link/inertial/mass')
+    return float(text) if text else 0.0
+
+
+def suction_check(tip_xyz, tool_quat, part_xyz, part_quat, shape: 'MarkerShape', mass_kg: float = 0.0,
+                  hole_radius: float = 0.0, lim: SuctionLimits = SuctionLimits(),
+                  ring: bool = False) -> tuple[bool, str, dict]:
+    """컵 끝(tool0 원점 + 패드 길이)과 부품 자세로 둥근 진공 컵이 잡을 수 있는지 판정. 모두 world(=base_link) 기준.
+
+    부품 좌표계: 원점 = 바닥 중심, +X = 장축, +Z = 위 (models/*/model.sdf 규칙).
+    1. 컵이 아래를 본다  2. 컵 전체가 부품 면 위 (구멍·가장자리 밖으로 나가지 않음, 둥근 면은 높이 차 ≤ lip_compliance)
+    3. 컵 끝과 면 사이 간격  4. 흡착력(진공도 × 컵 면적) ≥ safety_factor × 무게
+    ring=True 면 링 컵: 바깥 입술 반지름 r, 안쪽 입술 반지름 ri 사이 고리만 진공. 구멍 있는 부품은 핀이 구멍에 들어가야 한다.
+    돌려주는 값: (통과 여부, 실패 이유 또는 '', 측정값 dict(mm·N·deg))
+    """
+    r = (lim.ring_outer_diameter if ring else lim.cup_diameter) / 2
+    ri = lim.ring_inner_diameter / 2 if ring else 0.0
+    down = rotate(tool_quat, (0.0, 0.0, 1.0))                 # tool0 Z = 컵이 향하는 방향
+    tilt = math.degrees(math.acos(max(-1.0, min(1.0, -down[2]))))
+    qx, qy, qz, qw = part_quat
+    rel = rotate((-qx, -qy, -qz, qw), tuple(tip_xyz[i] - part_xyz[i] for i in range(3)))   # 컵 끝을 부품 좌표로
+    force = lim.vacuum_kpa * 1000 * math.pi * (r * r - ri * ri)
+    weight = mass_kg * 9.81
+    m = {'tilt_deg': tilt, 'dist_mm': math.hypot(rel[0], rel[1]) * 1000, 'dist3_mm': math.hypot(*rel) * 1000,
+         'force_n': force, 'weight_n': weight}
+    if tilt > lim.max_tilt_deg:
+        return False, f'컵이 아래를 보지 않음 (기울기 {tilt:.0f}°)', m
+
+    cx, cy, cz = shape.xyz
+    if shape.shape == 'cylinder' and abs(rotate(shape.quat, (0.0, 0.0, 1.0))[2]) < 0.5:
+        # 누운 원기둥 (나사): 축 = 부품 +X. 윗면이 둥글어 컵 양 끝 높이 차가 생긴다
+        R, half_len = shape.scale[0] / 2, shape.scale[2] / 2
+        along, lateral = rel[0] - cx, abs(rel[1] - cy)
+        m.update(along_mm=along * 1000, lateral_mm=lateral * 1000)
+        if abs(along) + r > half_len:
+            return False, f'컵이 부품 끝을 벗어남 (축 방향 {along * 1000:.1f} mm)', m
+        if lateral + r > R:
+            return False, f'컵이 부품 면을 벗어남 (옆으로 {lateral * 1000:.1f} mm, 반지름 {R * 1000:.1f} mm)', m
+        surface = cz + math.sqrt(R * R - lateral * lateral)
+        # 컵 입술 원이 닿는 면의 가장 높은 곳(축에 가장 가까운 점) - 가장 낮은 곳(가장 먼 점)
+        near = max(lateral - r, 0.0)
+        drop = math.sqrt(R * R - near * near) - math.sqrt(R * R - (lateral + r) ** 2)
+        m['surface_drop_mm'] = drop * 1000
+        if drop > lim.lip_compliance:
+            return False, f'둥근 면이라 컵이 밀착 안 됨 (높이 차 {drop * 1000:.2f} mm)', m
+    elif shape.shape == 'cylinder':
+        # 선 원기둥 (너트): 윗면은 평평한 원판, 가운데 구멍이 있을 수 있다
+        R = shape.scale[0] / 2
+        rho = math.hypot(rel[0] - cx, rel[1] - cy)
+        m['center_offset_mm'] = rho * 1000
+        surface = cz + shape.scale[2] / 2
+        if ring and hole_radius > 0:
+            # 핀 끝 경사가 구멍 가장자리에 걸리면 부품이 밀려 가운데로 맞춰진다. 남는 어긋남 = 핀과 구멍 틈
+            if 2 * hole_radius < lim.pin_diameter:
+                return False, f'센터링 핀(지름 {lim.pin_diameter * 1000:.1f} mm)이 구멍보다 굵음', m
+            if rho > lim.pin_capture:
+                return False, (f'센터링 핀이 구멍에 안 들어감 (중심에서 {rho * 1000:.1f} mm > '
+                               f'{lim.pin_capture * 1000:.1f} mm)'), m
+            rho = hole_radius - lim.pin_diameter / 2
+            m['centered_offset_mm'] = rho * 1000
+            if ri - rho < hole_radius:
+                return False, f'안쪽 입술이 구멍에 걸침 (입술 반지름 {ri * 1000:.1f} mm)', m
+        elif hole_radius > 0 and R - hole_radius < 2 * r:
+            return False, (f'구멍 둘레 폭 {(R - hole_radius) * 1000:.1f} mm 가 컵 지름 '
+                           f'{2 * r * 1000:.0f} mm 보다 좁아 밀봉 불가'), m
+        if hole_radius > 0 and not ring and rho - r < hole_radius:
+            return False, f'컵이 구멍 위에 있어 공기가 샘 (중심에서 {rho * 1000:.1f} mm)', m
+        if rho + r > R:
+            return False, f'컵이 부품 면을 벗어남 (중심에서 {rho * 1000:.1f} mm)', m
+    elif shape.shape == 'box':
+        hx, hy = shape.scale[0] / 2, shape.scale[1] / 2
+        if abs(rel[0] - cx) + r > hx or abs(rel[1] - cy) + r > hy:
+            return False, '컵이 부품 면을 벗어남', m
+        surface = cz + shape.scale[2] / 2
+    else:
+        return False, f'진공 컵으로 다룰 수 없는 모양 ({shape.shape})', m
+
+    gap = rel[2] - surface
+    m['gap_mm'] = gap * 1000
+    if gap > lim.seal_gap:
+        return False, f'부품과 떨어져 있음 (간격 {gap * 1000:.1f} mm > {lim.seal_gap * 1000:.0f} mm)', m
+    if gap < -lim.max_press:
+        return False, f'부품을 너무 눌렀음 (간격 {gap * 1000:.1f} mm)', m
+    if force < lim.safety_factor * weight:
+        return False, f'흡착력 부족 ({force:.2f} N < {lim.safety_factor:.0f} × 무게 {weight:.2f} N)', m
+    return True, '', m
 
 
 @dataclass(frozen=True)
@@ -180,6 +334,7 @@ class GzSpawner:
         self._cond = threading.Condition()
         self._states: dict[str, list[str]] = {slot_name(k): [] for k in range(max_objects)}
         self._detach = {}
+        self._attach = {}
         self._empty = Empty
         self._poses = {}   # obj_k → (받은 시각 monotonic, (x, y, z), (qx, qy, qz, qw))
         from gz.msgs10.pose_v_pb2 import Pose_V
@@ -189,6 +344,7 @@ class GzSpawner:
             self._node.subscribe(StringMsg, f'/vacuum/{name}/state',
                                  lambda msg, name=name: self._on_state(name, msg.data))
             self._detach[name] = self._node.advertise(f'/vacuum/{name}/detach', Empty)
+            self._attach[name] = self._node.advertise(f'/vacuum/{name}/attach', Empty)
 
     def _on_poses(self, msg) -> None:
         now = time.monotonic()
@@ -274,6 +430,23 @@ class GzSpawner:
                     return
         raise RuntimeError(f'{name}: detach 확인 실패')
 
+    def attach(self, name: str) -> None:
+        """슬롯을 attach 하고 "attached" 를 확인한다. 조건 검사는 호출하는 쪽(suction_check)이 한다."""
+        with self._cond:
+            since = len(self._states[name])
+        deadline = time.monotonic() + self.timeout_s
+        while time.monotonic() < deadline:
+            self._attach[name].publish(self._empty())
+            with self._cond:
+                if self._cond.wait_for(lambda: 'attached' in self._states[name][since:], timeout=0.2):
+                    return
+        raise RuntimeError(f'{name}: attach 확인 실패')
+
+    def attached(self) -> list[str]:
+        """마지막 상태가 attached 인 슬롯."""
+        with self._cond:
+            return [n for n, states in self._states.items() if states[-1:] == ['attached']]
+
     def remove(self, name: str) -> bool:
         """모델을 지운다. Gazebo 는 없는 이름에도 true 를 돌려주므로 응답이 오면 True, 서비스 오류면 False."""
         from gz.msgs10.boolean_pb2 import Boolean
@@ -312,8 +485,9 @@ def main(args=None):
     from rclpy.node import Node
     from rclpy.parameter import Parameter
     from std_msgs.msg import String
-    from std_srvs.srv import Trigger
-    from tf2_ros import TransformBroadcaster
+    from rclpy.time import Time
+    from std_srvs.srv import SetBool, Trigger
+    from tf2_ros import Buffer, TransformBroadcaster, TransformListener
     from visualization_msgs.msg import Marker, MarkerArray
 
     share = Path(get_package_share_directory('ur5e_pick_place'))
@@ -324,6 +498,9 @@ def main(args=None):
             self.declare_parameter('config_file', str(share / 'config' / 'sim.yaml'))
             self.declare_parameter('targets_topic', '/robot/targets')
             self.declare_parameter('tf_rate_hz', 10.0)
+            d = SuctionLimits()
+            for key in SUCTION_KEYS:
+                self.declare_parameter(f'vacuum_{key}', getattr(d, key))
             p = load_sim_params(Path(self.get_parameter('config_file').value))
             # pick_place_node·RViz 와 같은 시계를 쓴다 (시뮬레이터는 /clock). 다르면 RViz 가 TF 를 오래된 값으로 버린다
             self.set_parameters([Parameter('use_sim_time', value=bool(p.get('use_sim_time', False)))])
@@ -335,6 +512,7 @@ def main(args=None):
             self.lock = threading.Lock()
             self.slot_types = {}   # obj_k → part_type (이 노드가 스폰한 것만 마커 모양을 안다)
             self.shapes = {t: marker_shape(model_file(share / 'models', t)) for t in self.part_types}
+            self.masses = {t: part_mass(model_file(share / 'models', t)) for t in self.part_types}
             self.tf = TransformBroadcaster(self)
             self.pub_markers = self.create_publisher(MarkerArray, '/sim/object_markers', 10)
             self.create_timer(1.0 / self.get_parameter('tf_rate_hz').value, self.publish_tf)
@@ -342,6 +520,10 @@ def main(args=None):
             self.create_subscription(String, topic, self.on_targets, 10)
             self.create_service(Trigger, '/sim/spawn_objects', self.on_spawn)
             self.create_service(Trigger, '/sim/clear_objects', self.on_clear)
+            self.tool_length = float(p['tool_length_m'])
+            self.tf_buffer = Buffer()
+            self.tf_listener = TransformListener(self.tf_buffer, self, spin_thread=True)
+            self.create_service(SetBool, '/sim/vacuum', self.on_vacuum)
             self.get_logger().info(f'{topic} 의 최신 패킷을 /sim/spawn_objects 호출 때 스폰합니다. '
                                    f'작업 평면 base_link ({self.plane.x}, {self.plane.y}, {self.plane.z}) m, '
                                    f'yaw {self.plane.yaw_deg}°')
@@ -386,6 +568,59 @@ def main(args=None):
             response.success, response.message = True, f'obj_0 ~ obj_{self.max_objects - 1} 삭제'
             return response
 
+        def limits(self) -> SuctionLimits:
+            return SuctionLimits(**{k: self.get_parameter(f'vacuum_{k}').value for k in SUCTION_KEYS})
+
+        def on_vacuum(self, request, response):
+            """진공 켜기: 두 컵 중 조건을 만족하는 (컵, 부품) 하나만 붙인다. 끄기: 붙어 있던 부품을 뗀다."""
+            with self.lock:
+                try:
+                    if not request.data:
+                        released = self.spawner.attached()
+                        for name in released:
+                            self.spawner.release(name)
+                        response.success = True
+                        response.message = f'진공 OFF: {", ".join(released) or "붙어 있던 부품 없음"}'
+                        return response
+                    if held := self.spawner.attached():
+                        response.success, response.message = True, f'이미 흡착 중: {", ".join(held)}'
+                        return response
+                    t = self.tf_buffer.lookup_transform('base_link', 'tool0', Time()).transform
+                    q = (t.rotation.x, t.rotation.y, t.rotation.z, t.rotation.w)
+                    tool = (t.translation.x, t.translation.y, t.translation.z)
+                    lim = self.limits()
+                    cups, results = cup_tips(tool, q, self.tool_length, lim), []
+                    for name, (xyz, quat) in sorted(self.spawner.object_poses().items()):
+                        shape = self.shapes.get(self.slot_types.get(name))
+                        if shape is None:
+                            continue
+                        part = self.slot_types[name]
+                        for cup, tip, ring in cups:   # 컵마다 따로 검사
+                            ok, reason, m = suction_check(tip, q, xyz, quat, shape, self.masses[part],
+                                                          HOLE_RADIUS_M.get(part, 0.0), lim, ring)
+                            results.append((ok, m['dist3_mm'], name, cup, reason, m))
+                    if not results:
+                        response.success, response.message = False, '흡착 실패: 작업대에 부품이 없음'
+                        return response
+                    passed = sorted((r for r in results if r[0]), key=lambda r: r[1])
+                    if not passed:
+                        # 가장 가까운 부품의 실패 이유를 알려 준다
+                        _, _, name, cup, reason, _ = min(results, key=lambda r: r[1])
+                        response.success = False
+                        response.message = f'흡착 실패: 가장 가까운 {name} ({cup}) — {reason}'
+                        return response
+                    _, _, name, cup, _, m = passed[0]
+                    self.spawner.attach(name)
+                    response.success = True
+                    response.message = (f'진공 ON: {name}({self.slot_types[name]}) 흡착, {cup}. '
+                                        f'간격 {m["gap_mm"]:.1f} mm, '
+                                        f'부품 중심에서 {m["dist_mm"]:.1f} mm, '
+                                        f'흡착력 {m["force_n"]:.2f} N / 무게 {m["weight_n"]:.2f} N')
+                except Exception as e:   # TF 없음, attach 확인 실패 등
+                    response.success, response.message = False, f'진공 처리 오류: {e}'
+                self.get_logger().info(response.message)
+                return response
+
         def publish_tf(self):
             """Gazebo 의 obj_k 위치를 TF 와 마커로 내보낸다. 사라진 슬롯의 마커는 지운다."""
             stamp = self.get_clock().now().to_msg()
@@ -428,6 +663,10 @@ def main(args=None):
         rclpy.spin(node)
     except (KeyboardInterrupt, ExternalShutdownException):
         pass
+    except RuntimeError:
+        # Ctrl+C(SIGINT) 로 종료되는 순간 받던 메시지를 변환하다 나는 오류는 무시한다 (종료 중일 때만)
+        if rclpy.ok():
+            raise
     finally:
         node.destroy_node()
         rclpy.try_shutdown()
