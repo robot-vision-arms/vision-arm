@@ -385,9 +385,27 @@ python scripts/live_view.py
 | 5. Python·venv | ✅ 11-16 | ✅ 11-16 보고 | ✅ Python 3.12.3 |
 | 6. rosdep | ✅ 11-16 `rosdep check` 충족 | ✅ 11-16 보고 | ✅ |
 | 7. 빌드·테스트 | ✅ 11-16 빌드 성공, 55개 통과 (보고 기준) | ✅ 11-16 재점검: 빌드 성공, 65개 통과 (보고 기준) | ✅ 11-16 최신 `main`(작업 시트 ROI·RViz 수정 포함) 68개 통과 (ChArUco 머지 전 55, 직후 62) |
-| 8. 확인 ① | ✅ 11-16 Gazebo·RViz 화면 Plan & Execute로 팔 이동 확인 (headless `check_sim_week2.py`도 통과) | ⚠️ 11-17 프로젝트 Gazebo·RViz GUI 실행 및 서비스 기반 나사·너트 상자 투입 확인. 프로젝트 RViz 버튼 수동 Plan & Execute 확인·복귀 안정성은 남음 (아래 상세) | |
+| 8. 확인 ① | ✅ 11-16 Gazebo·RViz 화면 Plan & Execute로 팔 이동 확인 (headless `check_sim_week2.py`도 통과) | ⚠️ 11-17 프로젝트 Gazebo·RViz GUI 실행 및 서비스 기반 나사·너트 상자 투입 확인. 프로젝트 RViz 버튼 수동 Plan & Execute 확인·복귀 안정성은 남음 (아래 상세) | ✅ 11-17 프로젝트 `sim.launch.py` Gazebo·RViz 창에서 MotionPlanning 패널 Plan & Execute 로 팔 이동 (아래 상세) |
 | 9. 폰 영상 수신 | 해당 없음 (`check_environment.py` FAIL 1은 카메라 접속) | 해당 없음 (`check_environment.py` FAIL 1은 카메라 접속) | ✅ 11-16 USB 핫스팟 |
-| 10. 기록 | ✅ 11-17 캘리브레이션 결과 (위 팀원 1 기록, DECISIONS.md 10절) | | |
+| 10. 기록 | ✅ 11-17 캘리브레이션 결과 (위 팀원 1 기록, DECISIONS.md 10절) | | ✅ 11-17 PC 사양·버전 (아래 상세) |
+
+### 가영 PC 10단계 기록 — 2026-11-17
+
+| 항목 | 값 |
+|---|---|
+| CPU | Intel Core i5-12400 (6코어 12스레드) |
+| RAM | Windows 15.7 GB, WSL `.wslconfig` memory=10GB·swap=8GB → Ubuntu 9.7GiB / swap 8.0GiB |
+| GPU | Intel UHD Graphics 730 (내장). OpenCV 는 CPU 처리, Gazebo 렌더링은 WSLg 기본 |
+| OS | Windows 11 Pro / WSL2 Ubuntu 24.04.5 LTS (커널 6.18.33.2-microsoft-standard-WSL2) |
+| ROS·시뮬 | ROS 2 Jazzy, Gazebo Sim 8.15.0 (Harmonic), MoveIt 2.12.4 |
+| Python 패키지 | Python 3.12.3 (.venv), OpenCV 4.6.0, NumPy 1.26.4, PySide6 6.12.0 |
+| 카메라 | 아이폰 IP 카메라 앱, USB 개인용 핫스팟. 11-17 기준 HTTP MJPEG `http://172.20.10.1:8080/stream.mjpg` 1280×720 가로 (앱이 세로 720×1280 로 보낼 때는 `params.yaml` 의 `camera_rotate_deg: 270`). FPS 는 측정 시 송출이 꺼져 있어 미측정 |
+
+**8단계 확인 ① (가영 PC, 11-17):** `ros2 launch ur5e_pick_place sim.launch.py` (Gazebo·RViz 창, 진공 컵 두 개 헤드 URDF) → RViz MotionPlanning 패널에서 사용자가 직접 Plan & Execute.
+move_group 로그: `Plan and Execute request accepted` → `scaled_joint_trajectory_controller successfully finished` → `Completed trajectory execution with status SUCCEEDED` → `Plan and Execute request complete!`.
+그 전에 Plan 후 따로 누른 Execute 1 회는 `ABORTED` (계획 뒤 시작 자세가 달라졌을 때 흔함), 바로 다시 한 Plan & Execute 는 성공. 같은 날 `check_sim_week2.py`·`check_spawn_week3.py` 도 이 PC 에서 통과 (WEEK3).
+
+PROJECT.md 7장 측정 장비 표는 팀원 1 PC 기준으로 채워져 있어 바꾸지 않았다 (CPU·OS·버전은 같음). KPI 를 어느 PC 에서 잴지 정해지면 그 PC 값으로 채운다.
 
 ### 성민 PC 1·3·8단계 확인 상세 — 2026-11-17
 
