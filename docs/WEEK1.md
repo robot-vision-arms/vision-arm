@@ -33,7 +33,7 @@
 | `intrinsics.npz` | 18장, RMS 0.56 px, fx 883.4 / fy 881.9, cx 639.6 / cy 356.8, 왜곡 계수 0 |
 | 2단계 호모그래피 | 작업 시트(마커 4개, 꼭짓점 16개)를 폰 거치대로 고정해 촬영 (`data/calib/sheet/landscape_11.png`) |
 | `homography.npz` | 기준점 RMS **0.21 mm**, 한 점씩 빼고 잰 오차 **0.26 mm** |
-| 예비 위치 | `homography_landscape_01.npz` (폰을 90° 돌린 다른 자리, 0.256 mm). 쓰려면 `homography.npz` 로 복사 |
+| 예비 위치 | `archive/homography_landscape_01.npz` (폰을 90° 돌린 다른 자리, 0.256 mm). 쓰려면 `homography.npz` 로 복사 |
 | 화면 범위 | 1 mm ≈ 1.66 px. 화면 전체가 책상 약 78 × 46 cm |
 | 빈 시트 오검출 | 0개 (작업 시트 ROI 적용) |
 | 미완료 | 실제 나사·너트 촬영 검출 시험 (부품 준비 후). `.npz` 는 git 에 없으므로 팀원에게 따로 전달 |
