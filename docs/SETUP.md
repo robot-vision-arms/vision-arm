@@ -1,6 +1,6 @@
 # 개발 환경 구축 가이드 (WSL2 Ubuntu 24.04 + ROS2 Jazzy + PySide6 + Gazebo Harmonic + MoveIt2)
 
-팀원 3명이 같은 순서로 따라 하면 같은 환경이 되도록 정리한 문서입니다. 순서만 빠르게 따라가려면 [WEEK1.md](WEEK1.md) 체크리스트를 보세요.
+팀원 3명이 같은 순서로 따라 하면 같은 환경이 되도록 정리한 문서입니다. 순서만 빠르게 따라가려면 맨 아래 [부록 체크리스트](#부록-1주차-설치-체크리스트-실행-순서)를 보세요.
 처음 받은 가이드에서 **바꾼 부분은 맨 아래 [원본 가이드에서 바꾼 점](#원본-가이드에서-바꾼-점)** 에 이유와 함께 적었습니다.
 
 ## 환경 사양
@@ -144,7 +144,7 @@ memory=10GB
 swap=8GB
 ```
 
-값은 Windows 전체 메모리 16 GB 기준입니다 (Windows 쪽에 약 6 GB 를 남김, WEEK1.md 1단계). 16 GB 보다 작은 PC 는 `memory=8GB` 로 둡니다.
+값은 Windows 전체 메모리 16 GB 기준입니다 (Windows 쪽에 약 6 GB 를 남김, 부록 1단계). 16 GB 보다 작은 PC 는 `memory=8GB` 로 둡니다.
 PowerShell 에서 `wsl --shutdown` 후 WSL 을 다시 엽니다. 파일이 `.wslconfig.txt` 로 저장되지 않았는지 확인하세요.
 
 ### 5-2. UR 기본 예제부터 (우리 파일 없이)
@@ -258,3 +258,200 @@ python -c "import cv2; c=cv2.VideoCapture('http://192.168.0.23:8080/video'); ok,
 | 12 | `ur_simulation_gazebo` 클론 | `ros-jazzy-ur-simulation-gz` apt 설치 | `ur_simulation_gazebo` 는 Gazebo Classic 용(Humble)입니다. Jazzy 의 짝은 Gazebo Harmonic 이고 그쪽 패키지가 `ur_simulation_gz` 입니다. apt 판이 있어 클론·빌드할 필요가 없습니다. |
 | 13 | 의존성 직접 나열 | `rosdep install` (Step 3) | 의존성 기준을 package.xml 한 곳으로 둡니다. 문서와 따로 적으면 어긋납니다. |
 | 14 | 시뮬레이터 구동 확인 시점 없음 (3단계에서 처음 구축) | 1주차 Step 5 | WSL2 에서 Gazebo 렌더링·메모리 문제는 늦게 알면 대응할 시간이 없습니다. |
+
+---
+
+## 부록. 1주차 설치 체크리스트 (실행 순서)
+
+WEEK1.md 에 있던 설치 순서 체크리스트를 옮겨 왔다 (2026-11-19). 명령의 이유와 자세한 설명은 위 Step 들에 있고,
+여기는 "지금 무엇을 하고, 무엇이 나오면 다음으로 넘어가는지" 만 적는다. 팀원별 통과 여부는 [WEEK1.md 1절](WEEK1.md#1-현황-요약-2026-11-19) 표에 적는다.
+`sudo` 는 비밀번호를 묻기 때문에, 명령은 **각자 WSL 터미널에서 직접** 실행한다.
+
+### 전체 순서
+
+```
+[Windows]  1. WSL 메모리 늘리기 ──► 2. 폰 IP 카메라 앱 설치
+[WSL]      3. conda 끄기 ──► 4. ROS2 Jazzy ──► 5. Python·venv ──► 6. 시뮬레이터 패키지 (rosdep)
+           ──► 7. 빌드·테스트 ──► 8. 시뮬레이터 확인 ① ──► 9. 폰 영상 수신 ──► 10. 결과 기록
+```
+
+순서를 지켜야 하는 곳: **3 → 4 → 5** (conda 가 켜진 채로 venv 를 만들면 Python 3.11 venv 가 생김),
+**4 → 6** (rosdep 은 ROS2 가 있어야 동작), **5·6 → 7** (`env.sh` 가 `.venv` 와 ROS2 를 같이 켬).
+1·2 는 Windows 쪽이라 WSL 작업 전에 끝내 둡니다.
+
+### 1. WSL 메모리 늘리기 (Windows)
+
+Gazebo + MoveIt + RViz 를 같이 띄우면 7 GB 로는 부족할 수 있습니다 (권장 8 GB 이상, SETUP.md 5-1).
+이 PC 는 Windows 전체가 15.7 GB 라 **10 GB** 로 두고, Windows 쪽에 약 6 GB 를 남깁니다.
+(10 GB 는 "Windows 가 버틸 만큼 남기면서 8 GB 권장보다 여유" 로 고른 값이고, 실제로 돌려서 확인한 값은 아닙니다.
+Windows 가 느려지면 8 GB 로 내립니다.)
+
+메모장으로 `C:\Users\user1\.wslconfig` 파일을 새로 만들어 저장합니다 (확장자 `.txt` 가 붙지 않게 주의):
+
+```ini
+[wsl2]
+memory=10GB
+swap=8GB
+```
+
+```powershell
+# PowerShell
+wsl --shutdown
+```
+
+WSL 을 다시 열고:
+
+```bash
+free -h      # Mem total 이 9 GB 이상 보이면 통과 (커널 예약분 때문에 10 보다 조금 작게 나옴)
+```
+
+### 2. 폰 IP 카메라 앱 설치
+
+영상 수신 확인은 9단계에서 하지만, 앱 설치와 거치대 준비는 미리 해 둡니다 (SETUP.md Step 7).
+
+- [ ] 폰에 IP 카메라 앱 설치 (Android 예: IP Webcam)
+- [ ] 앱에서 서버를 시작하고, 같은 Wi-Fi 의 Windows 브라우저로 앱 주소를 열었을 때 영상이 보이면 통과
+- [ ] 작업면을 위에서 내려다보게 폰을 고정할 거치대 준비
+
+### 3. conda 자동 활성화 끄기
+
+```bash
+conda config --set auto_activate_base false
+```
+
+터미널을 **닫고 새로 연 뒤**:
+
+```bash
+which python3 && python3 --version
+```
+
+- [ ] `/usr/bin/python3`, `Python 3.12.x` 가 나오면 통과
+
+> 다른 과제에서 conda 가 필요하면 그때 `conda activate <env>` 로 켜면 됩니다. 이 프로젝트의 `env.sh` 는 conda 가 켜져 있어도 먼저 끕니다.
+
+### 4. ROS2 Jazzy 설치
+
+SETUP.md Step 1 의 명령을 그대로 순서대로 실행합니다 (로케일 → apt 소스 → `ros-jazzy-desktop ros-dev-tools ros-jazzy-cv-bridge`).
+다운로드 양이 많아서 시간이 꽤 걸립니다.
+
+확인 (터미널 2개):
+
+```bash
+source /opt/ros/jazzy/setup.bash && ros2 run demo_nodes_cpp talker     # 터미널 A
+source /opt/ros/jazzy/setup.bash && ros2 run demo_nodes_py listener    # 터미널 B
+```
+
+- [ ] 터미널 B 에 `I heard: [Hello World: N]` 가 계속 찍히면 통과
+
+### 5. Python 패키지·venv
+
+이 PC 에는 저장소가 이미 `~/vision-arm` 에 있으니 `git clone` 은 건너뜁니다 (다른 팀원은 SETUP.md Step 2 대로 clone).
+
+```bash
+sudo apt install -y python3-opencv python3-numpy python3-yaml python3-venv python3-pytest
+
+cd ~/vision-arm
+python3 -m venv --system-site-packages .venv
+touch .venv/COLCON_IGNORE
+source .venv/bin/activate
+pip install -r requirements.txt          # PySide6, pytest 만 설치됨
+
+source /opt/ros/jazzy/setup.bash
+python -c "import rclpy, cv2, numpy, PySide6; print(cv2.__version__, numpy.__version__, PySide6.__version__)"
+```
+
+- [ ] 마지막 줄이 에러 없이 버전 3개를 출력하면 통과
+- [ ] 출력된 버전을 10단계 표에 적어 둠
+
+### 6. 시뮬레이터 패키지 (rosdep)
+
+Gazebo Harmonic, UR5e, MoveIt2, pymoveit2 를 `src/ur5e_pick_place/package.xml` 기준으로 한 번에 설치합니다 (SETUP.md Step 3).
+
+```bash
+sudo apt install -y python3-rosdep
+sudo rosdep init            # "already exists" 가 나오면 이미 된 것이라 넘어감
+rosdep update
+
+cd ~/vision-arm
+source /opt/ros/jazzy/setup.bash
+rosdep install --from-paths src --ignore-src -y --rosdistro jazzy
+```
+
+- [ ] 마지막에 `#All required rosdeps installed successfully` 가 나오면 통과
+- [ ] 못 찾는 키가 있으면 SETUP.md Step 3 표의 패키지를 `sudo apt install -y <이름>` 으로 직접 설치하고 10단계에 기록
+
+### 7. 빌드·테스트
+
+```bash
+source ~/vision-arm/env.sh      # 이제부터는 매번 이 한 줄로 시작
+colcon build --symlink-install
+source install/setup.bash
+colcon test && colcon test-result --verbose
+```
+
+- [ ] `colcon build` 가 `2 packages finished` 로 끝나면 통과
+- [ ] 테스트는 실패(failure) 0 이면 통과. 뼈대라서 `skipped` 가 여러 개 나오는 것은 정상
+
+### 8. 시뮬레이터 구동 확인 ① (Go / No-Go)
+
+**8-1. UR 기본 예제** (우리 파일 없이):
+
+```bash
+source ~/vision-arm/env.sh
+ros2 launch ur_simulation_gz ur_sim_moveit.launch.py ur_type:=ur5e
+```
+
+- [ ] Gazebo 창에 UR5e 가 서 있음
+- [ ] RViz MotionPlanning 패널에서 목표 자세를 끌어 놓고 **Plan & Execute** → Gazebo 속 팔이 움직임
+
+**8-2. 런치 인자 확인** (우리 `sim.launch.py` 가 넘기는 인자가 실제로 있는지):
+
+```bash
+ros2 launch ur_simulation_gz ur_sim_control.launch.py --show-args   # description_file, world_file, gazebo_gui, launch_rviz
+ros2 launch ur_moveit_config ur_moveit.launch.py --show-args        # ur_type, use_sim_time, launch_rviz
+ls $(ros2 pkg prefix ur_simulation_gz)/share/ur_simulation_gz/urdf/ # ur_gz.urdf.xacro
+```
+
+- [ ] 인자·파일이 모두 있으면 통과. 다르면 `sim.launch.py` / `ur5e_vacuum.urdf.xacro` 를 고치고 10단계에 기록
+
+**8-3. 우리 런치 파일:**
+
+```bash
+ros2 launch ur5e_pick_place sim.launch.py
+```
+
+- [ ] 작업 매트와 상자 2개가 있는 월드에 UR5e 가 뜨고, RViz 에서 Plan & Execute 로 움직이면 **확인 ① 통과**
+
+화면이 검거나 너무 느리면 SETUP.md 5-4 표 순서대로 (소프트웨어 렌더링 → `gazebo_gui:=false`).
+그래도 안 되면 PROJECT.md 8장 "실패하면" 대로 진행하고, 팀에 바로 알립니다.
+
+### 9. 폰 영상 수신
+
+SETUP.md Step 7 대로 `params.yaml` 의 `camera_url` 에 폰 영상 주소를 넣고:
+
+```bash
+source ~/vision-arm/env.sh
+python scripts/check_environment.py        # '스마트폰 카메라 접속' 이 OK
+python -c "import cv2; c=cv2.VideoCapture('<camera_url>'); ok,f=c.read(); print(ok, None if f is None else f.shape)"
+```
+
+- [ ] 점검 스크립트의 `스마트폰 카메라 접속` 이 OK
+- [ ] 위 명령이 `True (높이, 너비, 3)` 을 출력하면 통과
+- [ ] 끝내 안 되면 폰으로 찍은 사진·동영상 폴더를 `params.yaml` 의 `image_dir` 로 쓰기로 하고 팀에 알림
+
+보유 MVTec 사진에는 실제 mm 정답이 없으므로 위치 KPI를 대신하지 않습니다.
+
+실시간 뷰어 사용법은 [WEEK1.md 2절](WEEK1.md#2-실행-방법) 에 있다.
+
+### 10. 결과 기록
+
+설치가 끝나면 아래를 채웁니다. 팀원 3명의 값이 다르면 그 차이가 나중에 "내 PC 에서는 되는데" 문제의 원인이 됩니다.
+
+| 기록할 것 | 어디에 |
+|---|---|
+| 8-2 런치 인자·xacro 경로 확인 결과, rosdep 이 못 찾은 키 | [DECISIONS.md 4장](DECISIONS.md#4-아직-확인-못-한-것-12주차에-채움) 표 |
+| 확인 ① 통과 여부, 쓴 대체 방법 (소프트웨어 렌더링 등) | DECISIONS.md 4장 "WSL2 에서 Gazebo + MoveIt + RViz" 행 |
+| 버전: PySide6·OpenCV·NumPy (5단계), `gz sim --version`, `apt-cache policy ros-jazzy-moveit` | PROJECT.md 7장 측정 장비 표 |
+| PC 사양: CPU·RAM·GPU·WSL 메모리 설정 | PROJECT.md 7장 측정 장비 표 |
+
+환경 설치가 끝나면 1주차 나머지 일(폰 고정, ChArUco 캘리브레이션, 작업 시트 호모그래피)로 넘어갑니다 (PROJECT.md 8장).

@@ -18,8 +18,9 @@ Gazebo 속 UR5e 가 그 결과로 부품을 집어 종류별로 분류합니다.
 ## 문서
 
 - [docs/PROJECT.md](docs/PROJECT.md): 프로젝트 정의, 좌표·각도 정의, 시스템 구성, 역할 분담(주차별 순환), KPI, 4주 로드맵, 최종 목표
-- [docs/WEEK1.md](docs/WEEK1.md): 1주차 환경 설치 체크리스트 (실행 순서, 단계별 통과 기준, 결과 기록 위치)
-- [docs/WEEK2.md](docs/WEEK2.md): 2주차 구현 상태, 비전·이동·흡착 실행 방법, MVTec 평가와 남은 실측 작업
+- [docs/WEEK1.md](docs/WEEK1.md): 1주차 현황 요약·팀원별 기록 (설치 순서 체크리스트는 SETUP.md 부록)
+- [docs/WEEK2.md](docs/WEEK2.md): 2주차 현황 요약·실행 방법·팀원별 기록 (검출·MoveIt 이동·ROS2 발행, MVTec 평가)
+- [docs/WEEK3.md](docs/WEEK3.md): 3주차 현황 요약·실행 방법·팀원별 기록 (GUI·TCP 통신·스폰·흡착)
 - [docs/SETUP.md](docs/SETUP.md): 개발 환경 구축 (ROS2 Jazzy, venv, rosdep 으로 Gazebo·MoveIt, 시뮬레이터 구동 확인, 스마트폰 카메라)
 - [docs/DECISIONS.md](docs/DECISIONS.md): 받은 역할 분담안과 비교해 바꾼 점, 이유, 검증 상태, 아직 확인 못 한 것
 
