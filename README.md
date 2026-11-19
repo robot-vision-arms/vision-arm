@@ -26,6 +26,7 @@ Gazebo 속 UR5e 가 그 결과로 부품을 집어 종류별로 분류합니다.
 - [docs/WEEK2.md](docs/WEEK2.md): 2주차 현황 요약·실행 방법·팀원별 기록 (검출·MoveIt 이동·ROS2 발행, MVTec 평가)
 - [docs/WEEK3.md](docs/WEEK3.md): 3주차 현황 요약·실행 방법·팀원별 기록 (GUI·TCP 통신·스폰·흡착, 검출·분류 모델 비교)
 - [docs/SETUP.md](docs/SETUP.md): 개발 환경 구축 (ROS2 Jazzy, venv, rosdep 으로 Gazebo·MoveIt, 시뮬레이터 구동 확인, 스마트폰 카메라, (선택) 모델 비교용 `.venv-ml`), 부록: 1주차 설치 체크리스트
+- [notebooks/model_comparison.ipynb](notebooks/model_comparison.ipynb): 검출·분류 모델 비교 (규칙 / k-NN·SVM·RF / CNN / YOLOv8-OBB) 학습 과정·비교 그래프·해석. 실행 환경은 SETUP.md Step 8
 - [docs/DECISIONS.md](docs/DECISIONS.md): 받은 역할 분담안과 비교해 바꾼 점, 이유, 검증 상태, 아직 확인 못 한 것, 캘리브레이션 결과(10절), 검출·분류 모델 비교 계획(11절)
 
 ## 구조
@@ -67,7 +68,7 @@ ros2 service call /sim/run_cycle std_srvs/srv/Trigger       # 터미널 4
 
 팀원별 진행은 각 주차 문서 맨 위 "현황 요약" 표에 있습니다 ([WEEK1](docs/WEEK1.md) · [WEEK2](docs/WEEK2.md) · [WEEK3](docs/WEEK3.md)).
 
-2026-11-19 기준: 1주차 완료(보정·영상 입력·작업 셀), 2주차는 실제 나사·너트 확인만 남음, 3주차 TCP·스폰·흡착 완료, GUI 와 모델 비교 진행 전.
+2026-11-19 기준: 1주차 완료(보정·영상 입력·작업 셀), 2주차는 실제 나사·너트 확인만 남음, 3주차 TCP·스폰·흡착 완료, 모델 비교는 MVTec 결과까지 완료(종합 F1 규칙 0.75 → YOLOv8n-OBB 0.99, [노트북](notebooks/model_comparison.ipynb)), GUI 진행 전.
 `colcon test` 137개 통과.
 
 아래는 2026-11-13 기록입니다. 영상 입력·전처리, 검출·비율 분류, 보정 파일 생성·로딩과 px→mm 변환,

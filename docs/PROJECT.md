@@ -32,7 +32,7 @@
 | 전처리 | 그레이스케일, Gaussian Blur, Threshold(Otsu) | `vision_pick_place/camera_stream.py` | 필수 |
 | 검출 | findContours, minAreaRect, 모멘트 | `vision_pick_place/vision_detector.py` | 필수 |
 | 부품 분류 | 장축/단축 비 (나사·너트) → 형상 특징 분류기 (공구) | `vision_detector.classify_part` | 확장 |
-| 검출·분류 모델 비교 | 규칙(지금) / 형상 특징 + k-NN·SVM·RF / CNN 분류 / YOLOv8-OBB 를 같은 데이터로 비교, CPU 추론 시간 포함 (DECISIONS.md 11절) | `scripts/` 비교 스크립트 (3주차 작성 예정), 가중치는 `data/models/` | 확장 (3·4주차) |
+| 검출·분류 모델 비교 | 규칙(지금) / 형상 특징 + k-NN·SVM·RF / CNN 분류 / YOLOv8-OBB 를 같은 데이터로 비교, CPU 추론 시간 포함 (DECISIONS.md 11절) | `notebooks/model_comparison.ipynb`, `scripts/train_yolo_obb.py`, 가중치는 `data/models/` | 확장 (3·4주차) |
 | 왜곡 보정 | Camera Calibration (ChArUco 보드, 기존 체커보드도 옵션으로 지원) | `scripts/calibrate_camera.py` → `calibrator.py` | 필수 |
 | px → mm | Homography. 작업 시트 네 귀퉁이 ArUco 마커 꼭짓점 16개를 자동 검출 (기존 수동 기준점 CSV 도 옵션) | `scripts/compute_homography.py --aruco` → `calibrator.py` | 필수 |
 | ROS2 발행 | rclpy 퍼블리셔 | `vision_pick_place/vision_node.py` | 필수 |
@@ -187,7 +187,11 @@ robot_vision/                   ← git 저장소 = colcon 워크스페이스
 │   ├── calibrate_camera.py     ChArUco 보드 사진 → intrinsics.npz
 │   ├── compute_homography.py   작업 시트 사진 (ArUco 4개) → homography.npz
 │   ├── evaluate_kpi.py         KPI 4종 (+ 선택 2종)
-│   └── (예정) 모델 비교 스크립트  A 규칙 / B 형상 특징+ML / C CNN / D YOLOv8-OBB (DECISIONS.md 11절)
+│   └── train_yolo_obb.py       MVTec → YOLO OBB 변환, YOLOv8n-OBB 학습 (모델 비교 방식 D)
+├── notebooks/                  학습·평가 노트북 (.venv-ml 로 실행, SETUP.md Step 8)
+│   ├── model_comparison.py     노트북 소스 (셀 구분 # %%, diff 보기 쉬움)
+│   ├── build_notebook.py       .py → .ipynb 변환·실행
+│   └── model_comparison.ipynb  모델 비교 A~D: 학습 과정·비교 그래프·해석 (DECISIONS.md 11절)
 ├── data/                       (git 제외, 폴더만 유지)
 │   ├── calib/                  인쇄물 PDF, 보드·시트 사진, *.npz
 │   ├── captures/               자체 촬영 이미지
@@ -288,7 +292,7 @@ data/mvtec_screws/
 | 송신 성공률 | 100회 연속 송신 중 ACK 수신 비율 | 100 % | 필수 | 미측정 |
 | 검출→송신 시간 | 3.3 구간, 100회 이상 측정한 P95 | ≤ 300 ms | 필수 | 미측정 |
 | 분류 정확도 | `part_type` 예측 = 실측 비율 | ≥ 95 % | 선택 | 미측정 |
-| 검출 모델 비교 | 방식 A~D 의 검출 F1·분류 정확도·각도 오차·CPU 추론 시간 (MVTec test → 자체 사진, DECISIONS.md 11절) | 비교표 작성 | 선택 | 미측정 |
+| 검출 모델 비교 | 방식 A~D 의 검출 F1·분류 정확도·각도 오차·CPU 추론 시간 (MVTec test → 자체 사진, DECISIONS.md 11절) | 비교표 작성 | 선택 | MVTec 완료 (11-19): 종합 F1 규칙 0.747 / +SVM 0.804 / YOLO 0.989, 자체 사진 미측정 |
 | Pick 성공률 | Gazebo 사이클에서 물체가 맞는 상자에 들어간 비율 (20개 이상) | ≥ 90 % | 선택 | 미측정 |
 
 기준값은 교육용 권장 목표입니다. **실측 전에는 달성으로 표기하지 않습니다.**

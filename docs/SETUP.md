@@ -255,7 +255,7 @@ source .venv-ml/bin/activate             # env.sh 대신 이걸 켬 (ROS 는 안
 
 pip install --upgrade pip
 pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu   # GPU 가 없으므로 CPU 판 (용량이 작음)
-pip install ultralytics scikit-learn opencv-python-headless
+pip install ultralytics scikit-learn opencv-python-headless matplotlib pandas jupyter nbconvert ipykernel
 
 python -c "import torch, ultralytics, sklearn, cv2; print(torch.__version__, torch.cuda.is_available(), ultralytics.__version__, sklearn.__version__, cv2.__version__)"
 deactivate
@@ -263,6 +263,8 @@ deactivate
 
 - 마지막 줄이 에러 없이 버전을 출력하고 `torch.cuda.is_available()` 가 `False` 면 통과 (CPU 학습).
 - 학습 결과(가중치 `*.pt`)와 변환한 학습 데이터는 `data/models/` 에 둡니다. git 에 올라가지 않습니다.
+- 이 venv 에는 pip 판 OpenCV 5.x·NumPy 2.x 가 깔립니다 (2026-11-19 기준 5.1.0 / 2.5.4). 규칙 검출(A) 결과가 ROS 쪽 OpenCV 4.6 과 같은지 확인했습니다 (MVTec test 예측 710·대응 551 동일).
+- 실행 순서: `python scripts/train_yolo_obb.py` (YOLO 학습, CPU 약 2시간) → `python notebooks/build_notebook.py --execute` (노트북 실행, 결과·그래프 저장). VS Code 에서 노트북을 열 때는 커널로 `.venv-ml` 의 Python 을 고릅니다.
 - 학습이 너무 느리면 Google Colab 무료 GPU 로 학습만 하고, 받은 가중치를 이 PC 에서 CPU 로 추론합니다.
 - 비교가 끝나 학습 모델을 `vision_node` 에 넣기로 하면, 그때 ROS 환경과 함께 쓰는 방법(ONNX 로 내보내 OpenCV DNN 으로 추론 등)을 따로 정합니다.
 
