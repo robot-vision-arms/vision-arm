@@ -7,7 +7,7 @@
 
 | 팀원 | 3주차 담당 (PROJECT.md 2.3) | 상태 | 남은 일 |
 |---|---|---|---|
-| 팀원 1 (동경) | GUI: `main_window.py`, `ros_worker.py` + 검출·분류 모델 비교 (11-19 추가) | ⬜ 시작 전. 4화면 설계·구현 순서, 모델 비교 계획은 3절 | 4화면 구현, `/robot/log`·`/sim/pick_log` 표시. MVTec 으로 A~D 모델 비교표 |
+| 팀원 1 (동경) | GUI: `main_window.py`, `ros_worker.py` + 검출·분류 모델 비교 (11-19 추가) | 🟡 모델 비교 MVTec 완료 (종합 F1 규칙 0.747 → YOLO 0.989, 3절). GUI 시작 전 | 4화면 구현, `/robot/log`·`/sim/pick_log` 표시. 4주차 자체 사진으로 모델 재평가 |
 | 팀원 2 (성민) | TCP: `robot_bridge.py`, `robot_server.py` (+ `--publish-ros`) | ✅ 실제 이미지 100/100 ACK, 180초 연속 3,371/3,371, 서버 재시작 5회 복구, 팀원 3 스폰 노드와 연결(`team2_link.launch.py`) | 실제 폰·보정 패킷으로 시험 (보정 완료로 가능) |
 | 팀원 3 (가영) | 스폰·흡착: `object_spawner.py`, DetachableJoint, TF | ✅ 패킷대로 스폰, TF·마커, 진공 컵 헤드(5 mm 컵 + 링 컵) 5/5 통과, 실제 폰 영상 → 스폰 노드 연결 | 실제 보정 패킷으로 "카메라 앞 부품 위치대로 Gazebo 에 부품이 생김" 확인 |
 
@@ -173,6 +173,22 @@ ros2 service call /sim/clear_objects std_srvs/srv/Trigger
 5. 4주차: 자체 촬영 사진(실측 정답)으로 상위 방식을 다시 재고 `vision_node` 에 넣을지 셋이 결정
 
 GPU 가 없어 학습·추론 모두 CPU 다. 추론 시간은 검출→송신 P95 ≤ 300 ms (PROJECT.md 7장) 안에 들어오는지 같이 본다.
+
+### 2026-11-19 모델 비교 MVTec 결과 (구현 순서 1~4)
+
+- 실행: `.venv-ml` 에서 `python scripts/train_yolo_obb.py` (D 학습, 약 2.1시간) → `python notebooks/build_notebook.py --execute` (A·B·C 와 전체 평가, C 학습 약 12분 포함). 결과는 `notebooks/model_comparison.ipynb`.
+- 가중치·변환 데이터는 `data/models/` (git 제외).
+
+| 방식 | 검출 F1 | 분류 13종 (정답 박스) | 분류 2종 | 종합 F1 (2종) | 중심 오차 | 각도 오차 | CPU 시간/장 |
+|---|---|---|---|---|---|---|---|
+| A-gray | 0.511 | — | 89.0% | 0.455 | 14.6 px | 5.46° | 6 ms |
+| A-hsv (지금 `vision_node`) | 0.804 | — | 92.9% | 0.747 | 9.5 px | 5.20° | 23 ms |
+| A-hsv + B-SVM | 0.804 | 99.2% | 100% | 0.804 | 9.5 px | 5.20° | 39 ms |
+| A-hsv + B-RF | 0.804 | 99.5% | 100% | 0.804 | 9.5 px | 5.20° | 125 ms |
+| A-hsv + C-CNN (ResNet18) | 0.804 | 99.4% | 98.9% | 0.795 | 9.5 px | 5.20° | 117 ms |
+| **D-YOLOv8n-OBB** | **0.989** | 97.9% (검출된 것) | 100% | **0.989** | **4.4 px** | **1.12°** | 98 ms |
+
+요약: 분류는 B 로 이미 풀리고 **검출이 병목**이다. YOLO 는 붙은 부품을 나눠 검출 F1 을 0.80 → 0.99 로 올렸다. CNN 은 B 보다 나은 점이 없었다. 자세한 해석·한계는 DECISIONS.md 11절과 노트북 8절에 있다. 4주차에 자체 사진으로 다시 재고 `vision_node` 적용을 셋이 정한다.
 
 ### 4주차 (참고)
 
