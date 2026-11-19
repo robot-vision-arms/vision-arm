@@ -36,6 +36,7 @@ class RobotBridge(Node):
         self.writer = csv.DictWriter(self.log_file, fieldnames=fields)
         self.writer.writeheader()
         self.pub_log = self.create_publisher(String, '/robot/log', 10)
+        # 대기열을 1개로 제한해 통신 지연 뒤 오래된 좌표가 연속으로 전달되는 것을 줄인다.
         self.sub = self.create_subscription(String, '/vision/detections', self.on_detections, 1)
 
     def on_detections(self, msg):
@@ -49,8 +50,7 @@ class RobotBridge(Node):
             packet = json.loads(msg.data)
             if isinstance(packet, dict):
                 result['seq'] = packet.get('seq')
-            # Retain legacy sent=attempted semantics. send_completed means that
-            # local sendall returned, not that the peer processed the data.
+            # sent는 기존 규약상 '전송 시도'다. send_completed는 로컬 송신 완료, acked는 서버 수신 확인이다.
             result['sent'] = True
             self.client.exchange(packet)
             result['acked'] = True
@@ -58,10 +58,12 @@ class RobotBridge(Node):
             result['error'] = str(exc)
         result.update(self.client.last_transaction)
         capture = packet.get('t_capture') if isinstance(packet, dict) else None
+        # WSL 시계 튐으로 계산된 지연을 정상 측정값으로 취급하지 않도록 유효성도 함께 기록한다.
         result.update(self.clock.finish(token, capture))
         if not result['acked']:
             result['latency_ms'] = None
             result['latency_valid'] = False
+        # 같은 결과를 GUI 연결용 토픽과 사후 분석용 CSV에 남긴다. 실제 로봇 집기 성공 로그는 아니다.
         self.pub_log.publish(String(data=json.dumps(result, ensure_ascii=False)))
         self.writer.writerow(result)
         self.log_file.flush()

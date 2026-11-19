@@ -46,8 +46,7 @@ class PoseServer(socketserver.ThreadingTCPServer):
             self.log_file.flush()
 
     def server_close(self):
-        # Close existing connections too, so a restarted server cannot leave
-        # the client talking to an old handler through a stale TCP connection.
+        # 서버 재시작 뒤 클라이언트가 옛 연결을 계속 사용하지 않도록 기존 접속도 종료한다.
         with self.lock:
             self.stopping = True
             clients = list(self.clients)
@@ -81,6 +80,7 @@ class PoseHandler(socketserver.StreamRequestHandler):
     def handle(self):
         try:
             while True:
+                # TCP 수신 경계는 패킷 경계가 아니다. 줄바꿈까지 모아 JSON 한 개로 읽고 크기도 제한한다.
                 raw = self.rfile.readline(MAX_LINE + 1)
                 if not raw:
                     return
@@ -94,6 +94,7 @@ class PoseHandler(socketserver.StreamRequestHandler):
                     self.wfile.write(encode(dict(ack=None, status='error', error=str(exc))))
                     self.server.record(packet, 'invalid', str(exc))
                     continue
+                # ACK는 형식 검사를 통과했다는 뜻이다. ROS 전달·스폰·집기 완료를 의미하지 않는다.
                 self.wfile.write(encode(make_ack(packet['seq'])))
                 self.server.record(packet, 'ok')
                 if self.server.on_packet is not None:
@@ -135,8 +136,7 @@ def main():
             node = rclpy.create_node('robot_server', context=context)
             publisher = node.create_publisher(String, '/robot/targets', 10)
             def publish(packet):
-                # A new volatile publisher can otherwise lose its first target
-                # immediately after server restart, even if TCP ACK succeeded.
+                # 서버 재시작 직후 첫 타깃이 사라지는 것을 줄이기 위해 구독 연결을 제한 시간 동안 기다린다.
                 deadline = time.monotonic() + args.target_wait_s
                 while publisher.get_subscription_count() == 0:
                     if not context.ok() or time.monotonic() >= deadline:

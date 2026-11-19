@@ -5,6 +5,7 @@ Does not edit/start the camera or GUI, does not trigger spawning or robot motion
 import os
 from pathlib import Path
 import sys
+import socket
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
@@ -13,11 +14,14 @@ from launch.actions import (DeclareLaunchArgument, ExecuteProcess, GroupAction,
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
 
-from vision_pick_place.team2_session import load_session, check_gazebo
+from vision_pick_place.team2_session import load_session, check_gazebo, check_ros_link
 
 
 def start_link(context):
     import yaml
+    port = int(LaunchConfiguration('port').perform(context))
+    if not 1 <= port <= 65535:
+        raise ValueError('port must be in 1..65535')
     session_file = LaunchConfiguration('session_file').perform(context)
     config = str(Path(LaunchConfiguration('sim_params').perform(context)).resolve(strict=True))
     session = load_session(session_file, os.environ.get('ROS_DOMAIN_ID', '0'))
@@ -27,6 +31,14 @@ def start_link(context):
     env = dict(os.environ, GZ_PARTITION=session['gz_partition'])
     # ROS 도메인만 같아도 Gazebo는 다른 서버일 수 있다. 기록된 partition의 실제 응답까지 확인한다.
     check_gazebo(session, env)
+    check_ros_link(params)
+    # 다른 ROS 도메인의 서버도 같은 TCP 포트를 쓸 수 있다. 기존 서버에 잘못 접속하기 전에 거부한다.
+    with socket.socket() as probe:
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            probe.bind(('127.0.0.1', port))
+        except OSError as exc:
+            raise RuntimeError(f'TCP port {port} is unavailable. Use a free port or stop its existing launch.') from exc
     share = get_package_share_directory('vision_pick_place')
     return [LogInfo(msg=f"Team 2 link: domain={session.get('ros_domain_id', '0')}, "
                     f"GZ_PARTITION={session['gz_partition']}; spawning remains service-triggered"),
