@@ -7,11 +7,11 @@
 
 | 팀원 | 3주차 담당 (PROJECT.md 2.3) | 상태 | 남은 일 |
 |---|---|---|---|
-| 팀원 1 (동경) | GUI: `main_window.py`, `ros_worker.py` | ⬜ 시작 전. 4화면 설계·구현 순서는 3절 | 4화면 구현, `/robot/log`·`/sim/pick_log` 표시 |
+| 팀원 1 (동경) | GUI: `main_window.py`, `ros_worker.py` + 검출·분류 모델 비교 (11-19 추가) | ⬜ 시작 전. 4화면 설계·구현 순서, 모델 비교 계획은 3절 | 4화면 구현, `/robot/log`·`/sim/pick_log` 표시. MVTec 으로 A~D 모델 비교표 |
 | 팀원 2 (성민) | TCP: `robot_bridge.py`, `robot_server.py` (+ `--publish-ros`) | ✅ 실제 이미지 100/100 ACK, 180초 연속 3,371/3,371, 서버 재시작 5회 복구, 팀원 3 스폰 노드와 연결(`team2_link.launch.py`) | 실제 폰·보정 패킷으로 시험 (보정 완료로 가능) |
 | 팀원 3 (가영) | 스폰·흡착: `object_spawner.py`, DetachableJoint, TF | ✅ 패킷대로 스폰, TF·마커, 진공 컵 헤드(5 mm 컵 + 링 컵) 5/5 통과, 실제 폰 영상 → 스폰 노드 연결 | 실제 보정 패킷으로 "카메라 앞 부품 위치대로 Gazebo 에 부품이 생김" 확인 |
 
-완료 기준 (PROJECT.md 8장 3주차): GUI 에 영상·좌표·캘리브 상태가 실시간으로 갱신되고, 송수신 기록이 쌓인다.
+완료 기준 (PROJECT.md 8장 3주차): GUI 에 영상·좌표·캘리브 상태가 실시간으로 갱신되고, 송수신 기록이 쌓인다. (병행) MVTec 모델 비교표.
 
 ### 담당 간 협의가 필요한 것
 
@@ -152,6 +152,27 @@ ros2 service call /sim/clear_objects std_srvs/srv/Trigger
 5. 문서: 실행 명령, 화면 캡처를 WEEK3 기록에 남김
 
 의존성: ③의 `/robot/log` 는 성민 님 3주차 `robot_bridge.py` 가 발행한다. 먼저 나오기 전까지는 가짜 발행(`ros2 topic pub`)으로 확인한다.
+
+### 3·4주차 계획: 검출·분류 모델 비교 — 11-19 결정
+
+팀 회의에서 모델 학습·평가를 **팀원 1 (동경) 혼자 3·4주차에 병행**하기로 정했다. 이유·평가 기준·결정 규칙은 [DECISIONS.md 11절](DECISIONS.md) 에 있다.
+
+| 방식 | 내용 |
+|---|---|
+| A. 규칙 (기준선) | 지금 `vision_detector.py`: 이진화 → 윤곽선 → 길이 비 |
+| B. 형상 특징 + 고전 ML | 면적·장축 길이·길이 비·볼록도·구멍 수·Hu 모멘트 → k-NN / SVM / 랜덤포레스트 |
+| C. CNN 분류기 | 부품 영역을 잘라 작은 CNN(ResNet18 전이학습 등) 으로 분류 |
+| D. YOLOv8-OBB | 회전 박스 검출 + 분류 + 각도를 한 번에 학습 (`yolov8n-obb`) |
+
+구현 순서:
+
+1. 학습용 `.venv-ml` 준비 (SETUP.md Step 8, ROS `.venv` 와 분리)
+2. 공통 평가 스크립트: MVTec test 에서 검출 F1, 분류 정확도·혼동 행렬, 중심·각도 오차, CPU 추론 시간 (`evaluate_detector.py` 의 회전 IoU 대응 재사용)
+3. A·B 비교 (빠름) → C 학습 → D 학습 (CPU 1~3시간 예상, 백그라운드. 너무 느리면 Colab 에서 학습만)
+4. MVTec 비교표를 DECISIONS.md 11절·노션에 기록하고 팀원 2 와 공유
+5. 4주차: 자체 촬영 사진(실측 정답)으로 상위 방식을 다시 재고 `vision_node` 에 넣을지 셋이 결정
+
+GPU 가 없어 학습·추론 모두 CPU 다. 추론 시간은 검출→송신 P95 ≤ 300 ms (PROJECT.md 7장) 안에 들어오는지 같이 본다.
 
 ### 4주차 (참고)
 

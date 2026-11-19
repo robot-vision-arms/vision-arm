@@ -13,6 +13,7 @@
 | 주요 라이브러리 | OpenCV·NumPy (apt, ROS 와 같은 빌드), PySide6 (pip, venv) |
 | 시뮬레이터 (확장) | Gazebo Harmonic (Jazzy 공식 짝) + `ur_simulation_gz` (UR5e) + MoveIt2 + pymoveit2, 전부 apt (rosdep) |
 | 권장 사양 | WSL 메모리 8 GB 이상, 디스크 여유 15 GB 이상 (ROS Desktop + Gazebo + MoveIt) |
+| 모델 비교 (선택) | scikit-learn, PyTorch (CPU 판), Ultralytics YOLO. ROS 용 `.venv` 와 **분리된** `.venv-ml` 에 설치 (Step 8). GPU 없이 CPU 로 학습·추론 |
 | 워크스페이스 | `~/vision-arm` (= GitHub 저장소 = colcon 워크스페이스 루트) |
 
 ---
@@ -237,6 +238,33 @@ python -c "import cv2; c=cv2.VideoCapture('http://192.168.0.23:8080/video'); ok,
 - 끝내 안 되면 폰으로 사진·동영상을 찍어 그 폴더를 `params.yaml` 의 `image_dir` 로 지정해 진행합니다.
 
 **1주차 안에 각자 확인**해 두세요.
+
+## Step 8. (선택) 모델 비교용 학습 환경
+
+검출·분류 모델 비교(DECISIONS.md 11절, 3·4주차 팀원 1 담당)를 할 PC 에서만 합니다. 다른 팀원은 건너뛰어도 됩니다.
+
+ROS 용 `.venv` 에 설치하지 않습니다. torch·ultralytics 는 pip 판 `opencv-python` 과 NumPy 2.x 를 끌어오는데,
+그러면 apt 의 `cv_bridge`(NumPy 1.26 빌드)와 PySide6 의 Qt 가 꼬일 수 있습니다 (아래 "원본 가이드에서 바꾼 점" 2번과 같은 이유).
+그래서 시스템 패키지를 보지 않는 **별도 venv** 를 만듭니다.
+
+```bash
+cd ~/vision-arm
+python3 -m venv .venv-ml                 # --system-site-packages 를 붙이지 않음
+touch .venv-ml/COLCON_IGNORE
+source .venv-ml/bin/activate             # env.sh 대신 이걸 켬 (ROS 는 안 씀)
+
+pip install --upgrade pip
+pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu   # GPU 가 없으므로 CPU 판 (용량이 작음)
+pip install ultralytics scikit-learn opencv-python-headless
+
+python -c "import torch, ultralytics, sklearn, cv2; print(torch.__version__, torch.cuda.is_available(), ultralytics.__version__, sklearn.__version__, cv2.__version__)"
+deactivate
+```
+
+- 마지막 줄이 에러 없이 버전을 출력하고 `torch.cuda.is_available()` 가 `False` 면 통과 (CPU 학습).
+- 학습 결과(가중치 `*.pt`)와 변환한 학습 데이터는 `data/models/` 에 둡니다. git 에 올라가지 않습니다.
+- 학습이 너무 느리면 Google Colab 무료 GPU 로 학습만 하고, 받은 가중치를 이 PC 에서 CPU 로 추론합니다.
+- 비교가 끝나 학습 모델을 `vision_node` 에 넣기로 하면, 그때 ROS 환경과 함께 쓰는 방법(ONNX 로 내보내 OpenCV DNN 으로 추론 등)을 따로 정합니다.
 
 ---
 

@@ -32,6 +32,7 @@
 | 전처리 | 그레이스케일, Gaussian Blur, Threshold(Otsu) | `vision_pick_place/camera_stream.py` | 필수 |
 | 검출 | findContours, minAreaRect, 모멘트 | `vision_pick_place/vision_detector.py` | 필수 |
 | 부품 분류 | 장축/단축 비 (나사·너트) → 형상 특징 분류기 (공구) | `vision_detector.classify_part` | 확장 |
+| 검출·분류 모델 비교 | 규칙(지금) / 형상 특징 + k-NN·SVM·RF / CNN 분류 / YOLOv8-OBB 를 같은 데이터로 비교, CPU 추론 시간 포함 (DECISIONS.md 11절) | `scripts/` 비교 스크립트 (3주차 작성 예정), 가중치는 `data/models/` | 확장 (3·4주차) |
 | 왜곡 보정 | Camera Calibration (ChArUco 보드, 기존 체커보드도 옵션으로 지원) | `scripts/calibrate_camera.py` → `calibrator.py` | 필수 |
 | px → mm | Homography. 작업 시트 네 귀퉁이 ArUco 마커 꼭짓점 16개를 자동 검출 (기존 수동 기준점 CSV 도 옵션) | `scripts/compute_homography.py --aruco` → `calibrator.py` | 필수 |
 | ROS2 발행 | rclpy 퍼블리셔 | `vision_pick_place/vision_node.py` | 필수 |
@@ -62,12 +63,13 @@
 |---|---|---|---|
 | 1주차 | 캘리브레이션: `calibrate_camera.py`, `compute_homography.py`, `calibrator.py` | Gazebo 구동: UR5e + MoveIt 띄우기, `workcell.sdf`, `ur5e_vacuum.urdf.xacro` | 영상 입력: `camera_stream.py`, 스마트폰 IP 카메라 수신, 3명 환경 점검 |
 | 2주차 | MoveIt 이동: `grasp.py`, `pick_place_node` 의 지정 좌표 이동 | 검출·분류: `vision_detector.py` (MVTec 검증) | ROS2 발행: `vision_node.py`, `packet.py` |
-| 3주차 | GUI: `main_window.py`, `ros_worker.py` | TCP: `robot_bridge.py`, `robot_server.py` (+ `--publish-ros`) | 스폰·흡착: `object_spawner.py`, DetachableJoint, TF |
-| 4주차 | KPI: `evaluate_kpi.py`, 100회 송신 테스트 | Pick & Place 한 사이클 통합 (`pick_place_node`) | 실측 정답 30+ 자세 수집, 시연 준비 |
+| 3주차 | GUI: `main_window.py`, `ros_worker.py` + **모델 비교**: MVTec 으로 A~D 비교표 | TCP: `robot_bridge.py`, `robot_server.py` (+ `--publish-ros`) | 스폰·흡착: `object_spawner.py`, DetachableJoint, TF |
+| 4주차 | KPI: `evaluate_kpi.py`, 100회 송신 테스트 + **모델 비교**: 자체 촬영 사진으로 재평가·채택 결정 | Pick & Place 한 사이클 통합 (`pick_place_node`) | 실측 정답 30+ 자세 수집, 시연 준비 |
 
 - 표의 사람은 **주 담당**(일정 책임)이다. 막히면 같이 붙는다.
 - PR 은 그 파일을 맡지 않은 사람이 리뷰한다. 리뷰하면서 남의 작업 묶음도 익힌다.
 - 4주차 Pick & Place 통합은 가장 무거워서, 팀원 1·3 이 KPI·데이터를 끝내는 대로 같이 붙는다.
+- 검출·분류 모델 학습·평가는 2026-11-19 회의에서 **팀원 1 (동경) 혼자** 3·4주차에 병행하기로 정했다 (DECISIONS.md 11절). 결과는 검출 담당(팀원 2)과 공유하고, `vision_node` 에 넣을지는 셋이 같이 정한다.
 
 ## 3. 좌표·각도·시간 정의
 
@@ -113,6 +115,7 @@ KPI 를 재려면 "무엇을 정답으로 볼지" 가 먼저 정해져야 합니
 - 패킷의 `part_type` 은 분류 이름 문자열이다. 모르는 것은 `"unknown"` 으로 보내고 로봇은 집지 않는다.
 - **4주 범위 (나사·너트)**: 장축/단축 길이 비로 나눈다. 비 ≤ `nut_max_aspect`(초기값 1.5) 이면 너트, 넘으면 나사 (`classify_part`).
 - **최종 목표 (여러 공구)**: 길이 비 하나로는 드라이버·육각렌치처럼 둘 다 길쭉한 공구를 못 나눈다. 9장 순서로 형상 특징 분류기로 바꾼다.
+- **모델 비교 (3·4주차)**: 길이 비 규칙을 기준선으로, 형상 특징 + k-NN·SVM·RF, CNN 분류, YOLOv8-OBB 를 같은 기준으로 비교해 고른다 (DECISIONS.md 11절). 어떤 방식을 쓰든 `part_type`·mm·각도 패킷 형식은 그대로다.
 
 ## 4. 시스템 구성
 
@@ -183,11 +186,13 @@ robot_vision/                   ← git 저장소 = colcon 워크스페이스
 │   ├── make_calib_sheets.py    인쇄물 PDF: ChArUco 보드, 작업 시트
 │   ├── calibrate_camera.py     ChArUco 보드 사진 → intrinsics.npz
 │   ├── compute_homography.py   작업 시트 사진 (ArUco 4개) → homography.npz
-│   └── evaluate_kpi.py         KPI 4종 (+ 선택 2종)
+│   ├── evaluate_kpi.py         KPI 4종 (+ 선택 2종)
+│   └── (예정) 모델 비교 스크립트  A 규칙 / B 형상 특징+ML / C CNN / D YOLOv8-OBB (DECISIONS.md 11절)
 ├── data/                       (git 제외, 폴더만 유지)
 │   ├── calib/                  인쇄물 PDF, 보드·시트 사진, *.npz
 │   ├── captures/               자체 촬영 이미지
 │   ├── ground_truth/           실측 정답 CSV
+│   ├── models/                 모델 비교용 변환 데이터·학습 가중치
 │   └── mvtec_screws/           참고용 MVTec Screws
 ├── logs/                       (git 제외) 통신·수신·집기 로그 CSV
 └── src/
@@ -283,6 +288,7 @@ data/mvtec_screws/
 | 송신 성공률 | 100회 연속 송신 중 ACK 수신 비율 | 100 % | 필수 | 미측정 |
 | 검출→송신 시간 | 3.3 구간, 100회 이상 측정한 P95 | ≤ 300 ms | 필수 | 미측정 |
 | 분류 정확도 | `part_type` 예측 = 실측 비율 | ≥ 95 % | 선택 | 미측정 |
+| 검출 모델 비교 | 방식 A~D 의 검출 F1·분류 정확도·각도 오차·CPU 추론 시간 (MVTec test → 자체 사진, DECISIONS.md 11절) | 비교표 작성 | 선택 | 미측정 |
 | Pick 성공률 | Gazebo 사이클에서 물체가 맞는 상자에 들어간 비율 (20개 이상) | ≥ 90 % | 선택 | 미측정 |
 
 기준값은 교육용 권장 목표입니다. **실측 전에는 달성으로 표기하지 않습니다.**
@@ -293,7 +299,7 @@ Pick 성공률은 시뮬레이터 안의 결과라 비전 정확도와 별개로
 | 항목 | 값 |
 |---|---|
 | CPU | Intel Core i5-12400 (6코어 12스레드) ※ 팀원 1 PC, WSL2 |
-| GPU | 미사용 (OpenCV CPU 처리). Gazebo 렌더링은 WSLg 기본 |
+| GPU | 미사용 (OpenCV CPU 처리, Intel 내장 그래픽이라 CUDA 학습 불가). 모델 추론 시간도 CPU 기준. Gazebo 렌더링은 WSLg 기본 |
 | RAM | |
 | 카메라 / 해상도 / FPS | |
 | 카메라 높이·작업 영역 크기 | |
@@ -305,8 +311,8 @@ Pick 성공률은 시뮬레이터 안의 결과라 비전 정확도와 별개로
 |---|---|---|
 | **1주차** 환경·캘리브레이션·시뮬 구동 | 전원 SETUP.md 완료 (스마트폰 카메라, Gazebo·MoveIt 포함) · ChArUco 보드 캘리브레이션 · 폰 고정 후 작업 시트(ArUco 4개) 호모그래피 · **UR5e 를 Gazebo 에 띄우고 MoveIt 으로 움직이기** | 3명 모두 `colcon build` 성공 · `intrinsics.npz`, `homography.npz` 생성 · 재투영 오차(mm) 기록 · **확인 ①** 통과 여부 기록 |
 | **2주차** 비전·ROS2 노드·로봇 이동 | MVTec 으로 검출·각도·분류 먼저 검증 · 자체 부품 촬영 · Blur/Threshold 조정 · `vision_node` 발행 · 코드(pymoveit2)로 작업 평면 위 지정 좌표 이동 · 손으로 스폰한 부품 attach/detach 시험 | `ros2 topic echo /vision/detections` 로 mm·각도·종류 확인 · `colcon test` 통과 · **확인 ②** 통과 여부 기록 |
-| **3주차** GUI·TCP·스폰 | 메인 윈도우 4화면 · QThread 로 ROS 구독 · `robot_server`, `robot_bridge` · `--publish-ros` · 인식 결과대로 Gazebo 에 부품 스폰 | GUI 실시간 표시 · TCP ACK 수신 · 카메라 앞 부품 위치대로 Gazebo 에 부품이 생김 |
-| **4주차** Pick & Place·KPI·시연 | 한 사이클 완성 · 실측 정답 30+ 자세 · 100회 송신 테스트 · `evaluate_kpi.py` | KPI 표 필수 4칸 + 측정 장비 표 채움 · 시연 (카메라 → GUI → TCP → Gazebo 분류) |
+| **3주차** GUI·TCP·스폰 | 메인 윈도우 4화면 · QThread 로 ROS 구독 · `robot_server`, `robot_bridge` · `--publish-ros` · 인식 결과대로 Gazebo 에 부품 스폰 · (병행) MVTec 으로 검출·분류 모델 A~D 비교 | GUI 실시간 표시 · TCP ACK 수신 · 카메라 앞 부품 위치대로 Gazebo 에 부품이 생김 · MVTec 모델 비교표 |
+| **4주차** Pick & Place·KPI·시연 | 한 사이클 완성 · 실측 정답 30+ 자세 · 100회 송신 테스트 · `evaluate_kpi.py` · (병행) 자체 사진으로 모델 재평가 | KPI 표 필수 4칸 + 측정 장비 표 채움 · 시연 (카메라 → GUI → TCP → Gazebo 분류) · 모델 채택 결정 기록 |
 
 ### 확인 지점 (Go / No-Go)
 
@@ -323,11 +329,11 @@ Pick 성공률은 시뮬레이터 안의 결과라 비전 정확도와 별개로
 
 | 순서 | 할 일 | 끝났다는 기준 |
 |---|---|---|
-| 1 | **형상 특징 분류기**: 윤곽선마다 면적(mm²), 장축 길이(mm), 길이 비, 볼록도(solidity), 구멍 수(윤곽선 계층), Hu 모멘트를 뽑아 규칙 → k-NN/SVM 순서로 비교. MVTec 13종으로 먼저 연습 | 분류 정확도 표 (종류별 혼동 행렬) |
+| 1 | **형상 특징 분류기**: 윤곽선마다 면적(mm²), 장축 길이(mm), 길이 비, 볼록도(solidity), 구멍 수(윤곽선 계층), Hu 모멘트를 뽑아 규칙 → k-NN/SVM 순서로 비교. MVTec 13종으로 먼저 연습. **→ 3주차로 앞당김 (DECISIONS.md 11절 방식 B)** | 분류 정확도 표 (종류별 혼동 행렬) |
 | 2 | **공구 촬영 데이터**: 대상 공구 4~6종 정하기 (예: 드라이버, 스패너, 육각렌치, 펜치), 종류당 30장 이상, `part_type` 라벨 | `poses.csv` 에 공구 행 추가 |
 | 3 | **집는 점**: 공구는 무게중심이 몸체 밖에 떨어질 수 있음 (펜치, 트인 스패너) → 거리 변환 최댓값(물체 안쪽에서 가장 두꺼운 점)을 집는 점으로 | 모든 공구에서 집는 점이 마스크 안 |
 | 4 | **Gazebo 모델·상자**: 공구마다 `models/<종류>/model.sdf` (기본 도형 조합으로 단순화, 메시는 라이선스 확인 후), 상자를 베이스 둘레에 배치 | 5장 "종류 늘리는 법" 대로 추가해 Pick 성공률 측정 |
-| 5 | (선택) 규칙·k-NN 으로 정확도가 안 나오면 학습 기반 회전 박스 검출(OBB)과 비교. 쓰게 되면 학습 데이터·추론 시간을 KPI 표에 같이 적는다 | 방식별 정확도·처리 시간 비교표 |
+| 5 | 학습 기반 회전 박스 검출(OBB)과 비교. 쓰게 되면 학습 데이터·추론 시간을 KPI 표에 같이 적는다. **→ 3·4주차로 앞당겨 CNN 분류까지 함께 비교 (DECISIONS.md 11절 방식 C·D)**. 공구 데이터가 생기면 같은 비교를 공구로 다시 한다 | 방식별 정확도·처리 시간 비교표 |
 
 - 상자가 늘면 UR5e 도달 범위(약 0.85 m) 안에 다 들어가는지, 상자끼리 계획 경로가 막히지 않는지 RViz 에서 먼저 확인합니다.
 - 공구 수가 늘어도 집는 방식(흡착 고정 관절)은 같습니다. 최종 목표에서 마찰 그리퍼로 바꾸려면 별도 과제로 봅니다.
@@ -352,6 +358,9 @@ Pick 성공률은 시뮬레이터 안의 결과라 비전 정확도와 별개로
 | 흡착(DetachableJoint)이 늦게 스폰한 모델을 못 잡음 | 확인 ② 에서 일찍 발견. 대체 플러그인 또는 `set_pose` 방식 (8장) |
 | 작은 부품이 물리 엔진에서 튐 | 부품 질량·관성을 실제 비율로 넣었음. 튀면 패드를 2 mm 위에서 멈춰 접촉 없이 붙이는 현재 방식을 유지하고, 상자에는 낮은 위치에서 놓기 |
 | 공구 종류가 늘면 길이 비 규칙으로 분류 불가 | 9장 1단계 형상 특징 분류기. 4주 범위는 나사·너트 2종으로 고정 |
+| GPU 가 없어 딥러닝 학습이 느림 | 가장 작은 모델(`yolov8n-obb`), 입력 크기 줄이기, 백그라운드 학습. 그래도 느리면 Colab 무료 GPU 로 학습만 하고 추론은 CPU (DECISIONS.md 11절) |
+| 학습 데이터가 적어 과적합 (MVTec 384장) | 기존 train/val/test 분할 유지, 선택은 val 로만, test 는 마지막에 한 번. 자체 촬영 사진에서 다시 확인 |
+| 학습 패키지가 ROS 환경을 깨뜨림 (pip OpenCV·NumPy 2.x) | 별도 `.venv-ml` 에서만 설치·학습 (SETUP.md Step 8) |
 
 ## 12. 참고 자료
 
@@ -362,3 +371,4 @@ Pick 성공률은 시뮬레이터 안의 결과라 비전 정확도와 별개로
 - [ur_simulation_gz 설치](https://docs.ros.org/en/rolling/p/ur_simulation_gz/doc/installation.html) · [사용법](https://docs.ros.org/en/rolling/p/ur_simulation_gz/doc/usage.html)
 - [Gazebo Sim DetachableJoint (Harmonic = gz-sim 8)](https://gazebosim.org/api/sim/8/detachablejoints.html)
 - [pymoveit2 (Jazzy)](https://docs.ros.org/en/jazzy/p/pymoveit2/) · [MoveIt2 바이너리 설치](https://moveit.ros.org/install-moveit2/binary)
+- [Ultralytics YOLO OBB (회전 박스 검출)](https://docs.ultralytics.com/tasks/obb/) · [scikit-learn 지도 학습](https://scikit-learn.org/stable/supervised_learning.html) · [PyTorch CPU 설치](https://pytorch.org/get-started/locally/)
