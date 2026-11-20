@@ -12,8 +12,9 @@ from vision_pick_place.vision_detector import classify_part, find_objects, norma
 def process_frame(frame, calibrator, seq, t_capture, *, blur_ksize=5, threshold=-1,
                   min_area_px=500, nut_max_aspect=1.5, segmentation_mode='gray',
                   hsv_max_saturation=70, hsv_max_dark_value=70, close_ksize=0, open_ksize=0,
-                  roi_mask=None):
-    """roi_mask: 원본 영상 크기의 uint8 마스크(255 = 검출할 곳, workspace_roi.sheet_roi_mask). None 이면 영상 전체."""
+                  roi_mask=None, part_heights_mm=None):
+    """roi_mask: 원본 영상 크기의 uint8 마스크(255 = 검출할 곳, workspace_roi.sheet_roi_mask). None 이면 영상 전체.
+    part_heights_mm: {part_type: 윤곽 중심 높이 mm}. 주면 그 높이로 시차를 보정한다 (calibrator 설명). 없는 종류는 0."""
     if calibrator.image_size is not None and calibrator.image_size != (frame.shape[1], frame.shape[0]):
         raise ValueError('입력 영상과 보정 사진의 해상도가 다릅니다. 같은 해상도로 다시 보정하세요.')
     mask = preprocess(frame, blur_ksize, threshold, segmentation_mode=segmentation_mode,
@@ -35,7 +36,8 @@ def process_frame(frame, calibrator, seq, t_capture, *, blur_ksize=5, threshold=
         endpoint = center + np.asarray(det.long_axis_px) * det.length_px / 2
         x_mm = y_mm = angle = None
         if calibrator.status.ready:
-            points_mm = calibrator.px_to_mm(np.array([center, endpoint]))
+            points_mm = calibrator.px_to_mm(np.array([center, endpoint]),
+                                            (part_heights_mm or {}).get(part_type, 0.0))
             x_mm, y_mm = map(float, points_mm[0])
             delta = points_mm[1] - points_mm[0]
             if part_type == 'screw':

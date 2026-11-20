@@ -85,3 +85,41 @@ def test_input_shapes(tmp_path):
     cal = Calibrator(*map(str, _save(tmp_path)))
     assert cal.px_to_mm([640, 360]).shape == (1, 2)       # 점 1개, 정수 리스트
     assert cal.px_to_mm(np.empty((0, 2))).shape == (0, 2)  # 검출 0개인 프레임
+
+
+def _tilted_camera(tmp_path):
+    """작업 평면 mm 좌표에서 (150, 100, 600) mm 위에 살짝 기울어진 카메라. (Calibrator, 투영 함수, 카메라 중심)."""
+    K = np.array([[900.0, 0, 640], [0, 900.0, 360], [0, 0, 1]])
+    rvec = np.array([np.pi + 0.08, 0.05, 0.02])          # 아래를 보되 조금 기울어짐
+    R, _ = cv2.Rodrigues(rvec)
+    center = np.array([150.0, 100.0, 600.0])
+    tvec = -R @ center
+
+    def project(xyz):
+        px, _ = cv2.projectPoints(np.asarray(xyz, np.float64).reshape(-1, 1, 3), rvec, tvec, K, np.zeros(5))
+        return px.reshape(-1, 2)
+
+    plane = np.array([[x, y, 0.0] for x in (20, 150, 280) for y in (20, 100, 190)])
+    H, _ = cv2.findHomography(project(plane), plane[:, :2])
+    np.savez(tmp_path / 'i.npz', camera_matrix=K, dist_coeffs=np.zeros(5), rms=0.0)
+    np.savez(tmp_path / 'h.npz', H=H, reproj_err_mm=0.0)
+    return Calibrator(str(tmp_path / 'i.npz'), str(tmp_path / 'h.npz')), project, center
+
+
+def test_camera_center_from_homography(tmp_path):
+    calib, _, center = _tilted_camera(tmp_path)
+    assert calib.camera_center_mm() == pytest.approx(center, abs=0.5)
+
+
+def test_parallax_correction_recovers_raised_point(tmp_path):
+    """평면보다 8 mm 위의 점: 보정 없이는 바깥으로 밀리고, height_mm=8 이면 제자리."""
+    calib, project, _ = _tilted_camera(tmp_path)
+    truth = np.array([[40.0, 30.0], [260.0, 170.0]])
+    px = project(np.column_stack((truth, np.full(2, 8.0))))
+    raw = calib.px_to_mm(px)
+    fixed = calib.px_to_mm(px, 8.0)
+    assert np.linalg.norm(raw - truth, axis=1).min() > 1.0       # 보정 안 하면 1 mm 넘게 어긋남
+    assert fixed == pytest.approx(truth, abs=0.01)
+    assert calib.px_to_mm(px, [8.0, 0.0])[0] == pytest.approx(truth[0], abs=0.01)   # 점마다 높이
+    with pytest.raises(ValueError):
+        calib.px_to_mm(px, -1.0)

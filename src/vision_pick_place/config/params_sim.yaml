@@ -19,3 +19,6 @@ vision_node:
     sheet_roi: true
     sheet_edge_margin_mm: 3.0
     sheet_marker_margin_mm: 9.0             # 매트 그림의 마커 흰 여백이 8 mm (make_sim_calib.py 설명) → 9 mm 를 뺀다
+    # 시차 보정: 나사(지름 8 mm 원기둥, 누움) 축 높이 4 mm, 너트(두께 6 mm) 가운데 3 mm. 0.75 m 카메라에서 0.3~0.7 mm 를 줄인다
+    parallax_part_types: ["screw", "nut"]
+    parallax_heights_mm: [4.0, 3.0]

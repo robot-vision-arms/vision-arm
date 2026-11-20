@@ -6,6 +6,12 @@
 
 px → mm 변환은 두 파일이 모두 있어야 한다 (항상 왜곡 보정 후 H 적용).
 파일이 없으면 미보정(status False), 파일이 깨졌거나 값이 이상하면 ValueError.
+
+시차 보정 (px_to_mm 의 height_mm):
+    호모그래피는 작업 평면(높이 0) 기준이다. 부품 윤곽은 평면보다 위(나사 축 4 mm 등)에 있어서, 카메라에서 본 광선을
+    평면까지 연장한 자리 = 실제보다 화면 중심에서 바깥으로 밀린 자리가 나온다. 밀린 양 ≈ 높이 / 카메라 높이 × 중심에서의 거리
+    (가상 카메라 0.75 m 에서 0.3~0.7 mm, 2026-11-20 정답 비교). 카메라 광학 중심을 H 와 내부 파라미터로 구해
+    (camera_center_mm) 그 점 쪽으로 높이 비율만큼 당긴다.
 """
 from dataclasses import dataclass
 from pathlib import Path
@@ -34,11 +40,13 @@ class Calibrator:
         self.H = None
         self.image_size = None
         self.status = CalibStatus()
+        self._camera_center = None
         self.load(Path(intrinsics_path), Path(homography_path))
 
     def load(self, intrinsics_path: Path, homography_path: Path) -> None:
         """파일이 없으면 예외 대신 status 에 False 로 남긴다 (GUI 가 '미보정' 으로 표시)."""
         self.camera_matrix = self.dist_coeffs = self.H = None
+        self._camera_center = None
         self.image_size = None
         self.status = CalibStatus()
         # 파일이 없으면 미보정, 파일이 있는데 깨졌거나 값이 이상하면 예외. 잘못된 보정값으로 mm 를 내보내는 것보다 멈추는 편이 안전하다.
@@ -87,8 +95,30 @@ class Calibrator:
         return cv2.undistortPoints(points.reshape(-1, 1, 2), self.camera_matrix,
                                    self.dist_coeffs, P=self.camera_matrix).reshape(-1, 2)
 
-    def px_to_mm(self, pts_px: np.ndarray) -> np.ndarray:
-        """(N, 2) 원본 픽셀 → (N, 2) 로봇 작업 평면 mm. 왜곡 보정 후 cv2.perspectiveTransform(H)."""
+    def camera_center_mm(self) -> np.ndarray:
+        """작업 평면 좌표로 본 카메라 광학 중심 (x_mm, y_mm, 높이_mm). 평면 → 영상 호모그래피를 K 로 분해한다 (Zhang).
+
+        H⁻¹ = s·K·[r1 r2 t] 이므로 K⁻¹H⁻¹ 의 앞 두 열을 단위 길이로 맞추면 회전 r1, r2 와 이동 t 가 나온다.
+        카메라 중심 = -Rᵀt. 높이는 부호와 상관없이 평면까지 거리로 돌려준다.
+        """
+        if not self.status.ready:
+            raise RuntimeError('내부 파라미터와 호모그래피가 모두 필요합니다.')
+        if self._camera_center is None:
+            B = np.linalg.inv(self.camera_matrix) @ np.linalg.inv(self.H)
+            scale = 2.0 / (np.linalg.norm(B[:, 0]) + np.linalg.norm(B[:, 1]))
+            r1, r2, t = scale * B[:, 0], scale * B[:, 1], scale * B[:, 2]
+            if t[2] < 0:   # 평면이 카메라 앞(z > 0)에 오도록 부호를 맞춘다
+                r1, r2, t = -r1, -r2, -t
+            U, _, Vt = np.linalg.svd(np.column_stack((r1, r2, np.cross(r1, r2))))
+            center = -(U @ Vt).T @ t
+            self._camera_center = np.array([center[0], center[1], abs(center[2])])
+        return self._camera_center
+
+    def px_to_mm(self, pts_px: np.ndarray, height_mm=0.0) -> np.ndarray:
+        """(N, 2) 원본 픽셀 → (N, 2) 로봇 작업 평면 mm. 왜곡 보정 후 cv2.perspectiveTransform(H).
+
+        height_mm (스칼라 또는 점마다): 그 점이 작업 평면보다 이만큼 위에 있다고 보고 시차를 보정한다 (모듈 설명). 0 이면 보정 없음.
+        """
         if not self.status.ready:
             raise RuntimeError('내부 파라미터와 호모그래피가 모두 필요합니다.')
         points = self.undistort_points(pts_px)
@@ -98,6 +128,14 @@ class Calibrator:
         if np.any(np.abs(homogeneous[:, 2]) < 1e-12):
             raise ValueError('호모그래피로 변환할 수 없는 점입니다.')
         result = homogeneous[:, :2] / homogeneous[:, 2:3]
+        heights = np.broadcast_to(np.asarray(height_mm, dtype=np.float64), (len(result),))
+        if not np.isfinite(heights).all() or (heights < 0).any():
+            raise ValueError('높이는 0 이상의 유한한 값이어야 합니다.')
+        if heights.any():
+            center = self.camera_center_mm()
+            if not (heights < center[2]).all():
+                raise ValueError('부품 높이가 카메라 높이보다 큽니다.')
+            result = center[:2] + (result - center[:2]) * (1 - heights / center[2])[:, None]
         if not np.isfinite(result).all():
             raise ValueError('변환 결과가 유한하지 않습니다.')
         return result

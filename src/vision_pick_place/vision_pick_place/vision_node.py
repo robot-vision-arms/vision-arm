@@ -70,6 +70,9 @@ class VisionNode(Node):
         self.declare_parameter('sheet_roi', True)
         self.declare_parameter('sheet_edge_margin_mm', 3.0)
         self.declare_parameter('sheet_marker_margin_mm', 5.0)
+        # 시차 보정: 종류별 윤곽 중심 높이 (mm, 같은 순서의 병렬 배열). 빈 배열이면 보정 안 함 (calibrator.px_to_mm 설명)
+        self.declare_parameter('parallax_part_types', [''])
+        self.declare_parameter('parallax_heights_mm', [0.0])
 
         self.pub_det = self.create_publisher(String, '/vision/detections', 10)
         self.pub_image = self.create_publisher(Image, '/vision/debug_image', 10)
@@ -107,7 +110,8 @@ class VisionNode(Node):
                     'hsv_max_saturation', 'hsv_max_dark_value', 'close_ksize', 'open_ksize')}
         try:
             packet, debug = process_frame(frame, self.calibrator, self.seq, t_capture,
-                                          roi_mask=self.sheet_roi(frame), **options)
+                                          roi_mask=self.sheet_roi(frame), part_heights_mm=self.part_heights(),
+                                          **options)
         except (ValueError, RuntimeError, cv2.error) as exc:
             self.get_logger().error(f'프레임 처리 실패: {exc}', throttle_duration_sec=5.0)
             return
@@ -117,6 +121,13 @@ class VisionNode(Node):
         image.header.frame_id = 'camera'
         self.pub_image.publish(image)
         self.seq += 1
+
+    def part_heights(self) -> dict:
+        types = [t for t in self.get_parameter('parallax_part_types').value if t]
+        heights = list(self.get_parameter('parallax_heights_mm').value)[:len(types)]
+        if len(heights) != len(types):
+            raise ValueError('parallax_part_types 와 parallax_heights_mm 의 길이가 같아야 합니다.')
+        return dict(zip(types, heights))
 
     def sheet_roi(self, frame):
         """작업 시트 안쪽·마커 제외 마스크. 보정이 없거나 sheet_roi=false 면 None (영상 전체에서 검출)."""
