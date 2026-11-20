@@ -1,5 +1,0 @@
-sample_id,image,x_mm,y_mm,angle_deg,part_type
-gt002,images/gt002.png,150,90,15,screw
-gt013,images/gt013.png,220,50,0,screw
-gt018,images/gt018.png,220,170,75,screw
-gt029,images/gt029.png,220,170,,nut
