@@ -409,6 +409,12 @@ class PickPlaceNode(Node):
             self.prepare_motion()
             spawned = self.call(self.spawn_client, Trigger.Request())
             if not spawned.success:
+                # 스폰 노드는 이전 부품을 지우고 같은 이름으로 바로 다시 만드는데, Gazebo 가 가끔 거부한다
+                # (11-20 무작위 시험 5회 중 1회 "같은 이름이 남아 있음"). 잠깐 기다렸다 한 번 더 한다
+                self.get_logger().warning(f'스폰 실패, 1초 뒤 다시: {spawned.message}')
+                time.sleep(1.0)
+                spawned = self.call(self.spawn_client, Trigger.Request())
+            if not spawned.success:
                 raise RuntimeError(f'스폰 실패: {spawned.message}')
             # 스폰 노드는 자기 최신 패킷으로 스폰하므로, 이 노드가 고른 위치와 같은지 확인한다 (패킷이 그새 바뀌면 다름)
             for t in targets:

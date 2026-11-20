@@ -9,6 +9,7 @@ GUI 프로세스 안의 다른 rclpy 사용과 섞이지 않도록 전용 Contex
 """
 import json
 import threading
+import time
 
 from PySide6.QtCore import QThread, Signal
 
@@ -19,6 +20,7 @@ class RosWorker(QThread):
     robot_log = Signal(dict)      # /robot/log JSON
     sim_log = Signal(dict)        # /sim/pick_log JSON (Gazebo 를 켰을 때만 들어옴)
     cycle_result = Signal(bool, str)   # /sim/run_cycle 응답 (성공, 메시지)
+    gazebo_ready = Signal(bool)        # /sim/run_cycle 서비스가 보이는지 (1초마다, 헤더의 Gazebo 상태 표시)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -67,11 +69,16 @@ class RosWorker(QThread):
         node.create_subscription(String, '/sim/pick_log', json_signal(self.sim_log), 100)
         cycle = node.create_client(Trigger, '/sim/run_cycle')
         pending = None
+        last_check = 0.0
 
         self._running.set()
         try:
             while self._running.is_set() and context.ok():
                 executor.spin_once(timeout_sec=0.05)
+                now = time.monotonic()
+                if now - last_check > 1.0:
+                    last_check = now
+                    self.gazebo_ready.emit(cycle.service_is_ready())
                 if self._cycle_requested.is_set() and pending is None:
                     self._cycle_requested.clear()
                     if cycle.service_is_ready():

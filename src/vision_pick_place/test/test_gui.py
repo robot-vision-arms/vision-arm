@@ -38,8 +38,8 @@ def cell(table, row, col):
 
 def test_calibration_panel_shows_loaded_files(window):
     labels = window.calib_labels
-    assert 'RMS 0.56 px' in labels['intrinsics'].text()
-    assert '재투영 0.21 mm' in labels['homography'].text()
+    assert '로드됨' in labels['intrinsics'].text() and '로드됨' in labels['homography'].text()
+    assert labels['error'].text() == '0.56 px / 0.21 mm'
     assert labels['camera'].text().startswith('600 mm')
 
 
@@ -57,12 +57,14 @@ def test_detections_table_and_uncalibrated_warning(window):
         {'id': 1, 'part_type': 'nut', 'x_mm': 40.1, 'y_mm': 80.3, 'angle_deg': None, 'u_px': 410.7, 'v_px': 288.0}]})
     table = window.det_table
     assert table.rowCount() == 2
-    assert [cell(table, 0, c) for c in range(7)] == ['0', '나사', '640.2', '360.8', '102.4', '55.0', '37.5']
-    assert cell(table, 1, 1) == '너트' and cell(table, 1, 6) == '—'
-    assert window.calib_labels['packet'].text().startswith('true')
+    assert [cell(table, 0, c) for c in range(5)] == ['0', '나사', '640.2, 360.8', '102.4, 55.0', '37.5°']
+    assert cell(table, 1, 1) == '너트' and cell(table, 1, 4) == '—'
+    assert 'calib_ok = true' in window.calib_pill.text()
+    assert window.tile_target.value.text().startswith('2개')
     window.on_detections({'seq': 8, 'calib_ok': False, 'objects': [
         {'id': 0, 'part_type': 'screw', 'x_mm': None, 'y_mm': None, 'angle_deg': None, 'u_px': 1.0, 'v_px': 2.0}]})
-    assert '미보정' in window.det_status.text() and cell(window.det_table, 0, 4) == '—'
+    assert '미보정' in window.det_status.text() and cell(window.det_table, 0, 3) == '—, —'
+    assert 'calib_ok = false' in window.calib_pill.text()
 
 
 def test_log_rows_and_summary(window):
@@ -72,11 +74,13 @@ def test_log_rows_and_summary(window):
     window.on_sim_log({'seq': 1, 'obj': 'obj_0', 'part_type': 'screw', 'result': 'ok', 'plan_ms': 35000.0, 'error': ''})
     window.on_sim_log({'seq': 1, 'obj': 'obj_1', 'part_type': 'nut', 'result': 'failed', 'plan_ms': 2000.0,
                        'error': '[흡착 높이로 하강·진공] 흡착 실패'})
-    table = window.log_table
-    assert table.rowCount() == 12
-    assert cell(table, 0, 1) == 'Gazebo' and cell(table, 0, 3) == '실패' and '흡착 실패' in cell(table, 0, 5)
-    summary = window.log_summary.text()
-    assert 'ACK 9/10' in summary and 'P95' in summary and 'Gazebo 집기 1/2 성공' in summary
+    lines = window.console.toPlainText().splitlines()
+    assert len(lines) == 12
+    assert 'ERR' in lines[3] and 'ACK timeout' in lines[3]
+    assert 'SIM' in lines[-1] and '실패' in lines[-1] and '흡착 실패' in lines[-1]
+    assert window.tile_ack.value.text() == '90 % (9/10)'
+    assert window.tile_p95.value.text().endswith('ms')
+    assert window.tile_pick.value.text() == '1 / 2'
 
 
 def test_video_panel_accepts_bgr_frame(window):

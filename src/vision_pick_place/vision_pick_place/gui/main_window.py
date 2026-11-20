@@ -1,11 +1,13 @@
-"""PySide6 메인 윈도우 (3주차). 과제 GUI 필수 화면 4가지를 한 창에 배치한다 (docs/PROJECT.md 2.2).
+"""PySide6 메인 윈도우 (3주차). 과제 GUI 필수 화면 4가지 (docs/PROJECT.md 2.2), 11-10 목업과 같은 구조.
 
-    ┌───────────────────────────────┬──────────────────────┐
-    │ ① 영상 + 검출 ROI + 장축 화살표 │ ② px·mm 좌표, 회전각, 종류 │
-    │   (/vision/debug_image)        │ ④ 캘리브레이션 상태     │
-    ├───────────────────────────────┴──────────────────────┤
-    │ ③ 송수신 기록: TCP (/robot/log) + Gazebo 집기 (/sim/pick_log), 요약 (ACK 비율·지연 P95) │
-    └──────────────────────────────────────────────────────┘
+    ┌ 헤더: 제목·입력 │ 연결 상태 (ROS2 · robot_server · Gazebo) │ [보정 다시 읽기] [사이클 실행] ┐
+    ├──────────────────────────────┬──────────────────────────────┤
+    │ ① 영상 · 검출 ROI · 장축 방향  │ ② 좌표 · 회전각 · 부품 종류      │
+    │   (/vision/debug_image, 범례)  │   표 + 기준 타일 3개             │
+    ├──────────────────────────────┼──────────────────────────────┤
+    │ ③ 가상 로봇 송수신 · 집기 결과  │ ④ 캘리브레이션 상태              │
+    │   콘솔 로그 + 숫자 타일 3개     │   항목 목록 + calib_ok 배지      │
+    └──────────────────────────────┴──────────────────────────────┘
 
     source env.sh   # venv (PySide6) 를 켠다
     python3 -m vision_pick_place.gui.main_window                              # 실물 보정 (data/calib)
@@ -18,30 +20,103 @@ ROS 는 ros_worker.RosWorker (QThread) 가 받고, 이 창은 Signal 로 받은 
 import argparse
 from collections import deque
 from datetime import datetime
+import html
 from pathlib import Path
 import sys
 import time
 
 import numpy as np
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtGui import QColor, QImage, QPixmap
-from PySide6.QtWidgets import (QApplication, QFormLayout, QGroupBox, QHBoxLayout, QHeaderView, QLabel,
-                               QMainWindow, QPushButton, QSizePolicy, QSplitter, QTableWidget,
-                               QTableWidgetItem, QVBoxLayout, QWidget)
+from PySide6.QtGui import QBrush, QColor, QImage, QPixmap
+from PySide6.QtWidgets import (QApplication, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QMainWindow,
+                               QPlainTextEdit, QPushButton, QSizePolicy, QTableWidget, QTableWidgetItem,
+                               QVBoxLayout, QWidget)
 
 from vision_pick_place.calibrator import Calibrator
 from vision_pick_place.communication_check import percentile95
 from vision_pick_place.gui.pipeline_inspector import configure_korean_font
 
-PART_NAMES = {'screw': '나사', 'nut': '너트', 'unknown': '모름'}
-LOG_ROWS = 200        # ③ 표에 남길 최근 기록 수
-SUMMARY_WINDOW = 100  # ③ 요약(ACK 비율·P95) 을 계산할 최근 송신 수
-FAIL_COLOR = QColor(255, 215, 215)
-OK_COLOR = QColor(220, 245, 220)
+LOG_LINES = 300       # ③ 콘솔에 남길 줄 수
+SUMMARY_WINDOW = 100  # ③ ACK 성공률·P95 를 계산할 최근 송신 수
+STALE_S = 2.0         # 이 시간 동안 아무것도 안 오면 연결 표시를 회색으로
+
+# 목업 색 (11-10 GUI 대시보드 목업)
+BG, CARD, BORDER, LINE = '#EEF0F3', '#FFFFFF', '#DDE1E6', '#E4E7EB'
+INK, MUTED, BLUE = '#16191D', '#5B6470', '#1D5FD1'
+OK_FG, OK_BG, BAD_FG, BAD_BG, OFF_FG, OFF_BG = '#13734B', '#E6F4EC', '#B42318', '#FDECEA', '#5B6470', '#E4E7EB'
+PART_BADGE = {'screw': ('나사', BLUE, '#E8EFFB'), 'nut': ('너트', '#A34808', '#FBEDE3'),
+              'unknown': ('모름', MUTED, '#EEF0F3')}
+CONSOLE = {'time': '#8B95A1', 'ack': '#6FD3A0', 'err': '#FF8A80', 'sim': '#F5B27A'}
+MONO = "'JetBrains Mono', 'DejaVu Sans Mono', monospace"
+
+STYLE = f"""
+QMainWindow, QWidget#root {{ background: {BG}; }}
+QFrame#card {{ background: {CARD}; border: 1px solid {BORDER}; border-radius: 10px; }}
+QLabel {{ color: {INK}; }}
+QLabel#title {{ font-size: 16px; font-weight: 700; }}
+QLabel#appTitle {{ font-size: 20px; font-weight: 700; }}
+QLabel#meta, QLabel#note {{ color: {MUTED}; font-size: 12px; }}
+QFrame#tile {{ border: 1px solid {LINE}; border-radius: 8px; background: {CARD}; }}
+QLabel#tileLabel {{ color: {MUTED}; font-size: 12px; border: none; }}
+QLabel#tileValue {{ font-family: {MONO}; font-size: 16px; font-weight: 600; border: none; }}
+QPushButton {{ min-height: 40px; padding: 0 16px; border-radius: 8px; border: 1px solid #C9CED6;
+              background: {CARD}; color: {INK}; font-size: 14px; }}
+QPushButton#primary {{ border: 1px solid {BLUE}; background: {BLUE}; color: white; }}
+QPushButton:disabled {{ background: #C9CED6; border-color: #C9CED6; color: white; }}
+QTableWidget {{ border: 1px solid {LINE}; border-radius: 8px; gridline-color: {LINE}; font-family: {MONO}; font-size: 13px; }}
+QHeaderView::section {{ background: #F4F5F7; color: #3E4650; border: none; padding: 8px; font-weight: 500; }}
+QPlainTextEdit#console {{ background: #16191D; color: #D7DCE2; border-radius: 8px; padding: 8px;
+                         font-family: {MONO}; font-size: 12px; }}
+"""
 
 
 def _fmt(value, digits=1):
     return '—' if value is None else f'{value:.{digits}f}'
+
+
+def _pill(label: QLabel, text: str, state: str):
+    """목업의 둥근 상태 배지. state: ok / bad / off."""
+    fg, bg = {'ok': (OK_FG, OK_BG), 'bad': (BAD_FG, BAD_BG), 'off': (OFF_FG, OFF_BG)}[state]
+    label.setText(f'● {text}')
+    label.setStyleSheet(f'padding: 5px 12px; border-radius: 13px; background: {bg}; color: {fg}; '
+                        'font-size: 13px; font-weight: 500;')
+
+
+class Card(QFrame):
+    """흰 카드: 제목 + 오른쪽 작은 설명 + 내용."""
+
+    def __init__(self, title: str):
+        super().__init__()
+        self.setObjectName('card')
+        self.body = QVBoxLayout(self)
+        self.body.setContentsMargins(16, 14, 16, 14)
+        self.body.setSpacing(10)
+        self.head = QHBoxLayout()
+        name = QLabel(title)
+        name.setObjectName('title')
+        self.meta = QLabel('')
+        self.meta.setObjectName('meta')
+        self.head.addWidget(name)
+        self.head.addStretch(1)
+        self.head.addWidget(self.meta)
+        self.body.addLayout(self.head)
+
+
+class Tile(QFrame):
+    """목업의 작은 타일: 위에 설명, 아래에 값."""
+
+    def __init__(self, label: str, value: str = '—'):
+        super().__init__()
+        self.setObjectName('tile')
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 10, 12, 10)
+        layout.setSpacing(2)
+        caption = QLabel(label)
+        caption.setObjectName('tileLabel')
+        self.value = QLabel(value)
+        self.value.setObjectName('tileValue')
+        layout.addWidget(caption)
+        layout.addWidget(self.value)
 
 
 class VideoPanel(QLabel):
@@ -52,13 +127,15 @@ class VideoPanel(QLabel):
         self.setAlignment(Qt.AlignCenter)
         self.setMinimumSize(320, 180)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.setStyleSheet('background: #202020; color: #bbbbbb;')
+        self.setStyleSheet('background: #202020; color: #bbbbbb; border-radius: 6px;')
         self._pixmap = None
+        self.frame_size = None
 
     def show_frame(self, bgr: np.ndarray):
         rgb = np.ascontiguousarray(bgr[:, :, ::-1])
         image = QImage(rgb.data, rgb.shape[1], rgb.shape[0], rgb.strides[0], QImage.Format_RGB888).copy()
         self._pixmap = QPixmap.fromImage(image)
+        self.frame_size = (rgb.shape[1], rgb.shape[0])
         self._rescale()
 
     def resizeEvent(self, event):
@@ -74,76 +151,39 @@ class MainWindow(QMainWindow):
     def __init__(self, calib_dir: str = 'data/calib', start_worker: bool = True):
         super().__init__()
         self.setWindowTitle('Vision Pick & Place')
+        self.setStyleSheet(STYLE)
         self.calib_dir = Path(calib_dir)
         self.last_packet_time = None
-        self.packet_times = deque(maxlen=30)     # 패킷 수신 주기 (Hz 표시)
-        self.sends = deque(maxlen=SUMMARY_WINDOW)  # (acked, latency_ms)
-        self.picks = []                          # Gazebo 집기 결과 'ok'/'failed'
+        self.last_ack_time = None
+        self.packet_times = deque(maxlen=30)       # 패킷 수신 주기 (Hz 표시)
+        self.sends = deque(maxlen=SUMMARY_WINDOW)   # (acked, latency_ms)
+        self.picks = []                             # Gazebo 집기 결과 True/False
+        self.gazebo = False
 
-        # ① 영상
-        self.video = VideoPanel()
-        # ② 좌표 표
-        self.det_table = QTableWidget(0, 7)
-        self.det_table.setHorizontalHeaderLabels(['id', '종류', 'u px', 'v px', 'x mm', 'y mm', '각도 °'])
-        self.det_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.det_table.verticalHeader().setVisible(False)
-        self.det_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.det_status = QLabel('패킷 대기 중 (/vision/detections)')
-        det_box = QGroupBox('② 검출 좌표 (작업 시트 mm, 각도 = +X 에서 반시계 [0°, 180°))')
-        det_layout = QVBoxLayout(det_box)
-        det_layout.addWidget(self.det_status)
-        det_layout.addWidget(self.det_table)
-        # ④ 캘리브 상태
-        calib_box = QGroupBox('④ 캘리브레이션 상태')
-        self.calib_form = QFormLayout(calib_box)
-        self.calib_labels = {}
-        for key in ('dir', 'intrinsics', 'homography', 'camera', 'packet'):
-            self.calib_labels[key] = QLabel('—')
-            self.calib_labels[key].setWordWrap(True)
-        self.calib_form.addRow('보정 폴더', self.calib_labels['dir'])
-        self.calib_form.addRow('내부 파라미터', self.calib_labels['intrinsics'])
-        self.calib_form.addRow('호모그래피', self.calib_labels['homography'])
-        self.calib_form.addRow('카메라 높이', self.calib_labels['camera'])
-        self.calib_form.addRow('패킷 calib_ok', self.calib_labels['packet'])
-        # ③ 송수신 기록
-        self.log_table = QTableWidget(0, 6)
-        self.log_table.setHorizontalHeaderLabels(['시각', '출처', 'seq', '결과', 'ms', '내용'])
-        header = self.log_table.horizontalHeader()
-        for col in range(5):
-            header.setSectionResizeMode(col, QHeaderView.ResizeToContents)
-        header.setSectionResizeMode(5, QHeaderView.Stretch)
-        self.log_table.verticalHeader().setVisible(False)
-        self.log_table.setEditTriggers(QTableWidget.NoEditTriggers)
-        self.log_summary = QLabel('TCP 송신 기록 없음 | Gazebo 집기 기록 없음')
-        self.cycle_button = QPushButton('Gazebo 집기 한 사이클 (/sim/run_cycle)')
-        self.cycle_button.clicked.connect(self.request_cycle)
-        log_box = QGroupBox('③ 송수신 기록 (TCP = 가상 로봇 ACK, Gazebo = 집기 결과)')
-        log_layout = QVBoxLayout(log_box)
-        top = QHBoxLayout()
-        top.addWidget(self.log_summary, 1)
-        top.addWidget(self.cycle_button)
-        log_layout.addLayout(top)
-        log_layout.addWidget(self.log_table)
-
-        video_box = QGroupBox('① 영상 (노란 선 = 검출 영역, 초록 = 검출 박스, 파랑 = 장축 방향)')
-        QVBoxLayout(video_box).addWidget(self.video)
-        right = QSplitter(Qt.Vertical)
-        right.addWidget(det_box)
-        right.addWidget(calib_box)
-        upper = QSplitter(Qt.Horizontal)
-        upper.addWidget(video_box)
-        upper.addWidget(right)
-        upper.setSizes([760, 520])
-        root = QSplitter(Qt.Vertical)
-        root.addWidget(upper)
-        root.addWidget(log_box)
-        root.setSizes([560, 240])
+        root = QWidget()
+        root.setObjectName('root')
+        outer = QVBoxLayout(root)
+        outer.setContentsMargins(20, 20, 20, 20)
+        outer.setSpacing(16)
+        outer.addWidget(self._header())
+        grid = QGridLayout()
+        grid.setSpacing(16)
+        grid.addWidget(self._video_card(), 0, 0)
+        grid.addWidget(self._detection_card(), 0, 1)
+        grid.addWidget(self._log_card(), 1, 0)
+        grid.addWidget(self._calib_card(), 1, 1)
+        grid.setRowStretch(0, 3)
+        grid.setRowStretch(1, 2)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        outer.addLayout(grid, 1)
         self.setCentralWidget(root)
 
         self.load_calibration()
-        self.age_timer = QTimer(self)   # 패킷이 끊겼는지 보이도록 1초마다 경과 시간 갱신
-        self.age_timer.timeout.connect(self.update_packet_age)
-        self.age_timer.start(1000)
+        self.status_timer = QTimer(self)   # 1초마다 연결 표시·패킷 끊김 갱신
+        self.status_timer.timeout.connect(self.update_status)
+        self.status_timer.start(1000)
+        self.update_status()
 
         self.worker = None
         if start_worker:
@@ -154,35 +194,159 @@ class MainWindow(QMainWindow):
             self.worker.robot_log.connect(self.on_robot_log)
             self.worker.sim_log.connect(self.on_sim_log)
             self.worker.cycle_result.connect(self.on_cycle_result)
+            self.worker.gazebo_ready.connect(self.on_gazebo_ready)
             self.worker.start()
+
+    # ---------- 화면 구성 ----------
+
+    def _header(self) -> QFrame:
+        bar = QFrame()
+        bar.setObjectName('card')
+        layout = QHBoxLayout(bar)
+        layout.setContentsMargins(18, 12, 18, 12)
+        layout.setSpacing(12)
+        names = QVBoxLayout()
+        title = QLabel('Vision Pick & Place')
+        title.setObjectName('appTitle')
+        self.input_label = QLabel('입력: /vision/debug_image')
+        self.input_label.setObjectName('meta')
+        names.addWidget(title)
+        names.addWidget(self.input_label)
+        layout.addLayout(names, 1)
+        self.pill_ros, self.pill_robot, self.pill_gazebo = QLabel(), QLabel(), QLabel()
+        for pill in (self.pill_ros, self.pill_robot, self.pill_gazebo):
+            layout.addWidget(pill)
+        layout.addSpacing(8)
+        reload_button = QPushButton('보정 다시 읽기')
+        reload_button.clicked.connect(self.load_calibration)
+        self.cycle_button = QPushButton('사이클 실행 (/sim/run_cycle)')
+        self.cycle_button.setObjectName('primary')
+        self.cycle_button.clicked.connect(self.request_cycle)
+        layout.addWidget(reload_button)
+        layout.addWidget(self.cycle_button)
+        return bar
+
+    def _video_card(self) -> Card:
+        self.video_card = Card('① 영상 · 검출 ROI · 장축 방향')
+        self.video = VideoPanel()
+        self.video_card.body.addWidget(self.video, 1)
+        legend = QLabel('<span style="color:#C8A400">━</span> 검출 영역 (시트 안쪽, 마커 제외) &nbsp;&nbsp; '
+                        '<span style="color:#1FA34A">━</span> 검출 박스 &nbsp;&nbsp; '
+                        f'<span style="color:{BLUE}">→</span> 장축 방향 (나사)')
+        legend.setObjectName('note')
+        self.video_card.body.addWidget(legend)
+        return self.video_card
+
+    def _detection_card(self) -> Card:
+        self.det_card = Card('② 좌표 · 회전각 · 부품 종류')
+        self.det_card.meta.setText('기준: 작업 평면 (work_plane)')
+        self.det_status = QLabel('패킷 대기 중 (/vision/detections)')
+        self.det_status.setObjectName('note')
+        self.det_table = QTableWidget(0, 5)
+        self.det_table.setHorizontalHeaderLabels(['#', '종류', 'px (u, v)', 'mm (X, Y)', '각도'])
+        header = self.det_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.Stretch)
+        header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
+        self.det_table.verticalHeader().setVisible(False)
+        self.det_table.setEditTriggers(QTableWidget.NoEditTriggers)
+        self.det_table.setSelectionMode(QTableWidget.NoSelection)
+        self.det_card.body.addWidget(self.det_status)
+        self.det_card.body.addWidget(self.det_table, 1)
+        tiles = QHBoxLayout()
+        self.tile_rule = Tile('나사 / 너트 기준', '장축/단축 > 1.5 → 나사')
+        self.tile_angle = Tile('각도 기준', 'mm 평면, [0°, 180°)')
+        self.tile_target = Tile('송신 대상', '—')
+        for tile in (self.tile_rule, self.tile_angle, self.tile_target):
+            tiles.addWidget(tile)
+        self.det_card.body.addLayout(tiles)
+        return self.det_card
+
+    def _log_card(self) -> Card:
+        card = Card('③ 가상 로봇 송수신 · Gazebo 집기 결과')
+        card.meta.setText('/robot/log · /sim/pick_log')
+        self.console = QPlainTextEdit()
+        self.console.setObjectName('console')
+        self.console.setReadOnly(True)
+        self.console.setMaximumBlockCount(LOG_LINES)
+        card.body.addWidget(self.console, 1)
+        tiles = QHBoxLayout()
+        self.tile_ack = Tile('ACK 성공률')
+        self.tile_p95 = Tile('지연 P95')
+        self.tile_pick = Tile('집기 성공')
+        for tile in (self.tile_ack, self.tile_p95, self.tile_pick):
+            tiles.addWidget(tile)
+        card.body.addLayout(tiles)
+        return card
+
+    def _calib_card(self) -> Card:
+        card = Card('④ 캘리브레이션 상태')
+        card.meta.hide()
+        self.calib_pill = QLabel()
+        card.head.addWidget(self.calib_pill)
+        box = QFrame()
+        box.setObjectName('tile')
+        rows = QVBoxLayout(box)
+        rows.setContentsMargins(0, 0, 0, 0)
+        rows.setSpacing(0)
+        self.calib_labels = {}
+        items = [('dir', '보정 폴더'), ('intrinsics', '내부 파라미터 (ChArUco)'),
+                 ('homography', '호모그래피 (ArUco 작업 시트 px → mm)'), ('error', '재투영 오차'),
+                 ('camera', '카메라 높이 (시차 보정)'), ('saved', '보정 저장 시각')]
+        for i, (key, name) in enumerate(items):
+            row = QFrame()
+            row.setStyleSheet(f'QFrame {{ border: none; border-top: 1px solid {LINE if i else "transparent"}; }}')
+            line = QHBoxLayout(row)
+            line.setContentsMargins(14, 9, 14, 9)
+            left = QLabel(name)
+            left.setStyleSheet('border: none; font-size: 14px;')
+            value = QLabel('—')
+            value.setStyleSheet(f'border: none; font-family: {MONO}; font-size: 13px;')
+            value.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
+            line.addWidget(left)
+            line.addStretch(1)
+            line.addWidget(value)
+            rows.addWidget(row)
+            self.calib_labels[key] = value
+        card.body.addWidget(box)
+        note = QLabel('카메라나 작업 시트가 움직이면 시트 사진을 다시 찍어 호모그래피를 다시 계산합니다. '
+                      '보정이 안 돼 있으면 calib_ok=false 로 송신되고, 로봇은 그 패킷을 거부합니다.')
+        note.setObjectName('note')
+        note.setWordWrap(True)
+        card.body.addWidget(note)
+        card.body.addStretch(1)
+        _pill(self.calib_pill, 'calib_ok 대기', 'off')
+        return card
 
     # ---------- ④ ----------
 
     def load_calibration(self):
-        """보정 파일을 읽어 상태를 표시한다. 파일 수정 시각으로 '카메라가 움직인 뒤 다시 보정했는지' 판단한다."""
+        """보정 파일을 읽어 상태를 표시한다. 파일 저장 시각으로 '카메라가 움직인 뒤 다시 보정했는지' 판단한다."""
         intr, hom = self.calib_dir / 'intrinsics.npz', self.calib_dir / 'homography.npz'
-        self.calib_labels['dir'].setText(str(self.calib_dir))
+        labels = self.calib_labels
+        labels['dir'].setText(str(self.calib_dir))
         try:
             calib = Calibrator(str(intr), str(hom))
         except (ValueError, OSError) as exc:
-            for key in ('intrinsics', 'homography', 'camera'):
-                self.calib_labels[key].setText(f'오류: {exc}')
+            for key in ('homography', 'error', 'camera', 'saved'):
+                labels[key].setText('—')
+            labels['intrinsics'].setText(f'오류: {exc}')
             return
         status = calib.status
 
-        def stamp(path):
-            return datetime.fromtimestamp(path.stat().st_mtime).strftime('%m-%d %H:%M')
+        def loaded(ok, name):
+            color = OK_FG if ok else BAD_FG
+            return f'<span style="color:{color}">{name} {"로드됨" if ok else "없음 (미보정)"}</span>'
 
-        self.calib_labels['intrinsics'].setText(
-            f'정상 · RMS {status.rms_px:.2f} px, 저장 {stamp(intr)}' if status.intrinsics_loaded else '없음 (미보정)')
-        self.calib_labels['homography'].setText(
-            f'정상 · 재투영 {status.reproj_err_mm:.2f} mm, 저장 {stamp(hom)}' if status.homography_loaded
-            else '없음 (미보정)')
+        labels['intrinsics'].setText(loaded(status.intrinsics_loaded, 'intrinsics.npz'))
+        labels['homography'].setText(loaded(status.homography_loaded, 'homography.npz'))
+        labels['error'].setText(f'{_fmt(status.rms_px, 2)} px / {_fmt(status.reproj_err_mm, 2)} mm')
         if status.ready:
             x, y, z = calib.camera_center_mm()
-            self.calib_labels['camera'].setText(f'{z:.0f} mm (시트 위 ({x:.0f}, {y:.0f}) mm)')
+            labels['camera'].setText(f'{z:.0f} mm (시트 ({x:.0f}, {y:.0f}) 위)')
         else:
-            self.calib_labels['camera'].setText('—')
+            labels['camera'].setText('—')
+        stamps = [datetime.fromtimestamp(p.stat().st_mtime).strftime('%m-%d %H:%M') for p in (intr, hom) if p.is_file()]
+        labels['saved'].setText(' / '.join(stamps) or '—')
 
     # ---------- ② ----------
 
@@ -195,77 +359,97 @@ class MainWindow(QMainWindow):
         objects = packet.get('objects') or []
         self.det_table.setRowCount(len(objects))
         for row, obj in enumerate(objects):
-            values = [str(obj.get('id', '')), PART_NAMES.get(obj.get('part_type'), str(obj.get('part_type'))),
-                      _fmt(obj.get('u_px')), _fmt(obj.get('v_px')),
-                      _fmt(obj.get('x_mm')), _fmt(obj.get('y_mm')), _fmt(obj.get('angle_deg'))]
+            kind = obj.get('part_type')
+            name, fg, bg = PART_BADGE.get(kind, (str(kind), MUTED, '#EEF0F3'))
+            values = [str(obj.get('id', '')), name,
+                      f'{_fmt(obj.get("u_px"))}, {_fmt(obj.get("v_px"))}',
+                      f'{_fmt(obj.get("x_mm"))}, {_fmt(obj.get("y_mm"))}',
+                      '—' if obj.get('angle_deg') is None else f'{obj["angle_deg"]:.1f}°']
             for col, text in enumerate(values):
                 item = QTableWidgetItem(text)
                 item.setTextAlignment(Qt.AlignCenter)
+                if col == 1:   # 목업처럼 종류를 색 배지로
+                    item.setForeground(QBrush(QColor(fg)))
+                    item.setBackground(QBrush(QColor(bg)))
                 self.det_table.setItem(row, col, item)
-        rate = f', {1 / np.mean(self.packet_times):.1f} Hz' if self.packet_times else ''
-        self.det_status.setText(f'seq {packet.get("seq")}: 물체 {len(objects)}개{rate}'
-                                + ('' if calib_ok else '  [미보정 — mm·각도 없음]'))
-        self.calib_labels['packet'].setText('true (보정됨)' if calib_ok else 'false — 미보정, mm 좌표를 쓰면 안 됨')
-
-    def update_packet_age(self):
-        if self.last_packet_time is not None and time.monotonic() - self.last_packet_time > 2.0:
-            self.det_status.setText(f'[주의] {time.monotonic() - self.last_packet_time:.0f}초째 패킷 없음 (vision_node 확인)')
+        rate = f' · {1 / np.mean(self.packet_times):.1f} Hz' if self.packet_times else ''
+        self.det_card.meta.setText(f'seq {packet.get("seq")} · 기준: 작업 평면 (work_plane)')
+        self.det_status.setText(f'물체 {len(objects)}개{rate}' + ('' if calib_ok else '  [미보정 — mm·각도 없음]'))
+        self.video_card.meta.setText(f'부품 {len(objects)}개{rate}')
+        sendable = sum(o.get('part_type') in ('screw', 'nut') and o.get('x_mm') is not None for o in objects)
+        self.tile_target.value.setText(f'{sendable}개 (집기 최대 3)')
+        _pill(self.calib_pill, f'calib_ok = {"true" if calib_ok else "false"}', 'ok' if calib_ok else 'bad')
+        if self.video.frame_size:
+            self.input_label.setText(f'입력: /vision/debug_image · {self.video.frame_size[0]}×{self.video.frame_size[1]}')
 
     # ---------- ③ ----------
 
-    def add_log_row(self, source: str, seq, ok: bool, ms, text: str):
-        self.log_table.insertRow(0)
-        values = [datetime.now().strftime('%H:%M:%S'), source, '' if seq is None else str(seq),
-                  '성공' if ok else '실패', _fmt(ms), text]
-        for col, value in enumerate(values):
-            item = QTableWidgetItem(value)
-            item.setBackground(OK_COLOR if ok else FAIL_COLOR)
-            self.log_table.setItem(0, col, item)
-        while self.log_table.rowCount() > LOG_ROWS:
-            self.log_table.removeRow(self.log_table.rowCount() - 1)
+    def log_line(self, tag: str, color: str, text: str):
+        """콘솔 한 줄: 시각  태그  내용 (목업의 TX/ACK/SIM 줄)."""
+        stamp = datetime.now().strftime('%H:%M:%S.%f')[:-3]
+        self.console.appendHtml(f'<span style="color:{CONSOLE["time"]}">{stamp}</span>&nbsp;&nbsp;'
+                                f'<span style="color:{color}">{tag}</span>&nbsp;&nbsp;{html.escape(text)}')
 
     def on_robot_log(self, log: dict):
         ok = bool(log.get('acked'))
         self.sends.append((ok, log.get('latency_ms') if ok else None))
-        self.add_log_row('TCP', log.get('seq'), ok, log.get('latency_ms'),
-                         'ACK' if ok else (log.get('error') or '응답 없음'))
-        self.update_summary()
+        if ok:
+            self.last_ack_time = time.monotonic()
+            self.log_line('ACK', CONSOLE['ack'], f'seq={log.get("seq")}  왕복 {_fmt(log.get("latency_ms"))} ms')
+        else:
+            self.log_line('ERR', CONSOLE['err'], f'seq={log.get("seq")}  {log.get("error") or "응답 없음"}')
+        self.update_tiles()
 
     def on_sim_log(self, log: dict):
         ok = log.get('result') == 'ok'
         if 'obj' in log:   # run_cycle 의 물체 하나 (move_to_target 기록은 action 키만 있다)
             self.picks.append(ok)
-            text = f'{log.get("obj")} {PART_NAMES.get(log.get("part_type"), log.get("part_type"))} → 상자'
+            name = PART_BADGE.get(log.get('part_type'), (log.get('part_type'),))[0]
+            seconds = (log.get('plan_ms') or 0) / 1000
+            text = f'{log.get("obj")} {name} → 상자  {"성공" if ok else "실패"}  ({seconds:.1f} s)'
         else:
-            text = log.get('action', '')
+            text = f'{log.get("action", "")}  {"성공" if ok else "실패"}'
         if not ok and log.get('error'):
-            text += f' — {log["error"]}'
-        self.add_log_row('Gazebo', log.get('seq'), ok, log.get('plan_ms'), text)
-        self.update_summary()
+            text += f'  — {log["error"]}'
+        self.log_line('SIM', CONSOLE['sim'] if ok else CONSOLE['err'], text)
+        self.update_tiles()
 
-    def update_summary(self):
-        parts = []
+    def update_tiles(self):
         if self.sends:
             acked = [ms for ok, ms in self.sends if ok and ms is not None]
-            p95 = f', 지연 P95 {percentile95(acked):.0f} ms' if acked else ''
-            parts.append(f'TCP 최근 {len(self.sends)}건: ACK {sum(ok for ok, _ in self.sends)}/{len(self.sends)}{p95}')
-        else:
-            parts.append('TCP 송신 기록 없음')
-        parts.append(f'Gazebo 집기 {sum(self.picks)}/{len(self.picks)} 성공' if self.picks else 'Gazebo 집기 기록 없음')
-        self.log_summary.setText(' | '.join(parts))
+            count = sum(ok for ok, _ in self.sends)
+            self.tile_ack.value.setText(f'{100 * count / len(self.sends):.0f} % ({count}/{len(self.sends)})')
+            self.tile_p95.value.setText(f'{percentile95(acked):.0f} ms' if acked else '—')
+        if self.picks:
+            self.tile_pick.value.setText(f'{sum(self.picks)} / {len(self.picks)}')
+
+    # ---------- 헤더 ----------
+
+    def on_gazebo_ready(self, ready: bool):
+        self.gazebo = ready
+
+    def update_status(self):
+        now = time.monotonic()
+        fresh = self.last_packet_time is not None and now - self.last_packet_time < STALE_S
+        _pill(self.pill_ros, 'ROS2 비전' if fresh else 'ROS2 비전 대기', 'ok' if fresh else 'off')
+        acked = self.last_ack_time is not None and now - self.last_ack_time < STALE_S
+        _pill(self.pill_robot, 'robot_server ACK' if acked else 'robot_server 대기', 'ok' if acked else 'off')
+        _pill(self.pill_gazebo, 'Gazebo' if self.gazebo else 'Gazebo 없음', 'ok' if self.gazebo else 'off')
+        if self.last_packet_time is not None and not fresh:
+            self.det_status.setText(f'[주의] {now - self.last_packet_time:.0f}초째 패킷 없음 (vision_node 확인)')
 
     def request_cycle(self):
         if self.worker is None:
             return
         self.cycle_button.setEnabled(False)
-        self.cycle_button.setText('집기 사이클 실행 중...')
+        self.cycle_button.setText('사이클 실행 중...')
+        self.log_line('SIM', CONSOLE['sim'], '/sim/run_cycle 요청')
         self.worker.request_cycle()
 
     def on_cycle_result(self, ok: bool, message: str):
         self.cycle_button.setEnabled(True)
-        self.cycle_button.setText('Gazebo 집기 한 사이클 (/sim/run_cycle)')
-        if not ok:
-            self.add_log_row('Gazebo', None, False, None, message)
+        self.cycle_button.setText('사이클 실행 (/sim/run_cycle)')
+        self.log_line('SIM', CONSOLE['ack'] if ok else CONSOLE['err'], message)
 
     def closeEvent(self, event):
         if self.worker is not None:
@@ -280,7 +464,7 @@ def main():
     app = QApplication([sys.argv[0]] + qt_args)
     configure_korean_font()
     win = MainWindow(args.calib_dir)
-    win.resize(1280, 800)
+    win.resize(1440, 960)
     win.show()
     sys.exit(app.exec())
 
