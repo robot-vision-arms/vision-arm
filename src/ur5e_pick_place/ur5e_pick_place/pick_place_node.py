@@ -7,7 +7,7 @@ robot_server --publish-ros 가 TCP 로 받은 패킷을 /robot/targets 로 다�
 한 사이클 (팀원 2 의 상자 투입 검사 check_team2_bin_reach.py --drop 에서 확인한 순서를 그대로 옮김):
     1. 최신 패킷 확인 (calib_ok 가 false 면 거부), part_types 에 없는 종류(unknown 포함)는 빼고 max_objects 개까지
     2. 스폰 노드의 /sim/spawn_objects 로 같은 위치·각도에 가상 나사/너트를 놓고, TF(base_link→obj_k)로 놓인 것을 확인
-    3. 물체마다: 접근(윗면 + approach_height_m) → 하강(컵 끝이 윗면 + grasp_gap_m) → /sim/vacuum ON
+    3. 물체마다: 부품 위 높은 곳(bin_retreat_z) → 직선으로 접근(윗면 + approach_height_m) → 하강(컵 끝이 윗면 + grasp_gap_m) → /sim/vacuum ON
                  ('떨어져 있음' 이면 1 mm 씩 더 내려 최대 grasp_attempts 번) → 들어 올림 → 상자 위 bin_drop_z → 진공 OFF
                  → 상자 안에 멈췄는지 TF 로 확인 → 다음 물체가 있으면 안쪽 경유점(bin_retreat_*)을 거친다
     4. 물체마다 결과를 /sim/pick_log 로 발행 (GUI ③) + logs/sim_pick_*.csv 기록 (KPI 의 Pick 성공률)
@@ -381,6 +381,7 @@ class PickPlaceNode(Node):
         started = time.monotonic()
         row = dict(seq=seq, obj=t.name, part_type=t.part_type, result='failed', error='')
         holding = False
+        step = '준비'
         try:
             shape = marker_shape(model_file(self.models_dir, t.part_type))
             if shape is None:
@@ -389,7 +390,13 @@ class PickPlaceNode(Node):
             # 구멍 있는 부품(너트)은 링 컵으로 집는다. 툴 yaw 0 에서 링 컵은 tool0 +X 쪽이라 툴을 반대로 옮긴다
             offset = SuctionLimits().ring_offset if HOLE_RADIUS_M.get(t.part_type, 0.0) > 0 else 0.0
             x, y = cup_tool_xy(t.x, t.y, offset)
-            self.move_tip(x, y, top + self.value('approach_height_m'))
+            # 먼 이동(상자 쪽 → 작업 매트)은 높은 곳끼리만 한다. 낮은 접근점으로 바로 가면 OMPL 이 자주 못 풀었다
+            # (팀원 2 11-19 시연, 11-20 TCP 경유 시험: 너트 접근 3회 실패). 그다음 접근 높이까지 직선으로 내려간다
+            step = '부품 위 높은 곳으로 이동'
+            self.move_tip(x, y, self.value('bin_retreat_z'))
+            step = '접근 높이로 하강'
+            self.move_tip(x, y, top + self.value('approach_height_m'), straight=True)
+            step = '흡착 높이로 하강·진공'
             result = None
             for attempt in range(int(self.get_parameter('grasp_attempts').value)):
                 self.move_tip(x, y, top + self.value('grasp_gap_m') - 0.001 * attempt, straight=True)
@@ -399,6 +406,7 @@ class PickPlaceNode(Node):
             if result is None or not result.success:
                 raise RuntimeError(f'흡착 실패: {result.message if result else "시도 안 함"}')
             holding = True
+            step = '들어 올림'
             if t.name not in result.message:
                 raise RuntimeError(f'다른 부품을 흡착함: {result.message}')
             self.move_tip(x, y, self.value('work_plane_z') + self.value('lift_height_m'), straight=True)
@@ -406,6 +414,7 @@ class PickPlaceNode(Node):
             if lifted[2] < self.value('work_plane_z') + self.value('approach_height_m'):
                 raise RuntimeError(f'들어 올렸는데 부품이 따라오지 않음 (z={lifted[2]:.3f} m)')
             bx, by = bin_xy
+            step = '상자 위로 이동·놓기'
             self.move_tip(*cup_tool_xy(bx, by, offset), self.value('bin_drop_z'))
             released = self.call(self.vacuum_client, SetBool.Request(data=False))
             if not released.success:
@@ -417,6 +426,7 @@ class PickPlaceNode(Node):
             if not inside_bin(final, bx, by):
                 raise RuntimeError(f'상자 밖에 떨어짐 ({final[0]:.3f}, {final[1]:.3f}, {final[2]:.3f}) m')
             row['result'] = 'ok'
+            step = '경유점 이동'
             # 다음 물체로 가기 전 / 마지막이면 대기 위치로: 상자 쪽 높은 안쪽 경유점 (팀원 2 검사와 같은 위치)
             retreat = (self.value('bin_retreat_x'), math.copysign(self.value('bin_retreat_y_abs'), by),
                        self.value('bin_retreat_z'))
@@ -429,7 +439,7 @@ class PickPlaceNode(Node):
                 # 마지막 물체는 이미 상자에 들어갔으므로 복귀 실패는 경고만 남긴다 (11-19 기록: 가끔 계획 실패)
                 self.get_logger().warning(f'투입 후 복귀 실패 (부품은 상자 안): {exc}')
         except (ValueError, RuntimeError) as exc:
-            row['error'] = str(exc)
+            row['error'] = f'[{step}] {exc}'
             if holding:   # 붙인 채 멈추면 다음 사이클이 꼬이므로 진공을 끈다
                 try:
                     self.call(self.vacuum_client, SetBool.Request(data=False))
