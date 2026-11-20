@@ -27,10 +27,11 @@ pick_place_node:
     bin_x: [0.0, 0.0]
     bin_y: [0.85, -0.85]
     bin_drop_z: 0.15               # 상자 위 놓는 높이 (패드 끝 기준)
-    # 투입 뒤 다음 물체로 가기 전 거치는 높은 안쪽 경유점 (base_link m, y 부호는 방금 쓴 상자 쪽). 팀원 2 투입 검사에서 확인한 위치
-    bin_retreat_x: 0.20
-    bin_retreat_y_abs: 0.55
-    bin_retreat_z: 0.25
+    # 대기 자세: 작업 시트 위 (ready_x_mm, ready_y_mm) 의 컵 끝 높이 travel_height_m. 첫 사이클에 관절 각도를 저장해
+    # 상자 ↔ 작업 매트 큰 이동은 관절 각도 목표로 한다 (좌표 목표는 OMPL 이 자주 못 풂, 11-20). 부품 사이 이동 높이도 같다
+    ready_x_mm: 148.5
+    ready_y_mm: 105.0
+    travel_height_m: 0.25
     settle_s: 3.0                  # 놓은 뒤 부품이 상자 안에서 멈출 때까지 기다리는 시간
     max_velocity_scaling: 0.3      # 시뮬레이션이 느린 WSL2 에서 궤적 추종 오차를 줄이려고 낮춘 초기값
     # 2주차 지정 좌표 이동. /sim/move_to_target (std_srvs/srv/Trigger) 호출 시 적용

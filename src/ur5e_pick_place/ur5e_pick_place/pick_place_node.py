@@ -7,10 +7,13 @@ robot_server --publish-ros 가 TCP 로 받은 패킷을 /robot/targets 로 다�
 한 사이클 (팀원 2 의 상자 투입 검사 check_team2_bin_reach.py --drop 에서 확인한 순서를 그대로 옮김):
     1. 최신 패킷 확인 (calib_ok 가 false 면 거부), part_types 에 없는 종류(unknown 포함)는 빼고 max_objects 개까지
     2. 스폰 노드의 /sim/spawn_objects 로 같은 위치·각도에 가상 나사/너트를 놓고, TF(base_link→obj_k)로 놓인 것을 확인
-    3. 물체마다: 부품 위 높은 곳(bin_retreat_z) → 직선으로 접근(윗면 + approach_height_m) → 하강(컵 끝이 윗면 + grasp_gap_m) → /sim/vacuum ON
+    3. 처음 한 번: 작업 시트 가운데 위 travel_height_m 로 가서 그 관절 각도를 '대기 자세' 로 저장 (노드가 켜져 있는 동안 재사용)
+    4. 물체마다: 부품 위 높은 곳(travel_height_m) → 직선으로 접근(윗면 + approach_height_m) → 하강(컵 끝이 윗면 + grasp_gap_m) → /sim/vacuum ON
                  ('떨어져 있음' 이면 1 mm 씩 더 내려 최대 grasp_attempts 번) → 들어 올림 → 상자 위 bin_drop_z → 진공 OFF
-                 → 상자 안에 멈췄는지 TF 로 확인 → 다음 물체가 있으면 안쪽 경유점(bin_retreat_*)을 거친다
-    4. 물체마다 결과를 /sim/pick_log 로 발행 (GUI ③) + logs/sim_pick_*.csv 기록 (KPI 의 Pick 성공률)
+                 → 상자 안에 멈췄는지 TF 로 확인 → 대기 자세로 복귀 (관절 각도 목표)
+    큰 이동(상자 ↔ 작업 매트)은 관절 각도 목표로 한다. 좌표 목표는 역기구학 해가 여러 개라 OMPL 이 이 구간을
+    자주 못 풀었다 (11-19 팀원 2 시연, 11-20 시험 3회). 관절 목표는 해가 하나라 계획이 안정적이다 (현업의 티칭 경유점과 같은 방식).
+    5. 물체마다 결과를 /sim/pick_log 로 발행 (GUI ③) + logs/sim_pick_*.csv 기록 (KPI 의 Pick 성공률)
 
 집기는 컵 두 개 헤드 (urdf/ur5e_vacuum.urdf.xacro, object_spawner.py 설명):
     나사 = tool0 바로 아래 5 mm 컵, 너트 = tool0 +X 로 12 mm 떨어진 링 컵. 컵이 둥글어 툴 yaw 는 0 으로 고정하고,
@@ -32,7 +35,6 @@ import csv
 from datetime import datetime
 import json
 import math
-import os
 from pathlib import Path
 import threading
 import time
@@ -94,9 +96,9 @@ class PickPlaceNode(Node):
         self.declare_parameter('bin_x', [0.0, 0.0])
         self.declare_parameter('bin_y', [0.45, -0.45])
         self.declare_parameter('bin_drop_z', 0.15)
-        self.declare_parameter('bin_retreat_x', 0.20)
-        self.declare_parameter('bin_retreat_y_abs', 0.55)
-        self.declare_parameter('bin_retreat_z', 0.25)
+        self.declare_parameter('ready_x_mm', 148.5)        # 대기 자세: 작업 시트 위 이 점 (mm) 의
+        self.declare_parameter('ready_y_mm', 105.0)
+        self.declare_parameter('travel_height_m', 0.25)    # 이 높이 (컵 끝, 작업 평면 위). 부품 사이 이동 높이도 같음
         self.declare_parameter('settle_s', 3.0)
         self.declare_parameter('max_velocity_scaling', 0.3)
         self.declare_parameter('target_x_mm', 100.0)
@@ -116,6 +118,7 @@ class PickPlaceNode(Node):
         self.latest = None   # 마지막으로 받은 패킷 dict
         self.motion_lock = threading.Lock()
         self.motion_failed = False
+        self.ready_joints = None   # 대기 자세 관절 각도 (UR_JOINTS 순서). 첫 사이클에 저장
         self.csv_path = None
 
         self.sub = self.create_subscription(String, '/robot/targets', self.on_targets, 10)
@@ -209,16 +212,30 @@ class PickPlaceNode(Node):
         성공하면 시도 횟수, 실패하면 RuntimeError. prepare_motion() 뒤에 부른다.
         """
         position = (x, y, tip_z + self.value('tool_length_m'))
-        timeout, delay = self.value('motion_timeout_s'), self.value('plan_retry_delay_s')
-        attempts = int(self.get_parameter('plan_attempts').value)
+        timeout = self.value('motion_timeout_s')
         if straight:
             if self.move_once(position, tool_down_quaternion(yaw_deg), timeout, cartesian=True) is None:
                 return 1
             if self.motion_failed:
                 raise RuntimeError('직선 이동 중 멈추지 않음. 노드를 재시작하세요.')
             self.get_logger().warning('직선 경로 실패, 일반 계획으로 다시 시도')
+        return self.retry(lambda: self.move_once(position, tool_down_quaternion(yaw_deg), timeout))
+
+    def move_joints(self, positions) -> int:
+        """관절 각도 목표 (UR_JOINTS 순서) 로 이동. 계획 실패면 plan_attempts 번까지 다시."""
+        timeout = self.value('motion_timeout_s')
+
+        def once():
+            started = time.monotonic()
+            self.moveit2.move_to_configuration(list(positions), joint_names=UR_JOINTS)
+            return self.wait_executed(started, timeout)
+        return self.retry(once)
+
+    def retry(self, attempt_once) -> int:
+        """attempt_once() (성공 None, 실패 이유) 를 다시 계획해도 되는 실패일 때만 plan_attempts 번까지. 성공하면 시도 횟수."""
+        delay, attempts = self.value('plan_retry_delay_s'), int(self.get_parameter('plan_attempts').value)
         for attempt in range(1, attempts + 1):
-            error = self.move_once(position, tool_down_quaternion(yaw_deg), timeout)
+            error = attempt_once()
             if error is None:
                 return attempt
             code = self.moveit2.get_last_execution_error_code()
@@ -247,6 +264,10 @@ class PickPlaceNode(Node):
                                          cartesian=cartesian, cartesian_fraction_threshold=0.95 if cartesian else 0.0,
                                          timeout_sec=timeout_s):
             return 'MoveIt 이동 요청 실패: move_group·현재 관절 상태를 확인하세요.'
+        return self.wait_executed(started, timeout_s)
+
+    def wait_executed(self, started: float, timeout_s: float):
+        """보낸 이동이 끝날 때까지 기다린다. 성공 None, 실패 이유. 멈추지 않으면 motion_failed 를 켠다."""
         remaining = max(0.0, timeout_s - (time.monotonic() - started))
         if self.moveit2.wait_until_executed(timeout_sec=remaining, cancel_on_timeout=True):
             return None
@@ -357,6 +378,7 @@ class PickPlaceNode(Node):
             # 스폰 노드는 자기 최신 패킷으로 스폰하므로, 이 노드가 고른 위치와 같은지 확인한다 (패킷이 그새 바뀌면 다름)
             for t in targets:
                 self.wait_object_xyz(t.name, near=(t.x, t.y))
+            self.go_ready()
             for i, t in enumerate(targets):
                 row = self.pick_one(t, bins[t.part_type], packet.get('seq'), is_last=(i == len(targets) - 1))
                 rows.append(row)
@@ -376,6 +398,18 @@ class PickPlaceNode(Node):
         self.get_logger().info(response.message)
         return response
 
+    def go_ready(self):
+        """대기 자세로. 처음에는 작업 시트 위 좌표 목표로 가서 그 관절 각도를 저장하고, 다음부터는 관절 목표로 간다."""
+        if self.ready_joints is not None:
+            self.move_joints(self.ready_joints)
+            return
+        x, y, z = work_to_base(self.value('ready_x_mm'), self.value('ready_y_mm'), self.plane())
+        self.move_tip(x, y, z + self.value('travel_height_m'))
+        state = self.moveit2.joint_state
+        joints = dict(zip(state.name, state.position))
+        self.ready_joints = [joints[name] for name in UR_JOINTS]
+        self.get_logger().info('대기 자세 저장 (rad): ' + ', '.join(f'{v:.3f}' for v in self.ready_joints))
+
     def pick_one(self, t, bin_xy, seq, is_last: bool) -> dict:
         """물체 하나: 접근 → 하강·흡착 → 들어 올림 → 상자 위 → 놓기 → 안착 확인. 결과 dict (CSV 한 줄)."""
         started = time.monotonic()
@@ -390,10 +424,9 @@ class PickPlaceNode(Node):
             # 구멍 있는 부품(너트)은 링 컵으로 집는다. 툴 yaw 0 에서 링 컵은 tool0 +X 쪽이라 툴을 반대로 옮긴다
             offset = SuctionLimits().ring_offset if HOLE_RADIUS_M.get(t.part_type, 0.0) > 0 else 0.0
             x, y = cup_tool_xy(t.x, t.y, offset)
-            # 먼 이동(상자 쪽 → 작업 매트)은 높은 곳끼리만 한다. 낮은 접근점으로 바로 가면 OMPL 이 자주 못 풀었다
-            # (팀원 2 11-19 시연, 11-20 TCP 경유 시험: 너트 접근 3회 실패). 그다음 접근 높이까지 직선으로 내려간다
+            # 대기 자세(작업 매트 위)에서 부품 위 같은 높이로 짧게 옮긴 뒤 접근 높이까지 직선으로 내려간다
             step = '부품 위 높은 곳으로 이동'
-            self.move_tip(x, y, self.value('bin_retreat_z'))
+            self.move_tip(x, y, self.value('work_plane_z') + self.value('travel_height_m'))
             step = '접근 높이로 하강'
             self.move_tip(x, y, top + self.value('approach_height_m'), straight=True)
             step = '흡착 높이로 하강·진공'
@@ -426,15 +459,12 @@ class PickPlaceNode(Node):
             if not inside_bin(final, bx, by):
                 raise RuntimeError(f'상자 밖에 떨어짐 ({final[0]:.3f}, {final[1]:.3f}, {final[2]:.3f}) m')
             row['result'] = 'ok'
-            step = '경유점 이동'
-            # 다음 물체로 가기 전 / 마지막이면 대기 위치로: 상자 쪽 높은 안쪽 경유점 (팀원 2 검사와 같은 위치)
-            retreat = (self.value('bin_retreat_x'), math.copysign(self.value('bin_retreat_y_abs'), by),
-                       self.value('bin_retreat_z'))
+            step = '대기 자세로 복귀'
             try:
-                self.move_tip(*retreat)
+                self.go_ready()   # 관절 각도 목표: 상자 쪽 → 작업 매트 위의 큰 이동
             except RuntimeError as exc:
                 if not is_last:
-                    row['error'] = f'투입 후 경유점 이동 실패 (부품은 상자 안): {exc}'
+                    row['error'] = f'투입 후 대기 자세 복귀 실패 (부품은 상자 안): {exc}'
                     return row | dict(plan_ms=(time.monotonic() - started) * 1000)
                 # 마지막 물체는 이미 상자에 들어갔으므로 복귀 실패는 경고만 남긴다 (11-19 기록: 가끔 계획 실패)
                 self.get_logger().warning(f'투입 후 복귀 실패 (부품은 상자 안): {exc}')
