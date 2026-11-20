@@ -49,3 +49,12 @@ def test_pick_metrics_counts_object_rows_only():
     ('angle_mae_deg', None, '측정 안 함')])
 def test_judge_against_project_criteria(name, value, expected):
     assert kpi.judge(name, value) == expected
+
+
+def test_load_vision_params_overlays_later_files(tmp_path):
+    base, green = tmp_path / 'params.yaml', tmp_path / 'params_green.yaml'
+    base.write_text('vision_node:\n  ros__parameters:\n    segmentation_mode: "gray"\n    min_area_px: 500\n')
+    green.write_text('vision_node:\n  ros__parameters:\n    segmentation_mode: "metal_hsv"\n')
+    merged = kpi.load_vision_params([base, green])
+    assert merged == {'segmentation_mode': 'metal_hsv', 'min_area_px': 500}
+    assert kpi.load_vision_params(str(base))['segmentation_mode'] == 'gray'

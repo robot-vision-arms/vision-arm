@@ -9,6 +9,7 @@
     --per-image-homography : 사진마다 시트 마커로 호모그래피를 다시 구한다 (촬영 중 시트가 움직였을 때).
                              없으면 --homography 하나로 전부 계산한다.
     --images-dir           : 사진을 poses.csv 의 image 경로 대신 이 폴더에서 같은 파일 이름으로 찾는다.
+    --params A.yaml B.yaml : 설정을 겹쳐 쓴다. 초록 시트면 params.yaml params_green.yaml
     --preds                : 이미 저장한 검출 결과 CSV (sample_id, part_type, x_mm, y_mm, angle_deg) 를 쓰면 사진 처리를 건너뛴다.
 
 결과 표에는 측정 장비(CPU·OpenCV·해상도)를 같이 출력한다. 실측 전에는 달성으로 쓰지 않는다 (PROJECT.md 7장).
@@ -19,8 +20,6 @@ import json
 import os
 from pathlib import Path
 import platform
-
-import yaml
 
 from vision_pick_place import kpi
 
@@ -71,7 +70,8 @@ def main():
     p.add_argument('--truth', help='정답 poses.csv (sample_id,image,x_mm,y_mm,angle_deg,part_type)')
     p.add_argument('--images-dir', help='사진을 이 폴더에서 파일 이름으로 찾는다')
     p.add_argument('--preds', help='저장된 검출 결과 CSV (사진 처리 대신)')
-    p.add_argument('--params', default='src/vision_pick_place/config/params.yaml')
+    p.add_argument('--params', nargs='+', default=['src/vision_pick_place/config/params.yaml'],
+                   help='vision_node 설정 YAML, 여러 개면 뒤 파일이 덮음 (초록 시트: params.yaml params_green.yaml)')
     p.add_argument('--intrinsics', default='data/calib/intrinsics.npz')
     p.add_argument('--homography', default='data/calib/homography.npz')
     p.add_argument('--per-image-homography', action='store_true')
@@ -87,7 +87,7 @@ def main():
     if not (args.truth or args.comm or args.pick):
         p.error('--truth, --comm, --pick 중 하나 이상 필요합니다.')
 
-    params = yaml.safe_load(Path(args.params).read_text())['vision_node']['ros__parameters']
+    params = kpi.load_vision_params(args.params)
     truth_rows = kpi.read_csv(args.truth) if args.truth else []
     base = Path(args.truth).parent if args.truth else Path('.')
 
@@ -96,7 +96,7 @@ def main():
             return Path(args.images_dir) / Path(row['image']).name
         return base / row['image']
 
-    report = dict(environment=environment(args.params, truth_rows, image_for), pose={}, comm=None, pick=None)
+    report = dict(environment=environment(' + '.join(args.params), truth_rows, image_for), pose={}, comm=None, pick=None)
     if truth_rows:
         if args.preds:
             by_sample = {}

@@ -41,6 +41,16 @@ def _float(value):
     return result if math.isfinite(result) else None
 
 
+def load_vision_params(paths) -> dict:
+    """vision_node 파라미터 YAML 여러 개를 순서대로 겹친다 (뒤 파일이 앞 값을 덮음). ros2 의 --params-file 여러 번과 같다.
+    예: [params.yaml, params_green.yaml] = 초록 시트 설정."""
+    import yaml
+    merged = {}
+    for path in ([paths] if isinstance(paths, (str, Path)) else paths):
+        merged.update(yaml.safe_load(Path(path).read_text())['vision_node']['ros__parameters'])
+    return merged
+
+
 def read_csv(path) -> list[dict]:
     with open(path, newline='', encoding='utf-8') as f:
         return list(csv.DictReader(f))

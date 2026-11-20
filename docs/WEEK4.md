@@ -68,6 +68,32 @@ PYTHONPATH=src/vision_pick_place python scripts/evaluate_kpi.py \
 - 송신은 가상 카메라 입력이다. 공식 값은 실물 폰 입력으로 다시 잰다.
 
 
+### 2026-11-20 초록 자세 시트 (그림자 대책, 다음 주 재촬영용)
+
+흰 시트에서는 은색 나사 옆 그림자를 같이 검출해 위치가 한쪽으로 치우쳤다 (WEEK3 동경 11-20, x −1.26 mm). 가상 카메라 바닥색 비교처럼
+초록 바탕 + `metal_hsv` 면 그림자가 빠진다. 가영 님 자세 시트에 `--green` 옵션을 추가했다 (흰 시트는 그대로).
+
+```bash
+PYTHONPATH=src/vision_pick_place python3 scripts/collect_ground_truth.py --print-sheet data/ground_truth/pose_sheet_green.pdf --green
+# 검출은 params.yaml 위에 params_green.yaml 을 겹쳐 쓴다 (metal_hsv, 마커 여백 9 mm, 가장자리 여백 8 mm)
+ros2 run vision_pick_place vision_node --ros-args --params-file src/vision_pick_place/config/params.yaml \
+    --params-file src/vision_pick_place/config/params_green.yaml
+# 수집·평가 스크립트도 --params 에 두 파일을 순서대로 (뒤 파일이 덮음)
+G="src/vision_pick_place/config/params.yaml src/vision_pick_place/config/params_green.yaml"
+python3 scripts/collect_ground_truth.py --rotate 270 --method print --params $G
+PYTHONPATH=src/vision_pick_place python scripts/evaluate_kpi.py --truth data/ground_truth/<폴더>/poses.csv --params $G
+```
+초록 설정은 초록 시트 전용이다. 흰 시트 사진에 쓰면 흰 바탕 전체가 '채도 낮음' 으로 한 덩어리가 되어 검출이 안 된다.
+
+| 흰 시트와 다른 점 | 이유 |
+|---|---|
+| 마커 둘레 흰 여백 4 → 8 mm | 초록 바탕에서는 흰 여백 테두리도 사각형으로 보여, 4 mm 면 ArUco 가 마커를 버린다 (Gazebo 에서 0개 검출 확인) |
+| 자세 선·번호·100 mm 선을 진한 초록 | 회색 선은 채도가 낮아 metal_hsv 에서 부품으로 잡힌다 |
+| 초록은 가장자리 6 mm 안쪽부터, 10 mm 격자 없음 | 프린터가 가장자리를 못 칠해 흰 띠가 남는다 → 검출 영역에서 8 mm 를 뺀다 |
+
+확인 (PNG 를 카메라 배율 2.6·3.0 px/mm 로 줄여서): PDF 297.0 × 210.0 mm, 마커 4/4 (보정 RMS 0.05~0.07 mm), 초록 설정 오검출 0개 (흰 시트 설정이면 1개).
+남은 확인: 실제 인쇄본의 초록 색·조명에서 `hsv_max_saturation` (70) 이 맞는지 폰으로 한 장 찍어 본다. 인쇄 초록이 연하면 채도가 낮아질 수 있다.
+
 ## 4. 팀원 2 (성민) 기록
 
 ## 5. 팀원 3 (가영) 기록

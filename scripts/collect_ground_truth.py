@@ -34,13 +34,13 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src/vision_pick_place'))
 from vision_pick_place import aruco_calib  # noqa: E402
 from vision_pick_place.calibrator import Calibrator  # noqa: E402
 from vision_pick_place.camera_stream import FrameSource  # noqa: E402
+from vision_pick_place.kpi import load_vision_params  # noqa: E402
 from vision_pick_place.vision_pipeline import process_frame  # noqa: E402
 from vision_pick_place.workspace_roi import sheet_roi_mask  # noqa: E402
 
@@ -116,17 +116,39 @@ def sheet_shift_px(frame, calib) -> float | None:
     return max(shifts) if shifts else None
 
 
-def render_pose_sheet(path: Path, plan: list, px_per_mm: float = 12.0) -> None:
+GREEN_BGR = (51, 153, 26)        # Gazebo 작업 매트와 같은 초록 (RGB 0.10, 0.60, 0.20)
+GREEN_LINE_BGR = (0, 90, 0)      # 초록 시트의 선·글자: 채도가 높고 너무 어둡지 않아 metal_hsv 에서 배경
+GREEN_INSET_MM = 6.0             # 프린터가 가장자리 몇 mm 를 못 칠하므로 초록은 이만큼 안쪽부터 (바깥 흰 띠)
+GREEN_QUIET_MM = 8.0             # 초록 바탕에서는 마커 흰 여백이 4 mm 면 ArUco 가 마커를 버린다 (DECISIONS 12절)
+
+
+def render_green_base(px_per_mm: float):
+    """초록 작업 시트 바탕: 흰 종이 + 안쪽 초록 + 마커 (흰 여백 8 mm). 10 mm 격자는 그리지 않는다 (회색이면 부품으로 잡힘)."""
+    width, height = (round(v * px_per_mm) for v in aruco_calib.SHEET_MM)
+    img = np.full((height, width, 3), 255, np.uint8)
+    inset = round(GREEN_INSET_MM * px_per_mm)
+    img[inset:height - inset, inset:width - inset] = GREEN_BGR
+    side, quiet = round(aruco_calib.SHEET_MARKER_MM * px_per_mm), round(GREEN_QUIET_MM * px_per_mm)
+    for marker_id, (x, y) in aruco_calib.SHEET_MARKERS.items():
+        col, row = round(x * px_per_mm), round((aruco_calib.SHEET_MM[1] - y - aruco_calib.SHEET_MARKER_MM) * px_per_mm)
+        img[max(row - quiet, 0):row + side + quiet, max(col - quiet, 0):col + side + quiet] = 255
+        img[row:row + side, col:col + side] = cv2.cvtColor(aruco_calib.marker_image(marker_id, side), cv2.COLOR_GRAY2BGR)
+    return img
+
+
+def render_pose_sheet(path: Path, plan: list, px_per_mm: float = 12.0, green: bool = False) -> None:
     """작업 시트(마커·10 mm 격자) 위에 자세 목록을 옅은 선으로 그린 A4 가로 PDF/PNG. 100% 배율로 인쇄한다.
 
     선은 회색(170)이라 이진화(Otsu, 오늘 임계값 약 120)에서 배경으로 처리된다. 부품을 선 위에 놓으면 실측값 = 그린 값.
+    green=True: 초록 바탕 (그림자를 부품으로 잡지 않게, WEEK3 동경 11-20). 선·글자는 진한 초록이라 metal_hsv 에서 배경이다.
+    검출 설정은 params.yaml 위에 config/params_green.yaml 을 겹쳐 쓴다 (metal_hsv, 마커 여백 9 mm, 가장자리 여백 8 mm).
     """
-    img = cv2.cvtColor(aruco_calib.render_sheet(px_per_mm), cv2.COLOR_GRAY2BGR)
+    img = render_green_base(px_per_mm) if green else cv2.cvtColor(aruco_calib.render_sheet(px_per_mm), cv2.COLOR_GRAY2BGR)
     h = img.shape[0]
 
     def px(x, y):
         return int(round(x * px_per_mm)), int(round(h - y * px_per_mm))
-    gray, w = (170, 170, 170), max(1, round(0.25 * px_per_mm))
+    gray, w = (GREEN_LINE_BGR if green else (170, 170, 170)), max(1, round(0.25 * px_per_mm))
     for q in plan:
         x, y = q['x_mm'], q['y_mm']
         cv2.drawMarker(img, px(x, y), gray, cv2.MARKER_CROSS, round(4 * px_per_mm), w)
@@ -139,11 +161,12 @@ def render_pose_sheet(path: Path, plan: list, px_per_mm: float = 12.0) -> None:
             lx, ly = x + 9, y + 3
         cv2.putText(img, f"{q['sample_id'][2:]}", px(lx, ly), cv2.FONT_HERSHEY_SIMPLEX, 0.12 * px_per_mm, gray, w)
     # 인쇄 배율 확인용 100 mm 선 (자로 재서 100 mm 인지 확인)
-    cv2.line(img, px(60, 8), px(160, 8), (120, 120, 120), w)
+    scale = GREEN_LINE_BGR if green else (120, 120, 120)
+    cv2.line(img, px(60, 8), px(160, 8), scale, w)
     for xe in (60, 160):
-        cv2.line(img, px(xe, 6.5), px(xe, 9.5), (120, 120, 120), w)
-    cv2.putText(img, 'pose sheet: print at 100% (line = 100 mm), A4 landscape', px(165, 7), cv2.FONT_HERSHEY_SIMPLEX,
-                0.12 * px_per_mm, (120, 120, 120), w)
+        cv2.line(img, px(xe, 6.5), px(xe, 9.5), scale, w)
+    cv2.putText(img, f"pose sheet{' (green)' if green else ''}: print at 100% (line = 100 mm), A4 landscape", px(165, 7),
+                cv2.FONT_HERSHEY_SIMPLEX, 0.12 * px_per_mm, scale, w)
     path.parent.mkdir(parents=True, exist_ok=True)
     cv2.imwrite(str(path.with_suffix('.png')), img)
     if path.suffix.lower() == '.pdf':
@@ -162,9 +185,11 @@ def main():
     p.add_argument('--rotate', type=int, default=None, help='기본: params.yaml 의 camera_rotate_deg')
     p.add_argument('--method', choices=('overlay', 'print'), default='overlay')
     p.add_argument('--out-dir', default=None)
-    p.add_argument('--params', default=str(ROOT / 'src/vision_pick_place/config/params.yaml'))
+    p.add_argument('--params', nargs='+', default=[str(ROOT / 'src/vision_pick_place/config/params.yaml')],
+                   help='vision_node 설정 YAML, 여러 개면 뒤 파일이 덮음 (초록 시트: params.yaml params_green.yaml)')
     p.add_argument('--print-plan', action='store_true')
     p.add_argument('--print-sheet', default=None, help='자세를 그린 인쇄용 시트 저장 경로 (.pdf 면 PNG 도 같이)')
+    p.add_argument('--green', action='store_true', help='--print-sheet 를 초록 바탕으로 (그림자 대책, config/params_green.yaml 과 함께)')
     p.add_argument('--max-shift-px', type=float, default=3.0, help='마커가 이보다 많이 벗어나면 저장 막음')
     p.add_argument('--only', default='', help='이 자세만 수집 (예: gt002,gt013). 다시 찍을 때')
     args = p.parse_args()
@@ -181,11 +206,11 @@ def main():
             print(q['sample_id'], q['part_type'], q['x_mm'], q['y_mm'], q['angle_deg'])
         return
     if args.print_sheet:
-        render_pose_sheet(Path(args.print_sheet), plan)
+        render_pose_sheet(Path(args.print_sheet), plan, green=args.green)
         print('저장:', args.print_sheet)
         return
 
-    vp = yaml.safe_load(open(args.params))['vision_node']['ros__parameters']
+    vp = load_vision_params(args.params)
     url = args.url or vp['camera_url']
     rotate = vp.get('camera_rotate_deg', 0) if args.rotate is None else args.rotate
     calib = Calibrator(str(ROOT / vp['intrinsics_path']), str(ROOT / vp['homography_path']))

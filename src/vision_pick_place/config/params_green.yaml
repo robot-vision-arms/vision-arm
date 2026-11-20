@@ -1,0 +1,15 @@
+# 초록 작업 시트용 덮어쓰기 (scripts/collect_ground_truth.py --print-sheet ... --green 으로 인쇄한 시트).
+# params.yaml 뒤에 겹쳐 준다:
+#   ros2 run vision_pick_place vision_node --ros-args --params-file src/vision_pick_place/config/params.yaml \
+#       --params-file src/vision_pick_place/config/params_green.yaml
+# 흰 시트에서는 은색 나사 옆 그림자를 같이 검출해 위치가 한쪽으로 치우쳤다 (WEEK3 동경 11-20, x −1.26 mm).
+# 초록 바탕은 그림자가 져도 채도가 남아, 채도 낮은 금속만 고르는 metal_hsv 로 그림자가 빠진다 (Gazebo 바닥색 비교).
+vision_node:
+  ros__parameters:
+    segmentation_mode: "metal_hsv"
+    hsv_max_saturation: 70
+    hsv_max_dark_value: 70
+    close_ksize: 3
+    open_ksize: 3
+    sheet_marker_margin_mm: 9.0   # 마커 흰 여백 8 mm (초록 바탕에서 4 mm 면 ArUco 가 마커를 버림) → 9 mm 를 뺀다
+    sheet_edge_margin_mm: 8.0     # 가장자리 6 mm 는 프린터가 못 칠한 흰 띠 → 8 mm 를 뺀다
