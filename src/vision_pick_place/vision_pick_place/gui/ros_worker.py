@@ -5,7 +5,7 @@ rclpy.spin 은 블로킹이라 GUI 스레드에서 돌리면 화면이 멈춘다
 GUI 프로세스 안의 다른 rclpy 사용과 섞이지 않도록 전용 Context 를 쓴다.
 
 구독:   /vision/detections (String JSON), /vision/debug_image (Image), /robot/log (String JSON), /sim/pick_log (String JSON)
-서비스: /sim/run_cycle (Trigger) — 버튼으로 요청할 때만 부른다 (Gazebo 를 켰을 때)
+서비스: /sim/run_cycle, /sim/spawn_random (Trigger) — 버튼으로 요청할 때만 부른다 (Gazebo 를 켰을 때)
 """
 import json
 import threading
@@ -20,16 +20,22 @@ class RosWorker(QThread):
     robot_log = Signal(dict)      # /robot/log JSON
     sim_log = Signal(dict)        # /sim/pick_log JSON (Gazebo 를 켰을 때만 들어옴)
     cycle_result = Signal(bool, str)   # /sim/run_cycle 응답 (성공, 메시지)
+    spawn_result = Signal(bool, str)   # /sim/spawn_random 응답 (성공, 메시지)
     gazebo_ready = Signal(bool)        # /sim/run_cycle 서비스가 보이는지 (1초마다, 헤더의 Gazebo 상태 표시)
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._running = threading.Event()
         self._cycle_requested = threading.Event()
+        self._spawn_requested = threading.Event()
 
     def request_cycle(self):
         """메인 스레드에서 부른다. 다음 루프에서 /sim/run_cycle 을 비동기로 호출한다."""
         self._cycle_requested.set()
+
+    def request_spawn(self):
+        """메인 스레드에서 부른다. 다음 루프에서 /sim/spawn_random 을 비동기로 호출한다."""
+        self._spawn_requested.set()
 
     def run(self):
         import rclpy
@@ -68,7 +74,9 @@ class RosWorker(QThread):
         node.create_subscription(String, '/robot/log', json_signal(self.robot_log), 100)
         node.create_subscription(String, '/sim/pick_log', json_signal(self.sim_log), 100)
         cycle = node.create_client(Trigger, '/sim/run_cycle')
+        spawn = node.create_client(Trigger, '/sim/spawn_random')
         pending = None
+        pending_spawn = None
         last_check = 0.0
 
         self._running.set()
@@ -85,6 +93,16 @@ class RosWorker(QThread):
                         pending = cycle.call_async(Trigger.Request())
                     else:
                         self.cycle_result.emit(False, '/sim/run_cycle 서비스가 없습니다 (sim.launch.py 를 띄웠는지 확인).')
+                if self._spawn_requested.is_set() and pending_spawn is None:
+                    self._spawn_requested.clear()
+                    if spawn.service_is_ready():
+                        pending_spawn = spawn.call_async(Trigger.Request())
+                    else:
+                        self.spawn_result.emit(False, '/sim/spawn_random 서비스가 없습니다 (스폰 노드·team2_link 확인).')
+                if pending_spawn is not None and pending_spawn.done():
+                    result = pending_spawn.result()
+                    self.spawn_result.emit(bool(result and result.success), result.message if result else '응답 없음')
+                    pending_spawn = None
                 if pending is not None and pending.done():
                     result = pending.result()
                     self.cycle_result.emit(bool(result and result.success),

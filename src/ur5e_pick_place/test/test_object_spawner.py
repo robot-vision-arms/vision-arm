@@ -252,3 +252,19 @@ def test_part_top_height_from_models():
     from ur5e_pick_place.object_spawner import part_top_m
     assert part_top_m(_shape(model_file(PKG / 'models', 'screw'))) == pytest.approx(0.008)   # 누운 원기둥: 지름 8 mm
     assert part_top_m(_shape(model_file(PKG / 'models', 'nut'))) == pytest.approx(0.006)     # 선 원기둥: 두께 6 mm
+
+
+def test_random_packet_is_spaced_and_spawnable():
+    import math
+    import random
+    from ur5e_pick_place.object_spawner import random_packet
+    for seed in range(20):
+        packet = random_packet(random.Random(seed))
+        objs = packet['objects']
+        assert sorted(o['part_type'] for o in objs) == ['nut', 'screw', 'screw']
+        assert all(70 <= o['x_mm'] <= 227 and 40 <= o['y_mm'] <= 170 for o in objs)
+        assert all(math.dist((a['x_mm'], a['y_mm']), (b['x_mm'], b['y_mm'])) >= 34.9
+                   for i, a in enumerate(objs) for b in objs[i + 1:])
+        assert all((o['angle_deg'] is None) == (o['part_type'] == 'nut') for o in objs)
+        requests, skipped = plan_spawns(packet, PlanePose(0.3, -0.15, 0.0, 0.0), ['screw', 'nut'], 3)
+        assert len(requests) == 3 and not skipped

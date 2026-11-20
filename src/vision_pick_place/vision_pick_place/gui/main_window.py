@@ -1,6 +1,6 @@
 """PySide6 메인 윈도우 (3주차). 과제 GUI 필수 화면 4가지 (docs/PROJECT.md 2.2), 11-10 목업과 같은 구조.
 
-    ┌ 헤더: 제목·입력 │ 연결 상태 (ROS2 · robot_server · Gazebo) │ [보정 다시 읽기] [사이클 실행] ┐
+    ┌ 헤더: 제목·입력 │ 연결 상태 (ROS2 · robot_server · Gazebo) │ [보정 다시 읽기] [부품 놓기] [사이클 실행] ┐
     ├──────────────────────────────┬──────────────────────────────┤
     │ ① 영상 · 검출 ROI · 장축 방향  │ ② 좌표 · 회전각 · 부품 종류      │
     │   (/vision/debug_image, 범례)  │   표 + 기준 타일 3개             │
@@ -194,6 +194,7 @@ class MainWindow(QMainWindow):
             self.worker.robot_log.connect(self.on_robot_log)
             self.worker.sim_log.connect(self.on_sim_log)
             self.worker.cycle_result.connect(self.on_cycle_result)
+            self.worker.spawn_result.connect(self.on_spawn_result)
             self.worker.gazebo_ready.connect(self.on_gazebo_ready)
             self.worker.start()
 
@@ -219,6 +220,10 @@ class MainWindow(QMainWindow):
         layout.addSpacing(8)
         reload_button = QPushButton('보정 다시 읽기')
         reload_button.clicked.connect(self.load_calibration)
+        # 시뮬 시연용: 사이클이 끝나면 매트가 비므로 새 부품을 놓는다 (실물에서는 사람이 놓는다)
+        self.spawn_button = QPushButton('부품 놓기 (무작위)')
+        self.spawn_button.clicked.connect(self.request_spawn)
+        layout.addWidget(self.spawn_button)
         self.cycle_button = QPushButton('사이클 실행 (/sim/run_cycle)')
         self.cycle_button.setObjectName('primary')
         self.cycle_button.clicked.connect(self.request_cycle)
@@ -445,6 +450,17 @@ class MainWindow(QMainWindow):
         self.cycle_button.setText('사이클 실행 중...')
         self.log_line('SIM', CONSOLE['sim'], '/sim/run_cycle 요청')
         self.worker.request_cycle()
+
+    def request_spawn(self):
+        if self.worker is None:
+            return
+        self.spawn_button.setEnabled(False)
+        self.log_line('SIM', CONSOLE['sim'], '/sim/spawn_random 요청')
+        self.worker.request_spawn()
+
+    def on_spawn_result(self, ok: bool, message: str):
+        self.spawn_button.setEnabled(True)
+        self.log_line('SIM', CONSOLE['sim'] if ok else CONSOLE['err'], message)
 
     def on_cycle_result(self, ok: bool, message: str):
         self.cycle_button.setEnabled(True)

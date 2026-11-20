@@ -314,6 +314,24 @@ def plan_spawns(packet: dict, plane: PlanePose, part_types: list[str],
     return requests, skipped
 
 
+def random_packet(rng, part_types=('screw', 'screw', 'nut'), x_range=(70.0, 227.0), y_range=(40.0, 170.0),
+                  min_gap_mm: float = 35.0, seq: int = 0) -> dict:
+    """시연용 무작위 배치 (작업 시트 mm). 마커 여백·가장자리를 피하고 부품끼리 min_gap_mm 이상 띄운다.
+    calib_ok=true 패킷 형식이라 plan_spawns 에 그대로 넣을 수 있다."""
+    kinds = list(part_types)
+    rng.shuffle(kinds)
+    placed, objects = [], []
+    for i, kind in enumerate(kinds):
+        for _ in range(500):
+            x, y = rng.uniform(*x_range), rng.uniform(*y_range)
+            if all(math.dist((x, y), p) >= min_gap_mm for p in placed):
+                break
+        placed.append((x, y))
+        objects.append(dict(id=i, part_type=kind, x_mm=round(x, 1), y_mm=round(y, 1),
+                            angle_deg=round(rng.uniform(0.0, 180.0), 1) if kind == 'screw' else None))
+    return dict(seq=seq, t_capture=0.0, calib_ok=True, objects=objects)
+
+
 def load_sim_params(config_file: Path) -> dict:
     """config/sim.yaml 에서 pick_place_node 의 ros__parameters 를 읽는다."""
     import yaml
@@ -529,6 +547,8 @@ def main(args=None):
             self.create_subscription(String, topic, self.on_targets, 10)
             self.create_service(Trigger, '/sim/spawn_objects', self.on_spawn)
             self.create_service(Trigger, '/sim/clear_objects', self.on_clear)
+            # 시연용: 작업 매트에 무작위로 나사·너트를 놓는다 (GUI '부품 놓기'). 실물의 '사람이 부품을 놓는 것' 에 해당
+            self.create_service(Trigger, '/sim/spawn_random', self.on_spawn_random)
             self.tool_length = float(p['tool_length_m'])
             self.tf_buffer = Buffer()
             self.tf_listener = TransformListener(self.tf_buffer, self, spin_thread=True)
@@ -563,6 +583,25 @@ def main(args=None):
             response.message = f'seq={packet.get("seq")} 스폰 {len(requests)}개: {placed}'
             if skipped:
                 response.message += ' / 건너뜀: ' + '; '.join(skipped)
+            self.get_logger().info(response.message)
+            return response
+
+        def on_spawn_random(self, request, response):
+            import random
+            packet = random_packet(random.Random(), seq=int(time.time()))
+            with self.lock:
+                try:
+                    requests, _ = plan_spawns(packet, self.plane, self.part_types, self.max_objects)
+                    self.slot_types = {}
+                    self.spawner.spawn_all(requests)
+                    self.slot_types = {r.name: r.part_type for r in requests}
+                except (ValueError, RuntimeError) as e:
+                    response.success, response.message = False, f'무작위 배치 실패: {e}'
+                    return response
+            response.success = True
+            response.message = '무작위 배치: ' + ', '.join(
+                f"{o['part_type']}({o['x_mm']:.0f}, {o['y_mm']:.0f} mm"
+                + ('' if o['angle_deg'] is None else f", {o['angle_deg']:.0f}°") + ')' for o in packet['objects'])
             self.get_logger().info(response.message)
             return response
 
