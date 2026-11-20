@@ -75,8 +75,11 @@ def test_log_rows_and_summary(window):
     window.on_sim_log({'seq': 1, 'obj': 'obj_1', 'part_type': 'nut', 'result': 'failed', 'plan_ms': 2000.0,
                        'error': '[흡착 높이로 하강·진공] 흡착 실패'})
     lines = window.console.toPlainText().splitlines()
-    assert len(lines) == 12
-    assert 'ERR' in lines[3] and 'ACK timeout' in lines[3]
+    # ACK 는 묶어서 쓰고, ERR·SIM 이 오면 그 전까지 모은 ACK 를 먼저 쓴다
+    assert len(lines) == 5
+    assert 'ACK' in lines[0] and 'seq 0~2' in lines[0] and '3건' in lines[0]
+    assert 'ERR' in lines[1] and 'ACK timeout' in lines[1]
+    assert 'seq 4~9' in lines[2] and '6건' in lines[2] and '평균 16 ms' in lines[2]
     assert 'SIM' in lines[-1] and '실패' in lines[-1] and '흡착 실패' in lines[-1]
     assert window.tile_ack.value.text() == '90 % (9/10)'
     assert window.tile_p95.value.text().endswith('ms')

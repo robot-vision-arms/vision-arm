@@ -3,7 +3,7 @@
     ┌ 헤더: 제목·입력 │ 연결 상태 (ROS2 · robot_server · Gazebo) │ [보정 다시 읽기] [부품 놓기] [사이클 실행] ┐
     ├──────────────────────────────┬──────────────────────────────┤
     │ ① 영상 · 검출 ROI · 장축 방향  │ ② 좌표 · 회전각 · 부품 종류      │
-    │   (/vision/debug_image, 범례)  │   표 + 기준 타일 3개             │
+    │   탭: 검출 카메라 / Gazebo 전경 │   표 + 기준 타일 3개             │
     ├──────────────────────────────┼──────────────────────────────┤
     │ ③ 가상 로봇 송수신 · 집기 결과  │ ④ 캘리브레이션 상태              │
     │   콘솔 로그 + 숫자 타일 3개     │   항목 목록 + calib_ok 배지      │
@@ -29,7 +29,7 @@ import numpy as np
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QBrush, QColor, QImage, QPixmap
 from PySide6.QtWidgets import (QApplication, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QMainWindow,
-                               QPlainTextEdit, QPushButton, QSizePolicy, QTableWidget, QTableWidgetItem,
+                               QPlainTextEdit, QPushButton, QSizePolicy, QTableWidget, QTableWidgetItem, QTabWidget,
                                QVBoxLayout, QWidget)
 
 from vision_pick_place.calibrator import Calibrator
@@ -122,8 +122,8 @@ class Tile(QFrame):
 class VideoPanel(QLabel):
     """① 영상. 창 크기에 맞춰 비율을 유지하며 줄인다."""
 
-    def __init__(self):
-        super().__init__('영상 없음\n(/vision/debug_image 대기 중)')
+    def __init__(self, topic: str = '/vision/debug_image'):
+        super().__init__(f'영상 없음\n({topic} 대기 중)')
         self.setAlignment(Qt.AlignCenter)
         self.setMinimumSize(320, 180)
         self.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
@@ -132,6 +132,9 @@ class VideoPanel(QLabel):
         self.frame_size = None
 
     def show_frame(self, bgr: np.ndarray):
+        if not self.isVisible() and self._pixmap is not None:
+            self.frame_size = (bgr.shape[1], bgr.shape[0])   # 안 보이는 탭은 변환을 건너뛴다 (CPU 절약)
+            return
         rgb = np.ascontiguousarray(bgr[:, :, ::-1])
         image = QImage(rgb.data, rgb.shape[1], rgb.shape[0], rgb.strides[0], QImage.Format_RGB888).copy()
         self._pixmap = QPixmap.fromImage(image)
@@ -158,6 +161,7 @@ class MainWindow(QMainWindow):
         self.packet_times = deque(maxlen=30)       # 패킷 수신 주기 (Hz 표시)
         self.sends = deque(maxlen=SUMMARY_WINDOW)   # (acked, latency_ms)
         self.picks = []                             # Gazebo 집기 결과 True/False
+        self.pending_acks = []                      # 아직 콘솔에 안 쓴 ACK (seq, latency_ms). 1초마다 한 줄로 묶는다
         self.gazebo = False
 
         root = QWidget()
@@ -183,6 +187,10 @@ class MainWindow(QMainWindow):
         self.status_timer = QTimer(self)   # 1초마다 연결 표시·패킷 끊김 갱신
         self.status_timer.timeout.connect(self.update_status)
         self.status_timer.start(1000)
+        # vision_node 가 물체가 없어도 초당 몇 번씩 보내고 매번 ACK 가 와서, 한 줄씩 쓰면 집기 결과가 밀려 올라간다
+        self.ack_timer = QTimer(self)
+        self.ack_timer.timeout.connect(self.flush_acks)
+        self.ack_timer.start(1000)
         self.update_status()
 
         self.worker = None
@@ -191,6 +199,7 @@ class MainWindow(QMainWindow):
             self.worker = RosWorker(self)
             self.worker.detections.connect(self.on_detections)
             self.worker.frame.connect(self.video.show_frame)
+            self.worker.overview.connect(self.overview.show_frame)
             self.worker.robot_log.connect(self.on_robot_log)
             self.worker.sim_log.connect(self.on_sim_log)
             self.worker.cycle_result.connect(self.on_cycle_result)
@@ -234,7 +243,12 @@ class MainWindow(QMainWindow):
     def _video_card(self) -> Card:
         self.video_card = Card('① 영상 · 검출 ROI · 장축 방향')
         self.video = VideoPanel()
-        self.video_card.body.addWidget(self.video, 1)
+        # Gazebo 전경 카메라 (11-10 목업의 Gazebo 시점). Gazebo 창을 띄우지 않아도 집기 과정을 볼 수 있다
+        self.overview = VideoPanel('/sim/overview/image')
+        self.video_tabs = QTabWidget()
+        self.video_tabs.addTab(self.video, '검출 카메라')
+        self.video_tabs.addTab(self.overview, 'Gazebo 전경')
+        self.video_card.body.addWidget(self.video_tabs, 1)
         legend = QLabel('<span style="color:#C8A400">━</span> 검출 영역 (시트 안쪽, 마커 제외) &nbsp;&nbsp; '
                         '<span style="color:#1FA34A">━</span> 검출 박스 &nbsp;&nbsp; '
                         f'<span style="color:{BLUE}">→</span> 장축 방향 (나사)')
@@ -400,12 +414,24 @@ class MainWindow(QMainWindow):
         self.sends.append((ok, log.get('latency_ms') if ok else None))
         if ok:
             self.last_ack_time = time.monotonic()
-            self.log_line('ACK', CONSOLE['ack'], f'seq={log.get("seq")}  왕복 {_fmt(log.get("latency_ms"))} ms')
+            self.pending_acks.append((log.get('seq'), log.get('latency_ms')))
         else:
+            self.flush_acks()   # 순서를 지키려고 모아 둔 ACK 를 먼저 쓴다
             self.log_line('ERR', CONSOLE['err'], f'seq={log.get("seq")}  {log.get("error") or "응답 없음"}')
         self.update_tiles()
 
+    def flush_acks(self):
+        """모아 둔 ACK 를 한 줄로: 'ACK  seq 120~124  5건, 평균 14 ms'."""
+        if not self.pending_acks:
+            return
+        seqs = [s for s, _ in self.pending_acks]
+        ms = [v for _, v in self.pending_acks if v is not None]
+        span = f'seq {seqs[0]}' if len(seqs) == 1 else f'seq {seqs[0]}~{seqs[-1]}'
+        self.log_line('ACK', CONSOLE['ack'], f'{span}  {len(seqs)}건' + (f', 평균 {np.mean(ms):.0f} ms' if ms else ''))
+        self.pending_acks = []
+
     def on_sim_log(self, log: dict):
+        self.flush_acks()
         ok = log.get('result') == 'ok'
         if 'obj' in log:   # run_cycle 의 물체 하나 (move_to_target 기록은 action 키만 있다)
             self.picks.append(ok)

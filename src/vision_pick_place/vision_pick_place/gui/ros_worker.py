@@ -4,7 +4,8 @@ rclpy.spin 은 블로킹이라 GUI 스레드에서 돌리면 화면이 멈춘다
 받은 데이터는 Qt Signal 로 메인 스레드에 넘긴다 (위젯은 메인 스레드에서만 건드려야 함).
 GUI 프로세스 안의 다른 rclpy 사용과 섞이지 않도록 전용 Context 를 쓴다.
 
-구독:   /vision/detections (String JSON), /vision/debug_image (Image), /robot/log (String JSON), /sim/pick_log (String JSON)
+구독:   /vision/detections (String JSON), /vision/debug_image (Image), /robot/log (String JSON), /sim/pick_log (String JSON),
+        /sim/overview/image (Image, Gazebo 전경 카메라)
 서비스: /sim/run_cycle, /sim/spawn_random (Trigger) — 버튼으로 요청할 때만 부른다 (Gazebo 를 켰을 때)
 """
 import json
@@ -17,6 +18,7 @@ from PySide6.QtCore import QThread, Signal
 class RosWorker(QThread):
     detections = Signal(dict)     # /vision/detections JSON
     frame = Signal(object)        # /vision/debug_image → numpy BGR
+    overview = Signal(object)     # /sim/overview/image → numpy BGR (Gazebo 전경 카메라, 시연용)
     robot_log = Signal(dict)      # /robot/log JSON
     sim_log = Signal(dict)        # /sim/pick_log JSON (Gazebo 를 켰을 때만 들어옴)
     cycle_result = Signal(bool, str)   # /sim/run_cycle 응답 (성공, 메시지)
@@ -63,14 +65,17 @@ class RosWorker(QThread):
                     signal.emit(value)
             return callback
 
-        def on_image(msg):
-            try:
-                self.frame.emit(bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8'))
-            except Exception:   # 잘못된 인코딩 한 장 때문에 GUI 가 멈추지 않게
-                pass
+        def image_signal(signal):
+            def callback(msg):
+                try:
+                    signal.emit(bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8'))
+                except Exception:   # 잘못된 인코딩 한 장 때문에 GUI 가 멈추지 않게
+                    pass
+            return callback
 
         node.create_subscription(String, '/vision/detections', json_signal(self.detections), 10)
-        node.create_subscription(Image, '/vision/debug_image', on_image, 1)   # 영상은 최신 1장만
+        node.create_subscription(Image, '/vision/debug_image', image_signal(self.frame), 1)   # 영상은 최신 1장만
+        node.create_subscription(Image, '/sim/overview/image', image_signal(self.overview), 1)
         node.create_subscription(String, '/robot/log', json_signal(self.robot_log), 100)
         node.create_subscription(String, '/sim/pick_log', json_signal(self.sim_log), 100)
         cycle = node.create_client(Trigger, '/sim/run_cycle')

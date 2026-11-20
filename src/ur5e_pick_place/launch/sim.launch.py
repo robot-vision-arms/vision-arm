@@ -73,7 +73,8 @@ def generate_launch_description():
         arguments=[f'/vacuum/obj_{k}/{op}@std_msgs/msg/Empty]gz.msgs.Empty'
                    for k in range(p['max_objects']) for op in ('attach', 'detach')]
         + ['/sim/camera/image@sensor_msgs/msg/Image[gz.msgs.Image',
-           '/sim/camera/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo'])
+           '/sim/camera/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo',
+           '/sim/overview/image@sensor_msgs/msg/Image[gz.msgs.Image'])   # 시연용 전경 (GUI ① 탭)
 
     # 작업 시트(work_plane) 좌표계를 RViz 에서 보이게 한다. 계산은 pick_place_node 가 같은 sim.yaml 값으로 직접 한다
     work_plane_tf = Node(

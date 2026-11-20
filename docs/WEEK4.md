@@ -94,6 +94,23 @@ PYTHONPATH=src/vision_pick_place python scripts/evaluate_kpi.py --truth data/gro
 확인 (PNG 를 카메라 배율 2.6·3.0 px/mm 로 줄여서): PDF 297.0 × 210.0 mm, 마커 4/4 (보정 RMS 0.05~0.07 mm), 초록 설정 오검출 0개 (흰 시트 설정이면 1개).
 남은 확인: 실제 인쇄본의 초록 색·조명에서 `hsv_max_saturation` (70) 이 맞는지 폰으로 한 장 찍어 본다. 인쇄 초록이 연하면 채도가 낮아질 수 있다.
 
+### 2026-11-20 GUI 에 Gazebo 전경, Gazebo 창 없이 시연 (FPS)
+
+- `workcell.sdf` 에 시연용 **전경 카메라** (`overview_camera`, 960×540, 5 Hz): 로봇 앞 오른쪽 위 3/4 시점에서 로봇·작업 매트·상자 두 개를 한 화면에.
+  후보 6곳을 Gazebo 에서 실시간으로 옮겨 보고 골랐다. GUI ① 에 [검출 카메라] / [Gazebo 전경] 탭 (11-10 목업의 Gazebo 판을 GUI 안으로).
+- 이제 Gazebo 창·RViz 를 띄우지 않아도 집기 과정을 볼 수 있다. WSL2 에서 Gazebo 창 렌더링이 가장 무거워서 끄면 빨라진다:
+
+| | Gazebo 창 + RViz | 둘 다 끔 |
+|---|---|---|
+| 검출 결과 주기 (실제 처리) | 3.0 Hz | **4.1 Hz** (상한 5 Hz) |
+| CPU 유휴 | 26 % | **43 %** |
+
+```bash
+SIM_ARGS="gazebo_gui:=false launch_rviz:=false" logs/start_demo.sh   # 권장
+```
+- GUI ③ 콘솔의 ACK 는 1초마다 한 줄로 묶는다 (`ACK  seq 120~124  5건, 평균 14 ms`). 물체가 없어도 계속 송신·ACK 되므로 한 줄씩 쓰면 집기 결과가 밀려 올라갔다. ERR·SIM 이 오면 모아 둔 ACK 를 먼저 써서 순서를 지킨다.
+- 안 보이는 탭의 영상은 변환하지 않는다 (CPU 절약).
+
 ## 4. 팀원 2 (성민) 기록
 
 ## 5. 팀원 3 (가영) 기록
