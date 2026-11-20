@@ -34,6 +34,7 @@ def generate_launch_description():
         Node(package='moveit_ros_move_group', executable='move_group', output='log', parameters=parameters),
         Node(package='rviz2', executable='rviz2', name='rviz2_moveit',
              condition=IfCondition(LaunchConfiguration('launch_rviz')),
-             arguments=['-d', os.path.join(ur_moveit, 'config', 'moveit.rviz')],
+             # 프로젝트 부품 마커와 Gazebo 카메라를 MotionPlanning과 함께 표시한다.
+             arguments=['-d', os.path.join(share, 'config', 'team2_view.rviz')],
              parameters=parameters, output='log'),
     ])

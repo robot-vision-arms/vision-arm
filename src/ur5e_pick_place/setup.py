@@ -19,6 +19,7 @@ setup(
         (share(), ['package.xml']),
         (share('launch'), glob('launch/*.launch.py')),
         (share('config'), glob('config/*.yaml')),
+        (share('config'), glob('config/*.rviz')),
         (share('urdf'), glob('urdf/*.xacro')),
         (share('worlds'), glob('worlds/*.sdf')),
     ] + [
@@ -35,6 +36,7 @@ setup(
     entry_points={
         'console_scripts': [
             'pick_place_node = ur5e_pick_place.pick_place_node:main',
+            'team2_workcell_visuals = ur5e_pick_place.team2_workcell_visuals:main',
         ],
     },
 )

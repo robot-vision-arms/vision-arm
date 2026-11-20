@@ -16,6 +16,7 @@ import uuid
 import yaml
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
+from launch.conditions import IfCondition
 from launch.actions import (AppendEnvironmentVariable, DeclareLaunchArgument, GroupAction,
                             IncludeLaunchDescription, LogInfo, OpaqueFunction,
                             SetEnvironmentVariable, SetLaunchConfiguration)
@@ -98,4 +99,7 @@ def generate_launch_description():
         bridge,
         work_plane_tf,
         pick_place,
+        Node(package='ur5e_pick_place', executable='team2_workcell_visuals',
+             condition=IfCondition(LaunchConfiguration('launch_rviz')),
+             parameters=[{'world_file': LaunchConfiguration('world_file')}]),
     ])
