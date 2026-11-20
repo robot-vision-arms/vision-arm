@@ -83,12 +83,15 @@ def generate_launch_description():
                    '--yaw', str(math.radians(p['work_plane_yaw_deg'])),
                    '--frame-id', 'base_link', '--child-frame-id', 'work_plane'])
 
-    pick_place = Node(package='ur5e_pick_place', executable='pick_place_node',
-                      parameters=[params_file, {'world_file': LaunchConfiguration('world_file')}])
+    pick_place = Node(package='ur5e_pick_place', executable='team2_pick_place_node',
+                      parameters=[params_file, {'world_file': LaunchConfiguration('world_file'),
+                                               'cycle_scene_mode': LaunchConfiguration('cycle_scene_mode')}])
 
     return LaunchDescription([
         DeclareLaunchArgument('gazebo_gui', default_value='true', description='false 면 Gazebo 창 없이 서버만'),
         DeclareLaunchArgument('launch_rviz', default_value='true', description='RViz 실행 여부'),
+        DeclareLaunchArgument('cycle_scene_mode', default_value='existing',
+                             description='existing: 기존 부품 집기; respawn: 사진 좌표 재현용 재스폰'),
         DeclareLaunchArgument('world_file', default_value=p.get('world_file') or os.path.join(share, 'worlds', 'workcell.sdf')),
         DeclareLaunchArgument('gz_partition', default_value=os.environ.get(
             'GZ_PARTITION') or f'vision_arm_{uuid.uuid4().hex[:12]}',

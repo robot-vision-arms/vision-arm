@@ -46,7 +46,8 @@ def main():
     stamp = datetime.now(timezone.utc).isoformat()
     metadata = dict(started_at_utc=stamp, ros_domain_id=os.environ.get('ROS_DOMAIN_ID', '0'),
                     settle_s=args.settle_s, startup_excluded=args.settle_s > 0,
-                    warmup_messages=0, warmup_errors=[])
+                    warmup_messages=0, warmup_errors=[], boundary_excluded_source_packets=0)
+    warmup_sequences = set()
     measuring = args.settle_s == 0
     # A fresh run must never leave a previous PASS looking like its result.
     save_report(args.out, dict(ok=False, status='running', **metadata))
@@ -63,13 +64,23 @@ def main():
                 metadata['warmup_messages'] += 1
                 try:
                     value = json.loads(msg.data)
+                    if isinstance(value, dict) and type(value.get('seq')) is int:
+                        warmup_sequences.add(value['seq'])
                     if kind == 'log' and (value.get('error') or value.get('acked') is not True):
                         metadata['warmup_errors'].append(value)
                 except (ValueError, TypeError, AttributeError) as exc:
                     metadata['warmup_errors'].append(str(exc))
                 return
             try:
-                measured.receive(kind, json.loads(msg.data))
+                value = json.loads(msg.data)
+                # 토픽별 콜백 순서는 같지 않다. 준비 구간에 ACK만 먼저 관찰한
+                # 패킷의 원본이 늦게 도착해도 새 측정 패킷으로 세지 않는다.
+                if (isinstance(value, dict) and type(value.get('seq')) is int
+                        and value['seq'] in warmup_sequences):
+                    if kind == 'packet':
+                        metadata['boundary_excluded_source_packets'] += 1
+                    return
+                measured.receive(kind, value)
             except (ValueError, TypeError) as exc:
                 measured.errors.append(f'{kind}: {exc}')
         subscriptions = [

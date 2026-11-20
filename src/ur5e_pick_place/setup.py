@@ -36,6 +36,7 @@ setup(
     entry_points={
         'console_scripts': [
             'pick_place_node = ur5e_pick_place.pick_place_node:main',
+            'team2_pick_place_node = ur5e_pick_place.team2_pick_place_node:main',
             'team2_workcell_visuals = ur5e_pick_place.team2_workcell_visuals:main',
         ],
     },
