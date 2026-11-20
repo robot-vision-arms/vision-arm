@@ -7,6 +7,7 @@ import os
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
+from launch.actions import ExecuteProcess
 from launch_ros.actions import Node
 
 
@@ -15,5 +16,7 @@ def generate_launch_description():
     return LaunchDescription([
         Node(package='vision_pick_place', executable='vision_node', parameters=[params]),
         Node(package='vision_pick_place', executable='robot_bridge', parameters=[params]),
-        Node(package='vision_pick_place', executable='gui'),
+        # GUI 는 PySide6 가 venv 에만 있어 PATH 의 python3 (env.sh 로 켠 venv) 로 띄운다.
+        # --symlink-install 로 만든 실행 파일은 첫 줄이 /usr/bin/python3 로 고정돼 PySide6 를 못 찾는다
+        ExecuteProcess(cmd=['python3', '-m', 'vision_pick_place.gui.main_window'], output='screen'),
     ])

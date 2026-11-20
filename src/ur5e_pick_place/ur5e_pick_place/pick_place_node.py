@@ -7,7 +7,7 @@ robot_server --publish-ros 가 TCP 로 받은 패킷을 /robot/targets 로 다�
 한 사이클 (팀원 2 의 상자 투입 검사 check_team2_bin_reach.py --drop 에서 확인한 순서를 그대로 옮김):
     1. 최신 패킷 확인 (calib_ok 가 false 면 거부), part_types 에 없는 종류(unknown 포함)는 빼고 max_objects 개까지
     2. 스폰 노드의 /sim/spawn_objects 로 같은 위치·각도에 가상 나사/너트를 놓고, TF(base_link→obj_k)로 놓인 것을 확인
-    3. 처음 한 번: 작업 시트 가운데 위 travel_height_m 로 가서 그 관절 각도를 '대기 자세' 로 저장 (노드가 켜져 있는 동안 재사용)
+    3. 처음 한 번: 작업 시트 옆(카메라 시야 밖) travel_height_m 로 가서 그 관절 각도를 '대기 자세' 로 저장 (노드가 켜져 있는 동안 재사용)
     4. 물체마다: 부품 위 높은 곳(travel_height_m) → 직선으로 접근(윗면 + approach_height_m) → 하강(컵 끝이 윗면 + grasp_gap_m) → /sim/vacuum ON
                  ('떨어져 있음' 이면 1 mm 씩 더 내려 최대 grasp_attempts 번) → 들어 올림 → 상자 위 bin_drop_z → 진공 OFF
                  → 상자 안에 멈췄는지 TF 로 확인 → 대기 자세로 복귀 (관절 각도 목표)
@@ -96,9 +96,12 @@ class PickPlaceNode(Node):
         self.declare_parameter('bin_x', [0.0, 0.0])
         self.declare_parameter('bin_y', [0.45, -0.45])
         self.declare_parameter('bin_drop_z', 0.15)
-        self.declare_parameter('ready_x_mm', 148.5)        # 대기 자세: 작업 시트 위 이 점 (mm) 의
-        self.declare_parameter('ready_y_mm', 105.0)
-        self.declare_parameter('travel_height_m', 0.25)    # 이 높이 (컵 끝, 작업 평면 위). 부품 사이 이동 높이도 같음
+        self.declare_parameter('ready_x_mm', 148.5)        # 대기 자세: 작업 시트 좌표 이 점 (mm, 카메라 시야 밖) 의
+        self.declare_parameter('ready_y_mm', -80.0)
+        self.declare_parameter('travel_height_m', 0.25)
+        # 대기 자세 관절 각도 (rad, UR_JOINTS 순서). 6개면 처음부터 관절 목표로 간다. 시작 자세(팔을 곧게 세움)는
+        # 특이 자세라 거기서 역기구학이 자주 실패했다 (11-20). 6개가 아니면 ready_x/y_mm 로 역기구학을 풀어 정한다
+        self.declare_parameter('ready_joints', [0.0])    # 이 높이 (컵 끝, 작업 평면 위). 부품 사이 이동 높이도 같음
         self.declare_parameter('settle_s', 3.0)
         self.declare_parameter('max_velocity_scaling', 0.3)
         self.declare_parameter('target_x_mm', 100.0)
@@ -219,7 +222,39 @@ class PickPlaceNode(Node):
             if self.motion_failed:
                 raise RuntimeError('직선 이동 중 멈추지 않음. 노드를 재시작하세요.')
             self.get_logger().warning('직선 경로 실패, 일반 계획으로 다시 시도')
+        # 좌표 목표를 그대로 주면 move_group 이 역기구학 해를 무작위로 골라 관절이 감기거나 멀리 도는 해가 나오고
+        # OMPL 이 자주 못 푼다 (11-20 시험: 상자 쪽 ↔ 작업 매트 이동 실패 4회). 현재 관절에서 시작해 역기구학을 풀어
+        # 가장 가까운 해를 얻고 관절 목표로 간다. 역기구학이 실패할 때만 좌표 목표로 계획한다.
+        joints = self.nearby_ik(position, tool_down_quaternion(yaw_deg))
+        if joints is not None:
+            return self.move_joints(joints)
+        self.get_logger().warning('역기구학 실패, 좌표 목표로 계획')
         return self.retry(lambda: self.move_once(position, tool_down_quaternion(yaw_deg), timeout))
+
+    def current_joints(self) -> list[float]:
+        state = self.moveit2.joint_state
+        values = dict(zip(state.name, state.position))
+        return [values[name] for name in UR_JOINTS]
+
+    def nearby_ik(self, position, quat_xyzw):
+        """현재 관절 각도를 시작점으로 tool0 자세의 역기구학을 푼다. 실패하면 None.
+
+        같은 자세라도 관절이 360° 다른 값이 여럿 있어서, 각 관절을 현재 값에 가장 가까운 쪽으로 옮긴다
+        (UR5e 는 팔꿈치 ±180°, 나머지 ±360°). 그래야 쓸데없이 한 바퀴 도는 경로가 나오지 않는다.
+        """
+        seed = self.current_joints()
+        result = self.moveit2.compute_ik(position=position, quat_xyzw=quat_xyzw, start_joint_state=seed,
+                                         timeout_sec=5.0)
+        if result is None:
+            return None
+        values = dict(zip(result.name, result.position))
+        joints = []
+        for name, start in zip(UR_JOINTS, seed):
+            value = values[name]
+            limit = math.pi if name == 'elbow_joint' else 2 * math.pi
+            near = value + 2 * math.pi * round((start - value) / (2 * math.pi))
+            joints.append(near if abs(near) <= limit else value)
+        return joints
 
     def move_joints(self, positions) -> int:
         """관절 각도 목표 (UR_JOINTS 순서) 로 이동. 계획 실패면 plan_attempts 번까지 다시."""
@@ -400,14 +435,16 @@ class PickPlaceNode(Node):
 
     def go_ready(self):
         """대기 자세로. 처음에는 작업 시트 위 좌표 목표로 가서 그 관절 각도를 저장하고, 다음부터는 관절 목표로 간다."""
+        if self.ready_joints is None:
+            configured = [float(v) for v in self.get_parameter('ready_joints').value]
+            if len(configured) == len(UR_JOINTS):
+                self.ready_joints = configured
         if self.ready_joints is not None:
             self.move_joints(self.ready_joints)
             return
         x, y, z = work_to_base(self.value('ready_x_mm'), self.value('ready_y_mm'), self.plane())
         self.move_tip(x, y, z + self.value('travel_height_m'))
-        state = self.moveit2.joint_state
-        joints = dict(zip(state.name, state.position))
-        self.ready_joints = [joints[name] for name in UR_JOINTS]
+        self.ready_joints = self.current_joints()
         self.get_logger().info('대기 자세 저장 (rad): ' + ', '.join(f'{v:.3f}' for v in self.ready_joints))
 
     def pick_one(self, t, bin_xy, seq, is_last: bool) -> dict:

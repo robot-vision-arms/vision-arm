@@ -45,5 +45,6 @@ def test_cup_tool_xy_moves_tool_opposite_to_ring_cup():
 
 def test_inside_bin():
     assert inside_bin((0.01, 0.84, 0.005), 0.0, 0.85)
-    assert not inside_bin((0.0, 0.79, 0.005), 0.0, 0.85)    # 상자 밖 (y 차이 6 cm)
+    assert inside_bin((0.0, 0.911, 0.013), 0.0, 0.85)       # 벽 근처, 다른 부품 위 (11-20 실제 사례)
+    assert not inside_bin((0.0, 0.77, 0.005), 0.0, 0.85)    # 상자 밖 (벽 너머)
     assert not inside_bin((0.0, 0.85, 0.10), 0.0, 0.85)     # 아직 공중

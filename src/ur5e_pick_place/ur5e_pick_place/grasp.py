@@ -56,8 +56,9 @@ def cup_tool_xy(part_x: float, part_y: float, cup_offset_m: float, tool_yaw_deg:
     return part_x - cup_offset_m * math.cos(yaw), part_y - cup_offset_m * math.sin(yaw)
 
 
-def inside_bin(xyz, bin_x: float, bin_y: float, half_width_m: float = 0.05,
+def inside_bin(xyz, bin_x: float, bin_y: float, half_width_m: float = 0.068,
                z_range_m: tuple[float, float] = (0.003, 0.04)) -> bool:
-    """부품 위치가 상자 안쪽 바닥 근처인지. 상자 벽 안쪽 폭 0.14 m 에서 여유를 두고 ±0.05 m (팀원 2 투입 검사와 같은 기준)."""
+    """부품 위치가 상자 안쪽인지. 벽 안쪽 면이 중심에서 ±0.07 m (workcell.sdf: 벽 중심 0.0725, 두께 5 mm) 라 ±0.068 m.
+    높이 0.04 m 까지는 먼저 넣은 부품 위에 겹치거나 벽에 기댄 경우다 (11-20: 두 번째 나사가 y +61 mm, z 13 mm 에 안착)."""
     x, y, z = xyz
     return abs(x - bin_x) < half_width_m and abs(y - bin_y) < half_width_m and z_range_m[0] < z < z_range_m[1]

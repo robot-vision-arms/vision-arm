@@ -7,7 +7,7 @@
 
 | 팀원 | 3주차 담당 (PROJECT.md 2.3) | 상태 | 남은 일 |
 |---|---|---|---|
-| 팀원 1 (동경) | GUI: `main_window.py`, `ros_worker.py` + 검출·분류 모델 비교 (11-19 추가) | 🟡 모델 비교 MVTec 완료 (종합 F1 규칙 0.747 → YOLO 0.989, 3절). Gazebo 가상 카메라·초록 매트 추가, `/sim/run_cycle` 구현 5/5 투입 (11-20). GUI 시작 전 | 4화면 구현, `/robot/log`·`/sim/pick_log` 표시. 4주차 자체 사진으로 모델 재평가 |
+| 팀원 1 (동경) | GUI: `main_window.py`, `ros_worker.py` + 검출·분류 모델 비교 (11-19 추가) | 🟡 모델 비교 MVTec 완료 (종합 F1 규칙 0.747 → YOLO 0.989, 3절). Gazebo 가상 카메라·초록 매트, `/sim/run_cycle`, 시차 보정, **GUI 4화면** (11-20) | 4화면 구현, `/robot/log`·`/sim/pick_log` 표시. 4주차 자체 사진으로 모델 재평가 |
 | 팀원 2 (성민) | TCP: `robot_bridge.py`, `robot_server.py` (+ `--publish-ros`) | ✅ 실제 이미지 100/100 ACK, 180초 연속 3,371/3,371, 서버 재시작 5회 복구, 팀원 3 스폰 노드와 연결(`team2_link.launch.py`) | 실제 폰·보정 패킷으로 시험 (보정 완료로 가능) |
 | 팀원 3 (가영) | 스폰·흡착: `object_spawner.py`, DetachableJoint, TF | ✅ 패킷대로 스폰, TF·마커, 진공 컵 헤드(5 mm 컵 + 링 컵) 5/5 통과, 실제 폰 영상 → 스폰 노드 연결. 11-20 실제 보정 패킷 → Gazebo 위치 일치(차이 0.01 mm 미만) | 없음 (실측 정답 대비 오차는 4주차) |
 
@@ -311,6 +311,34 @@ ros2 run vision_pick_place vision_node --ros-args --params-file src/vision_pick_
 
 전체 테스트 153개 통과 (`cup_tool_xy`, `inside_bin`, `part_top_m` 테스트 추가).
 남은 일: 실제 보정 패킷(폰 → TCP)으로 한 사이클, 가상 카메라 입력으로 같은 사이클, 사이클 시간 단축(속도 비율 0.3).
+
+### 2026-11-20 GUI 4화면 (`gui/main_window.py`, `gui/ros_worker.py`)
+
+![GUI (Gazebo 가상 카메라)](images/gui_sim.png)
+
+| 화면 | 내용 |
+|---|---|
+| ① 영상 | `/vision/debug_image` (검출 영역 노란 선, 검출 박스, 장축 화살표). 창 크기에 맞춰 비율 유지 |
+| ② 검출 좌표 | id, 종류, u/v px, x/y mm, 각도. 패킷 주기(Hz), `calib_ok: false` 면 "미보정" 표시, 2초 넘게 패킷이 없으면 경고 |
+| ③ 송수신 기록 | `/robot/log` (TCP ACK, 지연 ms) + `/sim/pick_log` (Gazebo 집기 결과), 실패는 빨간 줄. 요약: 최근 100건 ACK 비율·지연 P95, 집기 성공 수. **"Gazebo 집기 한 사이클" 버튼** (`/sim/run_cycle`) |
+| ④ 캘리브 상태 | 내부 파라미터 RMS, 호모그래피 재투영 오차, 파일 저장 시각(카메라가 움직인 뒤 다시 보정했는지), 카메라 높이(시차 보정에 쓰는 값), 패킷 `calib_ok` |
+
+- 실행 (`source env.sh` 로 venv 를 켠 뒤): `python3 -m vision_pick_place.gui.main_window` (실물), `... --calib-dir data/calib/sim` (가상 카메라).
+  `ros2 run vision_pick_place gui` 는 `--symlink-install` 빌드에서 실행 파일 첫 줄이 `/usr/bin/python3` 로 고정돼 PySide6(venv) 를 못 찾는다. `pipeline.launch.py` 도 같은 방식으로 바꿨다.
+- ROS 는 QThread 워커가 전용 Context 로 받고, 창은 Signal 로 받은 값으로만 갱신한다. 갱신 함수는 가짜 데이터로 시험 (`test/test_gui.py` 5개, venv 에서 실행. 시스템 python 의 colcon test 에서는 건너뜀).
+- 기호(✅·❌)는 WSL 글꼴에 없어 네모로 보여 글자로 바꿨다.
+
+**GUI 로 발견한 문제: 로봇 손목이 카메라를 가림.** 첫 화면에서 대기 자세(작업 시트 가운데 위 0.25 m)의 손목이 화면을 가리고 `vision_node` 가 손목을 '나사' 로 검출했다
+([캡처](images/gui_arm_in_view.png)). 현업처럼 촬영 전에 로봇을 시야 밖으로 빼야 한다. 대기 자세를 시트 아래쪽 밖 (148.5, −80) mm = base (0.45, −0.23) m 로 옮겼다
+(0.25 m 높이에서 카메라는 base y −0.12 ~ +0.03 m 만 봄. 처음 시도한 시트 왼쪽 밖 base x 0.20 m 는 베이스에 너무 가까워 역기구학 실패).
+
+**run_cycle 이동 안정화 (11-20 오후, 이어서).**
+- 수직이 아닌 이동은 **현재 관절에서 시작한 역기구학** (`compute_ik`, 충돌 검사 포함) → 각 관절을 현재 값에 가장 가까운 360° 등가값으로 → **관절 목표**. 좌표 목표를 그대로 주면 move_group 이 역기구학 해를 무작위로 골라 관절이 감기고 OMPL 이 자주 못 풀었다. 역기구학이 실패할 때만 좌표 목표로 계획.
+- 시작 자세(팔을 곧게 세움)는 특이 자세라 거기서 역기구학이 자주 실패했다 → 대기 자세를 **관절 각도로 고정** (`ready_joints`, 위 위치의 실제 관절값에서 360° 감긴 것만 편 값).
+- 상자 안 판정을 벽 안쪽 실제 폭에 맞춰 ±0.05 → ±0.068 m (두 번째 나사가 먼저 넣은 나사 위, y +61 mm 에 안착했는데 실패로 판정됐었다).
+- 결과: 가상 카메라 검출 → TCP → run_cycle **3/3, 약 112 초**. 계획 재시도 4회·역기구학 실패 2회는 모두 다음 시도나 대체 경로로 풀렸다. 반복 시험으로 안정성을 더 봐야 한다.
+
+**검출 → 송신 시간 (가상 카메라 입력).** `scripts/check_team_integration.py --count 100 --timeout 120` (팀원 2 도구): 100/100 ACK·타깃 동일, **P95 21.1 ms** (기준 ≤ 300 ms). 공식 KPI 는 실물 폰 입력으로 다시 잰다.
 
 ### 4주차 (참고)
 
