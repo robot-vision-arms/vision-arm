@@ -9,7 +9,7 @@
 |---|---|---|---|
 | 팀원 1 (동경) | GUI: `main_window.py`, `ros_worker.py` + 검출·분류 모델 비교 (11-19 추가) | 🟡 모델 비교 MVTec 완료 (종합 F1 규칙 0.747 → YOLO 0.989, 3절). Gazebo 가상 카메라·초록 매트 추가, `/sim/run_cycle` 구현 5/5 투입 (11-20). GUI 시작 전 | 4화면 구현, `/robot/log`·`/sim/pick_log` 표시. 4주차 자체 사진으로 모델 재평가 |
 | 팀원 2 (성민) | TCP: `robot_bridge.py`, `robot_server.py` (+ `--publish-ros`) | ✅ 실제 이미지 100/100 ACK, 180초 연속 3,371/3,371, 서버 재시작 5회 복구, 팀원 3 스폰 노드와 연결(`team2_link.launch.py`) | 실제 폰·보정 패킷으로 시험 (보정 완료로 가능) |
-| 팀원 3 (가영) | 스폰·흡착: `object_spawner.py`, DetachableJoint, TF | ✅ 패킷대로 스폰, TF·마커, 진공 컵 헤드(5 mm 컵 + 링 컵) 5/5 통과, 실제 폰 영상 → 스폰 노드 연결 | 실제 보정 패킷으로 "카메라 앞 부품 위치대로 Gazebo 에 부품이 생김" 확인 |
+| 팀원 3 (가영) | 스폰·흡착: `object_spawner.py`, DetachableJoint, TF | ✅ 패킷대로 스폰, TF·마커, 진공 컵 헤드(5 mm 컵 + 링 컵) 5/5 통과, 실제 폰 영상 → 스폰 노드 연결. 11-20 실제 보정 패킷 → Gazebo 위치 일치(차이 0.01 mm 미만) | 없음 (실측 정답 대비 오차는 4주차) |
 
 완료 기준 (PROJECT.md 8장 3주차): GUI 에 영상·좌표·캘리브 상태가 실시간으로 갱신되고, 송수신 기록이 쌓인다. (병행) MVTec 모델 비교표.
 
@@ -630,8 +630,10 @@ gz-sim8 `DetachableJoint.cc` 소스와 실기로 확인:
 
 - 실제 보정 패킷으로 "카메라 앞 부품 위치대로 Gazebo 에 부품이 생김" 확인 (동경 보정 후, 팀원 2 `tcp.launch.py` 의 `/robot/targets` 사용).
   > **갱신 (2026-11-19):** 11-17 보정 완료. `.npz` 를 받으면 진행.
+  > **완료 (2026-11-20):** 패킷 mm ↔ Gazebo 위치 차이 0.01 mm 미만 (아래 11-20 기록).
 - ~~TF: 스폰한 obj_k 를 RViz 에서 보이게 할지 결정~~ 11-17 완료 (아래).
 - `pick_place_node` 의 `/sim/run_cycle` 2단계에서 `plan_spawns`·`GzSpawner.spawn_all` 을 부르도록 연결 — `pick_place_node.py` 담당자와 협의 필요.
+  > **갱신 (2026-11-20):** 동경이 `/sim/run_cycle` 구현 (3절 11-20 기록). 스폰 노드가 함께 떠 있어야 함.
 
 #### TF·RViz 표시 (11-17)
 
@@ -788,3 +790,20 @@ URDF 변경 영향 확인: 팀원 1 의 `scripts/check_sim_week2.py` 를 새 시
 - 폰 송출 앱이 화면 꺼짐·백그라운드 전환 때 여러 번 멈췄다 (포트는 열려 있는데 프레임 0, 또는 포트 닫힘). 앱을 완전히 종료 후 다시 켜면 복구. 촬영·시연 중에는 자동 잠금을 끈다.
 
 보정 후 할 일: `data/calib/intrinsics.npz`·`homography.npz` 가 생기면 같은 실행으로 부품 2~3 개를 시트 격자의 알려진 위치에 놓고 `/sim/spawn_objects` → Gazebo 위치와 놓은 위치(mm) 비교.
+
+### 2026-11-20 실제 보정 패킷으로 스폰 위치 확인
+
+같은 날 WEEK2.md 가영 기록의 mm·각도 확인과 같은 장면(폰 거치·시트 그대로, `vision_node -p camera_rotate_deg:=270`, 11-20 homography)에서 이어서 했다. 다른 팀원 파일은 수정하지 않았다.
+
+실행: `sim.launch.py`(GUI 포함) → `team2_link.launch.py`(서버·브리지·스폰 노드, `GZ_PARTITION` 자동) → `/sim/spawn_objects`.
+
+| 단계 | 결과 |
+|---|---|
+| 폰 → `vision_node` → TCP → `/robot/targets` | `calib_ok: true` 패킷 수신. 나사 (139.8, 102.3) mm 23.9°, 너트 (212.2, 68.3) mm `null` |
+| `/sim/spawn_objects` | `success=True`, `seq=6163 스폰 2개: obj_0=screw(0.440, -0.048, 23.9°), obj_1=nut(0.512, -0.082, 0.0°)` |
+| Gazebo 실제 위치 (`gz model -p`) | obj_0 (0.439766, -0.047661) m, yaw 0.4169 rad = 23.89° / obj_1 (0.512240, -0.081699) m, yaw 0 |
+| 패킷 mm ↔ Gazebo | 작업 평면 원점 base_link (0.3, -0.15) 를 빼면 나사 (139.77, 102.34) mm, 너트 (212.24, 68.30) mm → **패킷과 차이 0.01 mm 미만, 각도 0.0°** |
+| TF `base_link→obj_k` | Gazebo 위치와 같음 |
+
+- 카메라 앞 부품 → Gazebo 부품까지 실제 보정 패킷으로 끊김 없이 연결됨을 확인했다.
+- 실제로 놓은 위치(자로 잰 정답)와의 오차는 부품을 격자에 정확히 맞추지 않아 재지 않았다. 4주차 실측 정답 수집에서 잰다.
