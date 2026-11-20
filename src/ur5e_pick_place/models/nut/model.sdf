@@ -1,6 +1,7 @@
 <?xml version="1.0"?>
 <!--
   M8 너트(맞변 13 mm, 두께 6 mm)를 원기둥(반지름 6.5 mm)으로 단순화. 장축이 없어 각도는 쓰지 않는다.
+  색은 나사와 같은 회색 금속 (가상 카메라 metal_hsv 검출용. 금색은 채도가 높아 배경으로 빠진다).
   모델 원점 = 바닥면 중심.
 -->
 <sdf version="1.9">
@@ -16,7 +17,7 @@
       </collision>
       <visual name="visual">
         <geometry><cylinder><radius>0.0065</radius><length>0.006</length></cylinder></geometry>
-        <material><ambient>0.8 0.65 0.2 1</ambient><diffuse>0.8 0.65 0.2 1</diffuse></material>
+        <material><ambient>0.6 0.6 0.65 1</ambient><diffuse>0.6 0.6 0.65 1</diffuse></material>
       </visual>
     </link>
   </model>

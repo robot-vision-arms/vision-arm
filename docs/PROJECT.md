@@ -39,7 +39,7 @@
 | 로봇 송신 | TCP Socket, JSON 패킷, 통신 로그 | `robot_bridge.py`, `packet.py` | 필수 |
 | 가상 로봇 | TCP 서버, 수신 로그, (확장) ROS 재발행 | `robot_server.py` | 필수 |
 | KPI 측정 | MAE, 성공률, P95 | `scripts/evaluate_kpi.py` | 필수 |
-| 시뮬레이터 | Gazebo Harmonic + `ur_simulation_gz` (UR5e), 작업 셀 world | `ur5e_pick_place/launch/sim.launch.py`, `worlds/workcell.sdf` | 확장 |
+| 시뮬레이터 | Gazebo Harmonic + `ur_simulation_gz` (UR5e), 작업 셀 world (초록 작업 매트, 위에서 보는 가상 카메라 `/sim/camera/image`, DECISIONS.md 12절) | `ur5e_pick_place/launch/sim.launch.py`, `worlds/workcell.sdf` | 확장 |
 | 좌표 변환 | 작업 평면 → `base_link`, 툴 자세 | `ur5e_pick_place/grasp.py` | 확장 |
 | 물체 스폰 | `ros_gz_sim create`, 부품 SDF 모델 | `object_spawner.py`, `models/<종류>/` | 확장 |
 | 모션 플래닝·집기 | MoveIt2 (`move_group` + pymoveit2), DetachableJoint 흡착 | `pick_place_node.py`, `urdf/ur5e_vacuum.urdf.xacro` | 확장 |

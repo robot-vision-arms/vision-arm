@@ -2,7 +2,8 @@ import math
 
 import pytest
 
-from ur5e_pick_place.grasp import PlanePose, nearest_equivalent_yaw_deg, tool_down_quaternion, work_to_base, wrap180
+from ur5e_pick_place.grasp import (PlanePose, cup_tool_xy, inside_bin, nearest_equivalent_yaw_deg, tool_down_quaternion,
+                                   work_to_base, wrap180)
 
 
 def test_work_to_base_applies_offset_and_yaw():
@@ -34,3 +35,15 @@ def test_tool_x_axis_aligns_with_requested_yaw():
     qx, qy, qz, qw = tool_down_quaternion(37)
     assert 1 - 2 * (qy * qy + qz * qz) == pytest.approx(math.cos(yaw))
     assert 2 * (qx * qy + qw * qz) == pytest.approx(math.sin(yaw))
+
+
+def test_cup_tool_xy_moves_tool_opposite_to_ring_cup():
+    assert cup_tool_xy(0.45, 0.01, 0.012) == pytest.approx((0.438, 0.01))
+    assert cup_tool_xy(0.45, 0.01, 0.012, 90.0) == pytest.approx((0.45, -0.002))
+    assert cup_tool_xy(0.45, 0.01, 0.0) == (0.45, 0.01)
+
+
+def test_inside_bin():
+    assert inside_bin((0.01, 0.84, 0.005), 0.0, 0.85)
+    assert not inside_bin((0.0, 0.79, 0.005), 0.0, 0.85)    # 상자 밖 (y 차이 6 cm)
+    assert not inside_bin((0.0, 0.85, 0.10), 0.0, 0.85)     # 아직 공중

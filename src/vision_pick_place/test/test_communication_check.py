@@ -2,7 +2,7 @@ import importlib.util
 import json
 from pathlib import Path
 
-from vision_pick_place.communication_check import CommunicationCheck, percentile95
+from vision_pick_place.communication_check import CommunicationCheck
 
 
 def fill(check, seq=1, latency=10.):

@@ -66,12 +66,15 @@ def generate_launch_description():
         launch_arguments={'launch_rviz': LaunchConfiguration('launch_rviz')}.items())
 
     # 흡착 on/off: ROS std_msgs/Empty → Gazebo gz.msgs.Empty (']' = ROS 에서 Gazebo 한 방향)
+    # 가상 카메라: Gazebo → ROS ('[' = Gazebo 에서 ROS 한 방향). workcell.sdf 의 top_camera
     bridge = Node(
         package='ros_gz_bridge', executable='parameter_bridge',
         arguments=[f'/vacuum/obj_{k}/{op}@std_msgs/msg/Empty]gz.msgs.Empty'
-                   for k in range(p['max_objects']) for op in ('attach', 'detach')])
+                   for k in range(p['max_objects']) for op in ('attach', 'detach')]
+        + ['/sim/camera/image@sensor_msgs/msg/Image[gz.msgs.Image',
+           '/sim/camera/camera_info@sensor_msgs/msg/CameraInfo[gz.msgs.CameraInfo'])
 
-    # 격자 종이 좌표계를 RViz 에서 보이게 한다. 계산은 pick_place_node 가 같은 sim.yaml 값으로 직접 한다
+    # 작업 시트(work_plane) 좌표계를 RViz 에서 보이게 한다. 계산은 pick_place_node 가 같은 sim.yaml 값으로 직접 한다
     work_plane_tf = Node(
         package='tf2_ros', executable='static_transform_publisher',
         arguments=['--x', str(p['work_plane_x']), '--y', str(p['work_plane_y']), '--z', str(p['work_plane_z']),

@@ -246,3 +246,9 @@ def test_ring_cup_rejects_screw_and_bad_pin():
     ok, reason, _ = suction_check((P[0], P[1], 0.0065), tool_down_quaternion(0), P, _yaw_q(0), NUT, NUT_KG,
                                   HOLE_RADIUS_M['nut'], narrow, ring=True)
     assert not ok and '안쪽 입술' in reason
+
+
+def test_part_top_height_from_models():
+    from ur5e_pick_place.object_spawner import part_top_m
+    assert part_top_m(_shape(model_file(PKG / 'models', 'screw'))) == pytest.approx(0.008)   # 누운 원기둥: 지름 8 mm
+    assert part_top_m(_shape(model_file(PKG / 'models', 'nut'))) == pytest.approx(0.006)     # 선 원기둥: 두께 6 mm

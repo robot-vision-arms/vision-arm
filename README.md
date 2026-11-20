@@ -69,8 +69,8 @@ ros2 service call /sim/run_cycle std_srvs/srv/Trigger       # 터미널 4
 
 팀원별 진행은 각 주차 문서 맨 위 "현황 요약" 표에 있습니다 ([WEEK1](docs/WEEK1.md) · [WEEK2](docs/WEEK2.md) · [WEEK3](docs/WEEK3.md)).
 
-2026-11-19 기준: 1주차 완료(보정·영상 입력·작업 셀), 2주차는 실제 나사·너트 확인만 남음, 3주차 TCP·스폰·흡착 완료, 모델 비교는 MVTec 결과까지 완료(종합 F1 규칙 0.75 → YOLOv8n-OBB 0.99, [노트북](notebooks/model_comparison.ipynb)), GUI 진행 전.
-`colcon test` 137개 통과.
+2026-11-20 기준: 1주차 완료(보정·영상 입력·작업 셀), 2주차는 실제 나사·너트 확인만 남음, 3주차 TCP·스폰·흡착 완료, `/sim/run_cycle` 자동 집기 사이클 구현(11-20, 5/5 상자 투입), Gazebo 가상 카메라·초록 매트 추가, 모델 비교는 MVTec 결과까지 완료(종합 F1 규칙 0.75 → YOLOv8n-OBB 0.99, [노트북](notebooks/model_comparison.ipynb)), GUI 진행 전.
+`colcon test` 153개 통과.
 
 아래는 2026-11-13 기록입니다. 영상 입력·전처리, 검출·비율 분류, 보정 파일 생성·로딩과 px→mm 변환,
 ROS2 검출·디버그 영상 발행, 작업면→로봇 좌표·툴 자세 계산을 구현했습니다.

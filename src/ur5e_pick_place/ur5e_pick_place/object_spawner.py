@@ -56,7 +56,7 @@ import math
 import threading
 import time
 import xml.etree.ElementTree as ET
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from pathlib import Path
 
 from ur5e_pick_place.grasp import PlanePose, work_to_base
@@ -259,6 +259,15 @@ def marker_shape(sdf_path: Path) -> MarkerShape | None:
     rgba = tuple(float(v) for v in color.split())
     return MarkerShape(shape, scale, (lp[0] + vp[0], lp[1] + vp[1], lp[2] + vp[2]),
                        rpy_to_quaternion(*lp[3:6]), rgba)
+
+
+def part_top_m(shape: MarkerShape) -> float:
+    """모델 원점(바닥 중심)에서 부품 윗면까지 높이 (m). 컵을 내릴 높이를 정할 때 쓴다."""
+    cz = shape.xyz[2]
+    if shape.shape == 'cylinder':
+        lying = abs(rotate(shape.quat, (0.0, 0.0, 1.0))[2]) < 0.5   # 축이 누워 있으면 (나사) 반지름, 서 있으면 (너트) 반 길이
+        return cz + (shape.scale[0] / 2 if lying else shape.scale[2] / 2)
+    return cz + shape.scale[2] / 2
 
 
 @dataclass(frozen=True)

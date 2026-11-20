@@ -1,6 +1,7 @@
 <?xml version="1.0"?>
 <!--
-  작업 셀: 바닥 + 격자 종이 자리(work_mat) + 분류 상자 2개. 로봇은 ur_sim_control.launch.py 가 world 원점에 스폰한다.
+  작업 셀: 바닥 + 작업 매트(work_mat, 초록) + 위에서 보는 카메라(top_camera) + 분류 상자 2개.
+  로봇은 ur_sim_control.launch.py 가 world 원점에 스폰한다.
   아래 좌표는 config/sim.yaml 과 맞춰야 한다:
     work_mat 의 모서리(-X,-Y)  = work_plane_x, work_plane_y  (A4 297x210 mm 기준)
     <type>_bin 중심            = part_types 에서 같은 칸의 bin_x, bin_y (공구 종류를 늘리면 상자도 여기 추가)
@@ -15,6 +16,10 @@
     <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
     <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
     <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <!-- 카메라 센서를 그린다 (top_camera). 없으면 카메라 토픽이 나오지 않는다 -->
+    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors">
+      <render_engine>ogre2</render_engine>
+    </plugin>
 
     <light type="directional" name="sun">
       <cast_shadows>true</cast_shadows>
@@ -33,13 +38,36 @@
       </link>
     </model>
 
-    <!-- 격자 종이 자리. 표시용이라 충돌 없음 (두께 1 mm 판에 물체가 걸리지 않게) -->
+    <!-- 작업 매트 (실제 작업 시트와 같은 A4 자리). 표시용이라 충돌 없음 (두께 1 mm 판에 물체가 걸리지 않게).
+         초록: 회색 금속 부품과 채도가 달라 metal_hsv 로 그림자 영향 없이 분리된다 (WEEK3 동경 기록, 바닥색 비교) -->
     <model name="work_mat">
       <static>true</static>
       <pose>0.4485 -0.045 0.0005 0 0 0</pose>
       <link name="link">
         <visual name="visual"><geometry><box><size>0.297 0.21 0.001</size></box></geometry>
-          <material><ambient>0.95 0.95 0.95 1</ambient><diffuse>0.95 0.95 0.95 1</diffuse></material></visual>
+          <material><ambient>0.10 0.60 0.20 1</ambient><diffuse>0.10 0.60 0.20 1</diffuse></material></visual>
+      </link>
+    </model>
+
+    <!-- 작업 매트를 위에서 내려다보는 가상 카메라. 화면 오른쪽 = +X, 위쪽 = +Y (작업 시트 규칙과 같음).
+         높이 0.75 m, 가로 시야 0.55 rad → 매트 면에서 약 423×238 mm (1 mm ≈ 3.0 px).
+         충돌이 없어 MoveIt 장애물로 등록되지 않는다. 토픽은 sim.launch.py 가 ROS 로 넘긴다 -->
+    <model name="top_camera">
+      <static>true</static>
+      <pose>0.4485 -0.045 0.75 0 1.5707963 1.5707963</pose>
+      <link name="link">
+        <visual name="body"><geometry><box><size>0.04 0.06 0.03</size></box></geometry>
+          <material><ambient>0.1 0.1 0.1 1</ambient><diffuse>0.1 0.1 0.1 1</diffuse></material></visual>
+        <sensor name="camera" type="camera">
+          <camera>
+            <horizontal_fov>0.55</horizontal_fov>
+            <image><width>1280</width><height>720</height></image>
+            <clip><near>0.05</near><far>3</far></clip>
+          </camera>
+          <always_on>1</always_on>
+          <update_rate>10</update_rate>
+          <topic>sim/camera/image</topic>
+        </sensor>
       </link>
     </model>
 

@@ -4,27 +4,36 @@ robot_server --publish-ros 가 TCP 로 받은 패킷을 /robot/targets 로 다�
 /sim/run_cycle 서비스가 호출될 때 한 사이클을 실행한다. 10 Hz 로 들어오는 패킷마다 움직이면 로봇이 쉬지 않으므로
 '패킷 한 장 → 집기 한 사이클' 로 끊는다.
 
-한 사이클:
-    1. 최신 패킷 확인 (calib_ok 가 false 면 거부), part_types 에 없는 종류(unknown 포함)는 빼고 max_objects 개까지 자르기
-    2. object_spawner 로 같은 위치·각도에 가상 나사/너트 스폰 → 곧바로 각 슬롯 detach
-       (DetachableJoint 는 child 모델이 나타나면 바로 붙이므로, 스폰 직후 떼어 둬야 물체가 제자리에 남는다)
-    3. 물체마다: 접근(approach_height_m 위) → 하강(grasp_gap_m 까지) → attach → 상승
-                 → part_type 의 상자(bin_x/bin_y 같은 칸) 위 → detach → 다음 물체
-    4. 결과를 /sim/pick_log 로 발행 (GUI ③) + logs/sim_pick_*.csv 기록 (KPI 의 Pick 성공률)
+한 사이클 (팀원 2 의 상자 투입 검사 check_team2_bin_reach.py --drop 에서 확인한 순서를 그대로 옮김):
+    1. 최신 패킷 확인 (calib_ok 가 false 면 거부), part_types 에 없는 종류(unknown 포함)는 빼고 max_objects 개까지
+    2. 스폰 노드의 /sim/spawn_objects 로 같은 위치·각도에 가상 나사/너트를 놓고, TF(base_link→obj_k)로 놓인 것을 확인
+    3. 물체마다: 접근(윗면 + approach_height_m) → 하강(컵 끝이 윗면 + grasp_gap_m) → /sim/vacuum ON
+                 ('떨어져 있음' 이면 1 mm 씩 더 내려 최대 grasp_attempts 번) → 들어 올림 → 상자 위 bin_drop_z → 진공 OFF
+                 → 상자 안에 멈췄는지 TF 로 확인 → 다음 물체가 있으면 안쪽 경유점(bin_retreat_*)을 거친다
+    4. 물체마다 결과를 /sim/pick_log 로 발행 (GUI ③) + logs/sim_pick_*.csv 기록 (KPI 의 Pick 성공률)
+
+집기는 컵 두 개 헤드 (urdf/ur5e_vacuum.urdf.xacro, object_spawner.py 설명):
+    나사 = tool0 바로 아래 5 mm 컵, 너트 = tool0 +X 로 12 mm 떨어진 링 컵. 컵이 둥글어 툴 yaw 는 0 으로 고정하고,
+    너트는 링 컵이 너트 중심에 오도록 tool0 을 -X 로 12 mm 옮긴다 (grasp.cup_tool_xy).
+    붙일지 말지는 스폰 노드의 /sim/vacuum 이 컵·부품 기하로 판정한다 (가까이 있다고 무조건 붙이지 않음).
 
 구독:   /robot/targets  std_msgs/String   packet 형식 JSON
 발행:   /sim/pick_log   std_msgs/String   {"seq", "obj", "part_type", "result", "plan_ms", "error"}
-        /vacuum/obj_<k>/attach, /vacuum/obj_<k>/detach  std_msgs/Empty  (ros_gz_bridge 가 Gazebo 로 전달)
-서비스: /sim/run_cycle  std_srvs/Trigger
+서비스: /sim/run_cycle       std_srvs/Trigger   위 한 사이클
+        /sim/move_to_target  std_srvs/Trigger   2주차 지정 좌표 이동 (target_* 파라미터)
+필요:   스폰 노드 (team2_link.launch.py 가 띄움): /sim/spawn_objects, /sim/vacuum, TF base_link→obj_k
 
     ros2 service call /sim/run_cycle std_srvs/srv/Trigger
 
 MoveIt 은 pymoveit2 (move_group 의 액션·서비스를 부르는 Python 클라이언트) 로 쓴다.
 move_group 은 sim.launch.py 가 ur_moveit_config 로 띄운다.
 """
+import csv
+from datetime import datetime
 import json
 import math
 import os
+from pathlib import Path
 import threading
 import time
 
@@ -35,11 +44,14 @@ from pymoveit2 import MoveIt2, MoveIt2State
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
-from std_msgs.msg import Empty, String
-from std_srvs.srv import Trigger
+from rclpy.time import Time
+from std_msgs.msg import String
+from std_srvs.srv import SetBool, Trigger
+from tf2_ros import Buffer, TransformException, TransformListener
 
-from ur5e_pick_place.object_spawner import slot_name
-from ur5e_pick_place.grasp import PlanePose, tool_down_quaternion, work_to_base
+from ur5e_pick_place.grasp import PlanePose, cup_tool_xy, inside_bin, tool_down_quaternion, work_to_base
+from ur5e_pick_place.object_spawner import (HOLE_RADIUS_M, SuctionLimits, marker_shape, model_file, part_top_m,
+                                            plan_spawns)
 from ur5e_pick_place.workcell_scene import collision_boxes
 
 # ur_moveit_config 의 계획 그룹·관절 이름 (1주차에 RViz MotionPlanning 패널에서 그룹 이름 확인)
@@ -59,6 +71,8 @@ EE_LINK = 'tool0'   # MoveIt 은 흡착 패드를 모르므로 tool0 목표 = �
 RETRYABLE_ERRORS = (MoveItErrorCodes.FAILURE, MoveItErrorCodes.PLANNING_FAILED, MoveItErrorCodes.TIMED_OUT,
                     MoveItErrorCodes.INVALID_MOTION_PLAN)
 
+CSV_FIELDS = ['time', 'seq', 'obj', 'part_type', 'result', 'plan_ms', 'error', 'final_x', 'final_y', 'final_z']
+
 
 class PickPlaceNode(Node):
     def __init__(self):
@@ -72,12 +86,18 @@ class PickPlaceNode(Node):
         self.declare_parameter('work_plane_z', 0.0)
         self.declare_parameter('work_plane_yaw_deg', 0.0)
         self.declare_parameter('tool_length_m', 0.05)
-        self.declare_parameter('grasp_gap_m', 0.002)
+        self.declare_parameter('grasp_gap_m', 0.0005)
+        self.declare_parameter('grasp_attempts', 3)
         self.declare_parameter('approach_height_m', 0.10)
+        self.declare_parameter('lift_height_m', 0.15)
         self.declare_parameter('part_types', ['screw', 'nut'])
         self.declare_parameter('bin_x', [0.0, 0.0])
         self.declare_parameter('bin_y', [0.45, -0.45])
         self.declare_parameter('bin_drop_z', 0.15)
+        self.declare_parameter('bin_retreat_x', 0.20)
+        self.declare_parameter('bin_retreat_y_abs', 0.55)
+        self.declare_parameter('bin_retreat_z', 0.25)
+        self.declare_parameter('settle_s', 3.0)
         self.declare_parameter('max_velocity_scaling', 0.3)
         self.declare_parameter('target_x_mm', 100.0)
         self.declare_parameter('target_y_mm', 100.0)
@@ -88,21 +108,25 @@ class PickPlaceNode(Node):
         self.declare_parameter('plan_attempts', 3)              # 계획 실패 시 최대 시도 횟수 (1 = 다시 시도 안 함)
         self.declare_parameter('plan_retry_delay_s', 2.0)       # 다시 시도하기 전 쉬는 시간
         self.declare_parameter('joint_state_wait_s', 10.0)      # 첫 이동 전에 관절 상태를 기다리는 최대 시간
+        self.declare_parameter('service_timeout_s', 30.0)       # 스폰·진공 서비스 응답 대기
+        self.declare_parameter('log_dir', 'logs')
 
         # pymoveit2 는 액션 응답을 같은 노드의 콜백으로 받으므로, 서비스 콜백 안에서 기다리려면 재진입 그룹 + 멀티스레드 실행기가 필요
         self.cb_group = ReentrantCallbackGroup()
         self.latest = None   # 마지막으로 받은 패킷 dict
         self.motion_lock = threading.Lock()
         self.motion_failed = False
+        self.csv_path = None
 
         self.sub = self.create_subscription(String, '/robot/targets', self.on_targets, 10)
         self.pub_log = self.create_publisher(String, '/sim/pick_log', 10)
-        n = self.get_parameter('max_objects').value
-        self.pub_attach = [self.create_publisher(Empty, f'/vacuum/{slot_name(k)}/attach', 10) for k in range(n)]
-        self.pub_detach = [self.create_publisher(Empty, f'/vacuum/{slot_name(k)}/detach', 10) for k in range(n)]
         self.srv = self.create_service(Trigger, '/sim/run_cycle', self.on_run_cycle, callback_group=self.cb_group)
         self.move_srv = self.create_service(Trigger, '/sim/move_to_target', self.on_move_to_target,
                                             callback_group=self.cb_group)
+        self.spawn_client = self.create_client(Trigger, '/sim/spawn_objects', callback_group=self.cb_group)
+        self.vacuum_client = self.create_client(SetBool, '/sim/vacuum', callback_group=self.cb_group)
+        self.tf_buffer = Buffer()
+        self.tf_listener = TransformListener(self.tf_buffer, self, spin_thread=True)
 
         self.moveit2 = MoveIt2(node=self, joint_names=UR_JOINTS, base_link_name=BASE_LINK,
                                end_effector_name=EE_LINK, group_name=GROUP_NAME,
@@ -110,15 +134,27 @@ class PickPlaceNode(Node):
                                ignore_new_calls_while_executing=True)
         self.moveit2.max_velocity = self.get_parameter('max_velocity_scaling').value
 
+        share = Path(get_package_share_directory('ur5e_pick_place'))
+        self.models_dir = share / 'models'
         # Gazebo 의 상자·바닥을 MoveIt 에도 알려 준다. 모르면 상자 벽을 뚫고 가는 경로를 계획할 수 있다.
         # /collision_object 는 저장되지 않는(volatile) 토픽이라 move_group 이 아직 안 떴을 때 보내면 사라진다.
         # 그래서 move_group 이 구독할 때까지 1초마다 확인하고, 구독이 보이면 두 번 보낸 뒤 멈춘다.
-        world_file = self.get_parameter('world_file').value or os.path.join(
-            get_package_share_directory('ur5e_pick_place'), 'worlds', f"{self.get_parameter('world_name').value}.sdf")
+        world_file = self.get_parameter('world_file').value or str(
+            share / 'worlds' / f"{self.get_parameter('world_name').value}.sdf")
         self.scene_boxes = collision_boxes(world_file)
         self.scene_sent = 0
         self.scene_timer = self.create_timer(1.0, self.publish_scene, callback_group=self.cb_group)
-        # TODO: logs/sim_pick_YYYYMMDD_HHMMSS.csv 열기
+
+    # ---------- 공통 ----------
+
+    def value(self, name: str) -> float:
+        result = float(self.get_parameter(name).value)
+        if not math.isfinite(result):
+            raise ValueError(f'{name}은 유한한 값이어야 합니다.')
+        return result
+
+    def plane(self) -> PlanePose:
+        return PlanePose(*(self.value(f'work_plane_{name}') for name in ('x', 'y', 'z', 'yaw_deg')))
 
     def publish_scene(self) -> bool:
         """충돌 박스를 MoveIt 에 등록. move_group 이 아직 구독하지 않으면 False. 같은 id 로 다시 보내면 덮어쓴다."""
@@ -145,63 +181,53 @@ class PickPlaceNode(Node):
         except (ValueError, TypeError) as exc:
             self.get_logger().warning(f'잘못된 로봇 타깃 패킷: {exc}')
 
-    def on_move_to_target(self, request, response):
-        """2주차: 명시적으로 호출했을 때만 지정 좌표로 한 번 이동한다."""
-        if not self.motion_lock.acquire(blocking=False):
-            response.success, response.message = False, '이미 이동 중입니다.'
-            return response
-        started = time.monotonic()
-        try:
+    def prepare_motion(self):
+        """이동 전 공통 준비: 설정값 검사, 관절 상태·충돌 물체 확인, MoveIt 속도·계획 시간 설정."""
+        if self.motion_failed:
+            raise RuntimeError('이전 이동 실패 후 노드를 재시작해야 합니다.')
+        timeout, speed, planning = (self.value(n) for n in ('motion_timeout_s', 'max_velocity_scaling', 'planning_time_s'))
+        attempts, delay = int(self.get_parameter('plan_attempts').value), self.value('plan_retry_delay_s')
+        if self.value('tool_length_m') < 0 or timeout <= 0 or planning <= 0 or not 0 < speed <= 1:
+            raise ValueError('툴 길이는 0 이상, 타임아웃·계획 시간은 양수, 속도 비율은 (0, 1]이어야 합니다.')
+        if attempts < 1 or delay < 0:
+            raise ValueError('plan_attempts는 1 이상, plan_retry_delay_s는 0 이상이어야 합니다.')
+        self.wait_for_joint_state(self.value('joint_state_wait_s'))
+        if self.scene_sent == 0:
+            # 시작 직후 바로 불린 경우: 충돌 물체 없이 계획하면 상자를 뚫을 수 있으므로 먼저 등록하고 반영될 시간을 준다
+            if not self.publish_scene():
+                raise RuntimeError('move_group 이 아직 /collision_object 를 구독하지 않습니다. 잠시 후 다시 부르세요.')
+            time.sleep(1.0)
+        self.moveit2.max_velocity = speed
+        self.moveit2.allowed_planning_time = planning
+
+    def move_tip(self, x: float, y: float, tip_z: float, yaw_deg: float = 0.0, straight: bool = False) -> int:
+        """컵 끝(패드 끝)을 base_link (x, y, tip_z) 로, 툴은 아래를 보고 yaw_deg. 계획 실패면 plan_attempts 번까지 다시.
+
+        straight=True (수직 하강·들어 올림): 먼저 직선(Cartesian) 경로로 간다. OMPL 은 무작위 탐색이라 몇 cm 수직 이동도
+        관절이 감긴 자세에서는 10초 안에 못 찾는 일이 있었다 (11-20 실험: 흡착 후 들어 올리기 3회 연속 실패).
+        직선 경로가 안 되면 아래 일반 계획으로 넘어간다.
+        성공하면 시도 횟수, 실패하면 RuntimeError. prepare_motion() 뒤에 부른다.
+        """
+        position = (x, y, tip_z + self.value('tool_length_m'))
+        timeout, delay = self.value('motion_timeout_s'), self.value('plan_retry_delay_s')
+        attempts = int(self.get_parameter('plan_attempts').value)
+        if straight:
+            if self.move_once(position, tool_down_quaternion(yaw_deg), timeout, cartesian=True) is None:
+                return 1
             if self.motion_failed:
-                raise RuntimeError('이전 이동 실패 후 노드를 재시작해야 합니다.')
-            def value(name):
-                result = float(self.get_parameter(name).value)
-                if not math.isfinite(result):
-                    raise ValueError(f'{name}은 유한한 값이어야 합니다.')
-                return result
-            plane = PlanePose(*(value(f'work_plane_{name}') for name in ('x', 'y', 'z', 'yaw_deg')))
-            x, y, z = work_to_base(value('target_x_mm'), value('target_y_mm'), plane)
-            height, tool_length = value('target_height_m'), value('tool_length_m')
-            timeout, speed = value('motion_timeout_s'), value('max_velocity_scaling')
-            if height < 0 or tool_length < 0 or timeout <= 0 or not 0 < speed <= 1:
-                raise ValueError('높이·툴 길이는 0 이상, 타임아웃은 양수, 속도 비율은 (0, 1]이어야 합니다.')
-            yaw = plane.yaw_deg + value('target_angle_deg')
-            position = (x, y, z + height + tool_length)
-            attempts, delay = int(self.get_parameter('plan_attempts').value), value('plan_retry_delay_s')
-            if attempts < 1 or delay < 0:
-                raise ValueError('plan_attempts는 1 이상, plan_retry_delay_s는 0 이상이어야 합니다.')
-            self.wait_for_joint_state(value('joint_state_wait_s'))
-            if self.scene_sent == 0:
-                # 시작 직후 바로 불린 경우: 충돌 물체 없이 계획하면 상자를 뚫을 수 있으므로 먼저 등록하고 반영될 시간을 준다
-                if not self.publish_scene():
-                    raise RuntimeError('move_group 이 아직 /collision_object 를 구독하지 않습니다. 잠시 후 다시 부르세요.')
-                time.sleep(1.0)
-            planning_time = value('planning_time_s')
-            if planning_time <= 0:
-                raise ValueError('planning_time_s는 양수여야 합니다.')
-            self.moveit2.max_velocity = speed
-            self.moveit2.allowed_planning_time = planning_time
-            for attempt in range(1, attempts + 1):
-                error = self.move_once(position, tool_down_quaternion(yaw), timeout)
-                if error is None:
-                    break
-                code = self.moveit2.get_last_execution_error_code()
-                retryable = (not self.motion_failed and code is not None and code.val in RETRYABLE_ERRORS)
-                if not retryable or attempt == attempts:
-                    detail = f' [error_code={None if code is None else code.val}, {self.moveit2.last_failure()}]'
-                    raise RuntimeError(error + detail + (f' ({attempt}회 시도)' if attempt > 1 else ''))
-                self.get_logger().warning(f'계획 실패(code {code.val}), {delay:.1f}초 후 다시 시도 {attempt + 1}/{attempts}')
-                time.sleep(delay)
-            response.success = True
-            response.message = f'tool0 base_link(m)={position}, yaw={yaw:.2f} deg, 시도 {attempt}회'
-        except (ValueError, RuntimeError) as exc:
-            response.success, response.message = False, str(exc)
-        finally:
-            self.motion_lock.release()
-        self.pub_log.publish(String(data=json.dumps(dict(
-            action='move_to_target', result='ok' if response.success else 'failed',
-            plan_ms=(time.monotonic() - started) * 1000, error='' if response.success else response.message))))
-        return response
+                raise RuntimeError('직선 이동 중 멈추지 않음. 노드를 재시작하세요.')
+            self.get_logger().warning('직선 경로 실패, 일반 계획으로 다시 시도')
+        for attempt in range(1, attempts + 1):
+            error = self.move_once(position, tool_down_quaternion(yaw_deg), timeout)
+            if error is None:
+                return attempt
+            code = self.moveit2.get_last_execution_error_code()
+            retryable = (not self.motion_failed and code is not None and code.val in RETRYABLE_ERRORS)
+            if not retryable or attempt == attempts:
+                detail = f' [error_code={None if code is None else code.val}, {self.moveit2.last_failure()}]'
+                raise RuntimeError(error + detail + (f' ({attempt}회 시도)' if attempt > 1 else ''))
+            self.get_logger().warning(f'계획 실패(code {code.val}), {delay:.1f}초 후 다시 시도 {attempt + 1}/{attempts}')
+            time.sleep(delay)
 
     def wait_for_joint_state(self, timeout_s: float):
         """시뮬레이터를 막 띄우면 관절 상태가 아직 안 들어와 있다. 시작 자세를 모르면 계획이 실패하므로 먼저 기다린다."""
@@ -211,11 +237,15 @@ class PickPlaceNode(Node):
                 raise RuntimeError(f'{timeout_s:.0f}초 동안 /joint_states 를 받지 못했습니다. 컨트롤러가 켜졌는지 확인하세요.')
             time.sleep(0.1)
 
-    def move_once(self, position, quat_xyzw, timeout_s: float):
-        """계획 + 실행 1번. 성공하면 None, 실패하면 이유 문자열. 실행 중 멈추지 않으면 motion_failed 를 켠다."""
+    def move_once(self, position, quat_xyzw, timeout_s: float, cartesian: bool = False):
+        """계획 + 실행 1번. 성공하면 None, 실패하면 이유 문자열. 실행 중 멈추지 않으면 motion_failed 를 켠다.
+
+        cartesian=True 면 직선 경로이고, 경로의 95 % 이상을 못 이으면 실행하지 않는다.
+        """
         started = time.monotonic()
-        if not self.moveit2.move_to_pose(position=position, quat_xyzw=quat_xyzw,
-                                         frame_id=BASE_LINK, timeout_sec=timeout_s):
+        if not self.moveit2.move_to_pose(position=position, quat_xyzw=quat_xyzw, frame_id=BASE_LINK,
+                                         cartesian=cartesian, cartesian_fraction_threshold=0.95 if cartesian else 0.0,
+                                         timeout_sec=timeout_s):
             return 'MoveIt 이동 요청 실패: move_group·현재 관절 상태를 확인하세요.'
         remaining = max(0.0, timeout_s - (time.monotonic() - started))
         if self.moveit2.wait_until_executed(timeout_sec=remaining, cancel_on_timeout=True):
@@ -224,12 +254,189 @@ class PickPlaceNode(Node):
         return ('이동 실패 또는 시간 초과. MoveIt 로그를 확인하세요.'
                 + (' 취소 완료 확인 후 노드를 재시작하세요.' if self.motion_failed else ''))
 
-    def on_run_cycle(self, request, response):
-        # TODO: 위 docstring 의 1~4 단계. 좌표·자세는 grasp.work_to_base / nearest_equivalent_yaw_deg / tool_down_quaternion
-        #       장축이 없는 종류(너트 등, 검출 단계에서 angle_deg 가 None)는 yaw 를 현재 손목 yaw 그대로 둔다
-        response.success = False
-        response.message = '전체 집기 사이클은 4주차 구현 대상입니다. 2주차 이동 확인은 /sim/move_to_target을 사용하세요.'
+    def call(self, client, request):
+        """다른 노드의 서비스를 부르고 응답을 기다린다 (멀티스레드 실행기라 콜백 안에서 기다려도 된다)."""
+        timeout = self.value('service_timeout_s')
+        if not client.wait_for_service(timeout_sec=min(timeout, 5.0)):
+            raise RuntimeError(f'{client.srv_name} 서비스가 없습니다. team2_link.launch.py (스폰 노드) 를 띄웠는지 확인하세요.')
+        future = client.call_async(request)
+        deadline = time.monotonic() + timeout
+        while not future.done():
+            if time.monotonic() > deadline:
+                raise RuntimeError(f'{client.srv_name} 응답 시간 초과')
+            time.sleep(0.02)
+        return future.result()
+
+    def object_xyz(self, name: str, max_age_s: float = 1.0):
+        """스폰 노드가 내보내는 TF base_link→obj_k 로 Gazebo 속 부품 위치. 없거나 오래됐으면 None."""
+        try:
+            t = self.tf_buffer.lookup_transform(BASE_LINK, name, Time())
+        except TransformException:
+            return None
+        age = (self.get_clock().now() - Time.from_msg(t.header.stamp)).nanoseconds / 1e9
+        if age > max_age_s:
+            return None
+        p = t.transform.translation
+        return (p.x, p.y, p.z)
+
+    def wait_object_xyz(self, name: str, near=None, tol_m: float = 0.005, timeout_s: float = 5.0):
+        """부품 위치가 들어올 때까지 (near 를 주면 그 근처에 올 때까지) 기다린다."""
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            xyz = self.object_xyz(name)
+            if xyz is not None and (near is None or math.dist(xyz[:2], near[:2]) <= tol_m):
+                return xyz
+            time.sleep(0.1)
+        raise RuntimeError(f'{name} 위치를 확인하지 못했습니다'
+                           + (f' (기대 위치 {near[0]:.3f}, {near[1]:.3f} 근처)' if near else ''))
+
+    def record(self, row: dict):
+        """한 물체 결과를 /sim/pick_log 로 발행하고 CSV 에 한 줄 추가한다."""
+        self.pub_log.publish(String(data=json.dumps(row, ensure_ascii=False)))
+        if self.csv_path is None:
+            log_dir = Path(self.get_parameter('log_dir').value)
+            log_dir.mkdir(parents=True, exist_ok=True)
+            self.csv_path = log_dir / f'sim_pick_{datetime.now():%Y%m%d_%H%M%S}.csv'
+            with open(self.csv_path, 'w', newline='') as f:
+                csv.DictWriter(f, CSV_FIELDS).writeheader()
+        with open(self.csv_path, 'a', newline='') as f:
+            csv.DictWriter(f, CSV_FIELDS, extrasaction='ignore').writerow(dict(time=time.time(), **row))
+
+    # ---------- 2주차: 지정 좌표 이동 ----------
+
+    def on_move_to_target(self, request, response):
+        """2주차: 명시적으로 호출했을 때만 지정 좌표로 한 번 이동한다."""
+        if not self.motion_lock.acquire(blocking=False):
+            response.success, response.message = False, '이미 이동 중입니다.'
+            return response
+        started = time.monotonic()
+        try:
+            plane = self.plane()
+            x, y, z = work_to_base(self.value('target_x_mm'), self.value('target_y_mm'), plane)
+            height = self.value('target_height_m')
+            if height < 0:
+                raise ValueError('target_height_m은 0 이상이어야 합니다.')
+            yaw = plane.yaw_deg + self.value('target_angle_deg')
+            self.prepare_motion()
+            attempt = self.move_tip(x, y, z + height, yaw)
+            response.success = True
+            response.message = (f'tool0 base_link(m)={(x, y, z + height + self.value("tool_length_m"))}, '
+                                f'yaw={yaw:.2f} deg, 시도 {attempt}회')
+        except (ValueError, RuntimeError) as exc:
+            response.success, response.message = False, str(exc)
+        finally:
+            self.motion_lock.release()
+        self.pub_log.publish(String(data=json.dumps(dict(
+            action='move_to_target', result='ok' if response.success else 'failed',
+            plan_ms=(time.monotonic() - started) * 1000, error='' if response.success else response.message))))
         return response
+
+    # ---------- 4주차: 집기 한 사이클 ----------
+
+    def on_run_cycle(self, request, response):
+        if not self.motion_lock.acquire(blocking=False):
+            response.success, response.message = False, '이미 이동 중입니다.'
+            return response
+        rows = []
+        try:
+            packet = self.latest
+            if packet is None:
+                raise RuntimeError('아직 받은 패킷이 없습니다 (/robot/targets).')
+            part_types = list(self.get_parameter('part_types').value)
+            bins = dict(zip(part_types, zip(self.get_parameter('bin_x').value, self.get_parameter('bin_y').value)))
+            if len(bins) != len(part_types):
+                raise ValueError('part_types, bin_x, bin_y 길이가 같아야 합니다.')
+            targets, skipped = plan_spawns(packet, self.plane(), part_types,
+                                           int(self.get_parameter('max_objects').value))
+            if not targets:
+                raise RuntimeError('집을 물체가 없습니다' + (f' ({"; ".join(skipped)})' if skipped else ''))
+            self.prepare_motion()
+            spawned = self.call(self.spawn_client, Trigger.Request())
+            if not spawned.success:
+                raise RuntimeError(f'스폰 실패: {spawned.message}')
+            # 스폰 노드는 자기 최신 패킷으로 스폰하므로, 이 노드가 고른 위치와 같은지 확인한다 (패킷이 그새 바뀌면 다름)
+            for t in targets:
+                self.wait_object_xyz(t.name, near=(t.x, t.y))
+            for i, t in enumerate(targets):
+                row = self.pick_one(t, bins[t.part_type], packet.get('seq'), is_last=(i == len(targets) - 1))
+                rows.append(row)
+                self.record(row)
+                if row['result'] != 'ok' or row['error']:   # 실패, 또는 넣었지만 다음 물체로 갈 경유점 이동 실패
+                    break
+            ok = sum(r['result'] == 'ok' for r in rows)
+            response.success = ok == len(targets)
+            response.message = (f'seq={packet.get("seq")}: {ok}/{len(targets)} 개 상자 투입. '
+                                + ', '.join(f'{r["obj"]}={r["part_type"]}:{r["result"]}' for r in rows)
+                                + (f' / 실패: {rows[-1]["error"]}' if rows and rows[-1]['result'] != 'ok' else '')
+                                + (f' / 건너뜀: {"; ".join(skipped)}' if skipped else ''))
+        except (ValueError, RuntimeError) as exc:
+            response.success, response.message = False, str(exc)
+        finally:
+            self.motion_lock.release()
+        self.get_logger().info(response.message)
+        return response
+
+    def pick_one(self, t, bin_xy, seq, is_last: bool) -> dict:
+        """물체 하나: 접근 → 하강·흡착 → 들어 올림 → 상자 위 → 놓기 → 안착 확인. 결과 dict (CSV 한 줄)."""
+        started = time.monotonic()
+        row = dict(seq=seq, obj=t.name, part_type=t.part_type, result='failed', error='')
+        holding = False
+        try:
+            shape = marker_shape(model_file(self.models_dir, t.part_type))
+            if shape is None:
+                raise RuntimeError(f'{t.part_type} 모델 모양을 읽지 못했습니다.')
+            top = self.value('work_plane_z') + part_top_m(shape)
+            # 구멍 있는 부품(너트)은 링 컵으로 집는다. 툴 yaw 0 에서 링 컵은 tool0 +X 쪽이라 툴을 반대로 옮긴다
+            offset = SuctionLimits().ring_offset if HOLE_RADIUS_M.get(t.part_type, 0.0) > 0 else 0.0
+            x, y = cup_tool_xy(t.x, t.y, offset)
+            self.move_tip(x, y, top + self.value('approach_height_m'))
+            result = None
+            for attempt in range(int(self.get_parameter('grasp_attempts').value)):
+                self.move_tip(x, y, top + self.value('grasp_gap_m') - 0.001 * attempt, straight=True)
+                result = self.call(self.vacuum_client, SetBool.Request(data=True))
+                if result.success or '떨어져' not in result.message:
+                    break
+            if result is None or not result.success:
+                raise RuntimeError(f'흡착 실패: {result.message if result else "시도 안 함"}')
+            holding = True
+            if t.name not in result.message:
+                raise RuntimeError(f'다른 부품을 흡착함: {result.message}')
+            self.move_tip(x, y, self.value('work_plane_z') + self.value('lift_height_m'), straight=True)
+            lifted = self.wait_object_xyz(t.name)
+            if lifted[2] < self.value('work_plane_z') + self.value('approach_height_m'):
+                raise RuntimeError(f'들어 올렸는데 부품이 따라오지 않음 (z={lifted[2]:.3f} m)')
+            bx, by = bin_xy
+            self.move_tip(*cup_tool_xy(bx, by, offset), self.value('bin_drop_z'))
+            released = self.call(self.vacuum_client, SetBool.Request(data=False))
+            if not released.success:
+                raise RuntimeError(f'놓기 실패: {released.message}')
+            holding = False
+            time.sleep(self.value('settle_s'))   # 떨어져서 멈출 때까지
+            final = self.wait_object_xyz(t.name)
+            row.update(final_x=final[0], final_y=final[1], final_z=final[2])
+            if not inside_bin(final, bx, by):
+                raise RuntimeError(f'상자 밖에 떨어짐 ({final[0]:.3f}, {final[1]:.3f}, {final[2]:.3f}) m')
+            row['result'] = 'ok'
+            # 다음 물체로 가기 전 / 마지막이면 대기 위치로: 상자 쪽 높은 안쪽 경유점 (팀원 2 검사와 같은 위치)
+            retreat = (self.value('bin_retreat_x'), math.copysign(self.value('bin_retreat_y_abs'), by),
+                       self.value('bin_retreat_z'))
+            try:
+                self.move_tip(*retreat)
+            except RuntimeError as exc:
+                if not is_last:
+                    row['error'] = f'투입 후 경유점 이동 실패 (부품은 상자 안): {exc}'
+                    return row | dict(plan_ms=(time.monotonic() - started) * 1000)
+                # 마지막 물체는 이미 상자에 들어갔으므로 복귀 실패는 경고만 남긴다 (11-19 기록: 가끔 계획 실패)
+                self.get_logger().warning(f'투입 후 복귀 실패 (부품은 상자 안): {exc}')
+        except (ValueError, RuntimeError) as exc:
+            row['error'] = str(exc)
+            if holding:   # 붙인 채 멈추면 다음 사이클이 꼬이므로 진공을 끈다
+                try:
+                    self.call(self.vacuum_client, SetBool.Request(data=False))
+                except RuntimeError:
+                    pass
+        row['plan_ms'] = (time.monotonic() - started) * 1000
+        return row
 
     def destroy_node(self):
         self.moveit2.destroy()
@@ -239,7 +446,8 @@ class PickPlaceNode(Node):
 def main(args=None):
     rclpy.init(args=args)
     node = PickPlaceNode()
-    executor = MultiThreadedExecutor(num_threads=2)
+    # 서비스 콜백이 MoveIt 액션·다른 노드 서비스 응답을 기다리는 동안 그 응답을 처리할 스레드가 더 필요하다
+    executor = MultiThreadedExecutor(num_threads=4)
     executor.add_node(node)
     try:
         executor.spin()

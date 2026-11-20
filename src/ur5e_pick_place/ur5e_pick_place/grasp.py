@@ -1,7 +1,7 @@
 """작업 평면 좌표 → UR5e base_link 좌표, 흡착 툴 자세 계산 (2주차). ROS 에 의존하지 않는 순수 계산.
 
 프레임 정의 (docs/PROJECT.md 3.4):
-    work_plane : 격자 종이 좌표계. 비전 패킷의 x_mm, y_mm, angle_deg 가 이 좌표계 값
+    work_plane : 작업 시트 좌표계 (왼쪽 아래 원점, +X 오른쪽, +Y 위쪽, mm). 비전 패킷의 x_mm, y_mm, angle_deg 가 이 좌표계 값
     base_link  : UR5e 베이스. Gazebo 안에서 work_plane 을 어디에 둘지는 config/sim.yaml 의 work_plane_* 로 정한다
 툴은 항상 아래(-Z)를 보고, 길쭉한 흡착 패드의 긴 변(tool0 의 +X)을 물체 장축에 맞춘다.
 """
@@ -48,3 +48,16 @@ def tool_down_quaternion(yaw_deg: float) -> tuple[float, float, float, float]:
     """
     half_yaw = math.radians(yaw_deg) / 2.0
     return (math.cos(half_yaw), math.sin(half_yaw), 0.0, 0.0)
+
+
+def cup_tool_xy(part_x: float, part_y: float, cup_offset_m: float, tool_yaw_deg: float = 0.0) -> tuple[float, float]:
+    """컵이 tool0 +X 로 cup_offset_m 떨어져 있을 때(링 컵), 컵 중심이 부품 중심에 오도록 하는 tool0 의 (x, y)."""
+    yaw = math.radians(tool_yaw_deg)
+    return part_x - cup_offset_m * math.cos(yaw), part_y - cup_offset_m * math.sin(yaw)
+
+
+def inside_bin(xyz, bin_x: float, bin_y: float, half_width_m: float = 0.05,
+               z_range_m: tuple[float, float] = (0.003, 0.04)) -> bool:
+    """부품 위치가 상자 안쪽 바닥 근처인지. 상자 벽 안쪽 폭 0.14 m 에서 여유를 두고 ±0.05 m (팀원 2 투입 검사와 같은 기준)."""
+    x, y, z = xyz
+    return abs(x - bin_x) < half_width_m and abs(y - bin_y) < half_width_m and z_range_m[0] < z < z_range_m[1]
