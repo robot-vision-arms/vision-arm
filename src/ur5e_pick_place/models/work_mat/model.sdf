@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<!--
+  작업 매트: 실제 작업 시트(A4 가로)와 같은 크기·마커 위치. 모델 원점 = 시트 가운데, 윗면이 z = 0.
+  그림 work_sheet.png 는 scripts/make_sim_calib.py 가 aruco_calib 값으로 만든다 (초록 바탕 + ArUco 40~43).
+  가상 카메라 사진으로 compute_homography.py (aruco 방식) 를 실물과 똑같이 돌릴 수 있다.
+  표시용이라 충돌 없음 (얇은 판에 물체가 걸리지 않게, MoveIt 장애물로도 등록되지 않음).
+-->
+<sdf version="1.9">
+  <model name="work_mat">
+    <static>true</static>
+    <link name="link">
+      <visual name="visual">
+        <geometry><plane><normal>0 0 1</normal><size>0.297 0.21</size></plane></geometry>
+        <material>
+          <ambient>1 1 1 1</ambient>
+          <diffuse>1 1 1 1</diffuse>
+          <specular>0 0 0 1</specular>
+          <pbr><metal>
+            <albedo_map>model://work_mat/work_sheet.png</albedo_map>
+            <roughness>1.0</roughness>
+            <metalness>0.0</metalness>
+          </metal></pbr>
+        </material>
+      </visual>
+    </link>
+  </model>
+</sdf>

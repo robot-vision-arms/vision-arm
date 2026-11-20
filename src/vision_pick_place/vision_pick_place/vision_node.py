@@ -1,5 +1,11 @@
 """ROS2 비전 노드 (2주차): 프레임 → 검출 → mm 변환 → 토픽 발행.
 
+입력 (하나만):
+    image_topic   ROS 영상 토픽 (예: Gazebo 가상 카메라 /sim/camera/image, config/params_sim.yaml)
+    image_dir     사진 폴더 (MVTec·촬영본 재생)
+    camera_url    스마트폰 IP 카메라 주소 (실물, config/params.yaml)
+    camera_index  USB 카메라 번호
+
 발행 토픽:
     /vision/detections   std_msgs/String   packet.make_pose_packet() 결과를 JSON 문자열로
     /vision/debug_image  sensor_msgs/Image ROI 박스·장축 화살표를 그린 영상 (GUI 표시용)
@@ -21,9 +27,30 @@ from vision_pick_place.vision_pipeline import process_frame
 from vision_pick_place.workspace_roi import sheet_roi_mask
 
 
+class TopicFrameSource:
+    """ROS 영상 토픽을 FrameSource 와 같은 read()/release() 로 감싼다. 가장 최근 1장만 들고 있다가
+    아직 돌려주지 않은 새 프레임이 있을 때만 준다 (FrameSource 의 카메라 입력과 같은 규칙)."""
+
+    def __init__(self, node: Node, topic: str, bridge: CvBridge):
+        self._node, self._bridge = node, bridge
+        self._latest = None
+        self._sub = node.create_subscription(Image, topic, self._on_image, 1)
+
+    def _on_image(self, msg: Image):
+        self._latest = msg
+
+    def read(self):
+        msg, self._latest = self._latest, None
+        return None if msg is None else self._bridge.imgmsg_to_cv2(msg, desired_encoding='bgr8')
+
+    def release(self):
+        self._node.destroy_subscription(self._sub)
+
+
 class VisionNode(Node):
     def __init__(self):
         super().__init__('vision_node')
+        self.declare_parameter('image_topic', '')
         self.declare_parameter('camera_url', '')
         self.declare_parameter('camera_index', 0)
         self.declare_parameter('image_dir', '')
@@ -53,10 +80,15 @@ class VisionNode(Node):
         rate = self.get_parameter('publish_rate_hz').value
         if not math.isfinite(rate) or rate <= 0:
             raise ValueError('publish_rate_hz는 양수여야 합니다.')
-        self.source = FrameSource(camera_index=self.get_parameter('camera_index').value,
-                                  camera_url=self.get_parameter('camera_url').value,
-                                  image_dir=self.get_parameter('image_dir').value,
-                                  rotate_deg=self.get_parameter('camera_rotate_deg').value)
+        topic = self.get_parameter('image_topic').value
+        if topic:
+            self.source = TopicFrameSource(self, topic, self.cv_bridge)
+            self.get_logger().info(f'입력: ROS 영상 토픽 {topic}')
+        else:
+            self.source = FrameSource(camera_index=self.get_parameter('camera_index').value,
+                                      camera_url=self.get_parameter('camera_url').value,
+                                      image_dir=self.get_parameter('image_dir').value,
+                                      rotate_deg=self.get_parameter('camera_rotate_deg').value)
         if not self.calibrator.status.ready:
             self.get_logger().warning('미보정: px만 발행합니다. mm 좌표와 각도는 null입니다.')
         self.roi_mask = None

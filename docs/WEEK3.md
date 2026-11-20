@@ -210,9 +210,36 @@ GPU 가 없어 학습·추론 모두 CPU 다. 추론 시간은 검출→송신 P
   흰 바닥은 낮은 조명의 그림자를 부품으로 잡고, 초록·파랑은 그림자에도 `metal_hsv` 로 8/8. 자세한 근거는 DECISIONS.md 12절.
 
 남은 일 (순서대로):
-1. 작업 매트에 ArUco 시트 그림을 입히고, 가상 카메라 사진으로 `compute_homography.py --aruco` → `data/calib/sim/`
-2. `vision_node` 에 ROS 영상 토픽 입력 (`image_topic`) 추가. 그 뒤 처리는 그대로
-3. 부품을 무작위 정답 위치에 놓고 검출 좌표로 집는 모드 + 자동 반복 시험 (위치·각도 오차, Pick 성공률 CSV)
+1. ~~작업 매트에 ArUco 시트 그림을 입히고, 가상 카메라 사진으로 `compute_homography.py --aruco` → `data/calib/sim/`~~ 11-20 완료 (아래)
+2. ~~`vision_node` 에 ROS 영상 토픽 입력 (`image_topic`) 추가. 그 뒤 처리는 그대로~~ 11-20 완료 (아래)
+3. 부품을 무작위 정답 위치에 놓고 검출 좌표로 집는 모드 + 자동 반복 시험 (위치·각도 오차, Pick 성공률 CSV) — 진행 중 (별도 작업)
+
+### 2026-11-20 가상 카메라 보정·`vision_node` 영상 토픽 입력
+
+- **작업 매트 그림** (`models/work_mat/`, `scripts/make_sim_calib.py`): 실물 작업 시트와 같은 위치·크기의 ArUco 40~43 을 초록 바탕에 그렸다.
+  - 처음에는 마커 흰 여백을 실물과 같은 4 mm 로 했더니 **마커가 0개 검출**됐다. 초록 바탕에서는 흰 여백 바깥 테두리도 사각형으로 보이는데,
+    ArUco 는 둘레의 5 % (약 7 mm) 보다 가까운 두 사각형을 하나로 보고 바깥 것만 남긴다. 흰 바탕인 실물 시트는 바깥 테두리가 없어 문제없었다.
+  - 여백을 8 mm 로 늘려 해결. 대신 가상 카메라에서는 검출 영역에서 마커 둘레 9 mm 를 뺀다 (`sheet_marker_margin_mm: 9`).
+  - XML 주석 안 `--` 때문에 `pick_place_node` 가 월드 파일을 못 읽은 일이 있어, 모든 SDF 가 올바른 XML 인지 보는 테스트를 넣었다.
+- **보정** (실물과 같은 명령): 내부 파라미터는 카메라 설정에서 계산 (fx = fy = 2268.3, 왜곡 0), 호모그래피는 가상 카메라 사진 1장으로
+  `compute_homography.py --aruco`. 마커 4/4, 한 점씩 빼고 잰 오차 **0.197 mm**, 카메라 기하로 계산한 정답 30점 대비 평균 **0.23 mm** (최대 0.27).
+  보정 파일은 PC 마다 같아서 `data/calib/sim/*.npz` 만 git 에 넣었다.
+- **`vision_node` 입력 `image_topic`**: 값이 있으면 ROS 영상 토픽을 받는다 (최신 1장만). 설정은 `config/params_sim.yaml`
+  (`/sim/camera/image`, `metal_hsv`, 보정 `data/calib/sim/`). 그 뒤 처리는 그대로.
+- **확인**: 스폰한 부품 3개(정답 위치)를 가상 카메라로 검출 → 종류 3/3, 오검출 0.
+
+| 부품 | 정답 (mm, °) | 검출 (mm, °) | 위치 오차 | 각도 오차 |
+|---|---|---|---|---|
+| 나사 | (90, 80), 45° | (89.60, 79.80), 45.01° | 0.45 mm | 0.01° |
+| 너트 | (180, 140) | (180.22, 140.20) | 0.30 mm | — |
+| 나사 | (230, 60), 120° | (230.56, 59.66), 120.00° | 0.66 mm | 0.00° |
+
+실행:
+```bash
+ros2 launch ur5e_pick_place sim.launch.py
+ros2 run vision_pick_place vision_node --ros-args --params-file src/vision_pick_place/config/params_sim.yaml
+```
+전체 테스트 159개 통과 (영상 토픽 입력, SDF 문법, 카메라 시야 테스트 추가).
 
 ### 2026-11-20 `/sim/run_cycle` 집기 한 사이클 구현 (`pick_place_node.py`)
 

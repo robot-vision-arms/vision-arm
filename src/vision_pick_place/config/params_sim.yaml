@@ -1,0 +1,21 @@
+# Gazebo 가상 카메라 입력 (DECISIONS.md 12절). 보정 파일은 scripts/make_sim_calib.py 로 만든 것 (git 에 포함).
+#   ros2 launch ur5e_pick_place sim.launch.py
+#   ros2 run vision_pick_place vision_node --ros-args --params-file src/vision_pick_place/config/params_sim.yaml
+vision_node:
+  ros__parameters:
+    image_topic: "/sim/camera/image"        # workcell.sdf 의 top_camera (sim.launch.py 가 ROS 로 넘김)
+    use_sim_time: true
+    intrinsics_path: "data/calib/sim/intrinsics.npz"
+    homography_path: "data/calib/sim/homography.npz"
+    segmentation_mode: "metal_hsv"          # 초록 매트 위 회색 금속: 채도 낮은 것 = 부품 (그림자에 강함)
+    hsv_max_saturation: 70
+    hsv_max_dark_value: 70
+    blur_ksize: 5
+    close_ksize: 3
+    open_ksize: 3
+    min_area_px: 300                        # 1 mm ≈ 3 px: 너트(지름 13 mm) 약 1,200 px², 나사(8x40 mm) 약 2,900 px²
+    nut_max_aspect: 1.5
+    publish_rate_hz: 5.0                    # 가상 카메라 10 Hz, 렌더링이 느린 PC 를 고려
+    sheet_roi: true
+    sheet_edge_margin_mm: 3.0
+    sheet_marker_margin_mm: 9.0             # 매트 그림의 마커 흰 여백이 8 mm (make_sim_calib.py 설명) → 9 mm 를 뺀다

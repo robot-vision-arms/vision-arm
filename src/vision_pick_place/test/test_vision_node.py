@@ -67,3 +67,36 @@ def test_publishes_pose_and_debug_image_with_real_ros(tmp_path, calibrated, mode
         if probe is not None:
             probe.destroy_node()
         rclpy.try_shutdown()
+
+
+def test_reads_frames_from_ros_image_topic(tmp_path):
+    """image_topic 입력 (Gazebo 가상 카메라용): 토픽으로 받은 영상을 같은 파이프라인으로 처리한다."""
+    from cv_bridge import CvBridge
+    frame = np.full((120, 160, 3), (30, 160, 50), dtype=np.uint8)          # 초록 바탕
+    cv2.rectangle(frame, (40, 50), (120, 70), (160, 160, 165), -1)         # 회색 금속 막대 → 나사
+    rclpy.init(args=['--ros-args', '-p', 'image_topic:=/test/camera', '-p', 'segmentation_mode:=metal_hsv',
+                     '-p', f'intrinsics_path:={tmp_path / "none.npz"}', '-p', f'homography_path:={tmp_path / "none.npz"}'])
+    executor = SingleThreadedExecutor()
+    node = probe = None
+    try:
+        node = VisionNode()
+        probe = Node('topic_input_probe')
+        packets = []
+        probe.create_subscription(String, '/vision/detections', lambda m: packets.append(json.loads(m.data)), 10)
+        pub = probe.create_publisher(Image, '/test/camera', 10)
+        msg = CvBridge().cv2_to_imgmsg(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB), encoding='rgb8')   # Gazebo 는 rgb8
+        executor.add_node(node)
+        executor.add_node(probe)
+        deadline = time.monotonic() + 8
+        while time.monotonic() < deadline and not packets:
+            pub.publish(msg)
+            executor.spin_once(timeout_sec=0.1)
+        assert packets, '영상 토픽 입력으로 검출 결과를 발행하지 못했습니다.'
+        assert [o['part_type'] for o in packets[-1]['objects']] == ['screw']
+    finally:
+        executor.shutdown()
+        if node is not None:
+            node.destroy_node()
+        if probe is not None:
+            probe.destroy_node()
+        rclpy.try_shutdown()

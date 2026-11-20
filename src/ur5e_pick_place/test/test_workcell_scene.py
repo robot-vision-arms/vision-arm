@@ -51,3 +51,27 @@ def test_relative_to_is_rejected(tmp_path):
       <pose relative_to="x">0 0 0 0 0 0</pose></model></world></sdf>""")
     with pytest.raises(ValueError):
         collision_boxes(str(sdf))
+
+
+@pytest.mark.parametrize('sdf', sorted((WORLD.parents[1] / 'models').glob('*/model.sdf')) + [WORLD],
+                         ids=lambda p: f'{p.parent.name}/{p.name}')
+def test_sdf_files_are_valid_xml(sdf):
+    """XML 주석 안의 '--' 같은 실수는 Gazebo 는 넘어가도 pick_place_node·스폰 노드의 파서는 죽는다 (11-20)."""
+    import xml.etree.ElementTree as ET
+    ET.parse(sdf)
+
+
+def test_top_camera_sees_the_whole_work_mat():
+    """가상 카메라 화면(바닥 기준)에 작업 매트 A4 가 여백을 두고 다 들어오는지."""
+    import xml.etree.ElementTree as ET
+    root = ET.parse(WORLD).getroot()
+    cam = root.find(".//model[@name='top_camera']")
+    x, y, z = (float(v) for v in cam.findtext('pose').split()[:3])
+    camera = cam.find('.//sensor/camera')
+    hfov = float(camera.findtext('horizontal_fov'))
+    w, h = int(camera.findtext('image/width')), int(camera.findtext('image/height'))
+    half_w = z * math.tan(hfov / 2)
+    half_h = half_w * h / w
+    mat = next(i for i in root.iter('include') if i.findtext('name') == 'work_mat')
+    mx, my = (float(v) for v in mat.findtext('pose').split()[:2])
+    assert abs(mx - x) + 0.297 / 2 < half_w and abs(my - y) + 0.21 / 2 < half_h

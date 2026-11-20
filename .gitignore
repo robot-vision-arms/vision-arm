@@ -36,6 +36,8 @@ logs/*
 *.tar.gz
 *.7z
 *.npz
+# 가상 카메라 보정은 카메라 설정으로 정해져 PC 마다 같다 → 공유 (scripts/make_sim_calib.py)
+!data/calib/sim/*.npz
 *.hdict
 *.mp4
 *.avi
