@@ -332,6 +332,16 @@ def random_packet(rng, part_types=('screw', 'screw', 'nut'), x_range=(70.0, 227.
     return dict(seq=seq, t_capture=0.0, calib_ok=True, objects=objects)
 
 
+def existing_slots(poses: dict, last_msg_t: float | None, now: float, max_age_s: float = 0.5) -> set[str] | None:
+    """pose/info 기록으로 지금 있는 슬롯 이름. 메시지를 max_age_s 안에 못 받았으면 None (판단 불가 → 호출 쪽이 전부 지움).
+
+    poses: 슬롯 → (받은 시각, ...). 지워진 슬롯은 새 메시지에 안 나오므로 시각이 오래되어 빠진다.
+    """
+    if last_msg_t is None or now - last_msg_t > max_age_s:
+        return None
+    return {name for name, (t, *_) in poses.items() if now - t <= max_age_s}
+
+
 def load_sim_params(config_file: Path) -> dict:
     """config/sim.yaml 에서 pick_place_node 의 ros__parameters 를 읽는다."""
     import yaml
@@ -364,6 +374,7 @@ class GzSpawner:
         self._attach = {}
         self._empty = Empty
         self._poses = {}   # obj_k → (받은 시각 monotonic, (x, y, z), (qx, qy, qz, qw))
+        self._poses_t = None   # pose/info 를 마지막으로 받은 시각 (obj_k 가 하나도 없어도 갱신)
         from gz.msgs10.pose_v_pb2 import Pose_V
         self._node.subscribe(Pose_V, f'/world/{world}/pose/info', self._on_poses)
         for k in range(max_objects):
@@ -375,6 +386,7 @@ class GzSpawner:
 
     def _on_poses(self, msg) -> None:
         now = time.monotonic()
+        self._poses_t = now
         for pose in msg.pose:
             if pose.name in self._states:   # obj_0 ~ obj_{n-1} 모델만
                 p, q = pose.position, pose.orientation
@@ -384,6 +396,11 @@ class GzSpawner:
         """지금 Gazebo 에 있는 obj_k 의 world(=base_link) 위치·자세. 지워진 슬롯은 곧 목록에서 빠진다."""
         now = time.monotonic()
         return {name: (xyz, quat) for name, (t, xyz, quat) in list(self._poses.items()) if now - t <= max_age_s}
+
+    def present_slots(self, max_age_s: float = 0.5) -> set[str] | None:
+        """지금 Gazebo 에 있는 obj_k 이름. pose/info 를 최근에 못 받았으면 None (있는지 모름)."""
+        # 구독 스레드가 동시에 넣으므로 object_poses 처럼 list() 로 한 번에 복사해서 넘긴다
+        return existing_slots(dict(list(self._poses.items())), self._poses_t, time.monotonic(), max_age_s)
 
     def _on_state(self, name: str, state: str) -> None:
         with self._cond:
@@ -489,8 +506,18 @@ class GzSpawner:
         return any(self._request(f'/world/{self.world}/remove', msg, Boolean) for _ in range(2))   # 한 번 더 시도
 
     def clear(self) -> None:
-        """obj_0 ~ obj_{n-1} 을 모두 지운다 (없는 슬롯도 오류 아님)."""
-        failed = [slot_name(k) for k in range(self.max_objects) if not self.remove(slot_name(k))]
+        """obj_0 ~ obj_{n-1} 중 Gazebo 에 있는 것을 지운다.
+
+        없는 이름을 지우면 응답은 true 지만 Gazebo 서버가 '[Err] Entity named [obj_k] ... not found, so not removed.'
+        를 슬롯마다 찍는다 (11-23 성민 님 10개 실행에서 시작할 때마다 보임). 그래서 pose/info 로 있는 슬롯만 지운다.
+        pose/info 를 아직 못 받았으면(노드가 막 떴거나 시뮬레이션 정지) 있는지 모르므로 예전처럼 전부 지운다 —
+        이전 실행에서 남은 모델을 못 지우면 같은 이름 스폰이 실패하기 때문.
+        """
+        names = [slot_name(k) for k in range(self.max_objects)]
+        present = self.present_slots()
+        if present is not None:
+            names = [n for n in names if n in present]
+        failed = [n for n in names if not self.remove(n)]
         if failed:
             raise RuntimeError(f'삭제 요청 실패: {", ".join(failed)}')
 

@@ -268,3 +268,13 @@ def test_random_packet_is_spaced_and_spawnable():
         assert all((o['angle_deg'] is None) == (o['part_type'] == 'nut') for o in objs)
         requests, skipped = plan_spawns(packet, PlanePose(0.3, -0.15, 0.0, 0.0), ['screw', 'nut'], 3)
         assert len(requests) == 3 and not skipped
+
+
+def test_existing_slots_only_when_pose_info_is_fresh():
+    """clear() 는 pose/info 로 본 슬롯만 지운다. 정보가 없거나 오래되면 None (전부 지우는 예전 동작)."""
+    from ur5e_pick_place.object_spawner import existing_slots
+    poses = {'obj_0': (10.0, (0, 0, 0), (0, 0, 0, 1)), 'obj_1': (9.0, (0, 0, 0), (0, 0, 0, 1))}
+    assert existing_slots(poses, None, 10.1) is None              # 아직 한 번도 못 받음
+    assert existing_slots(poses, 9.0, 10.1) is None               # 마지막 메시지가 오래됨 (정지·끊김)
+    assert existing_slots(poses, 10.0, 10.1) == {'obj_0'}         # obj_1 은 새 메시지에 없음 = 지워짐
+    assert existing_slots({}, 10.0, 10.1) == set()                # 장면에 부품 없음 → 지울 것 없음

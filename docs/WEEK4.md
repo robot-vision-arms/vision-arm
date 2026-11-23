@@ -159,3 +159,28 @@ PYTHONPATH=src/vision_pick_place python3 scripts/collect_ground_truth.py --print
 | 오검출 (자세 선·번호가 부품으로 잡히는지) | 초록 설정(`params.yaml` + `params_green.yaml`) **0개**, 흰 시트 설정만 쓰면 1개 → 초록 시트에는 반드시 초록 설정을 겹쳐 쓴다 |
 | 남은 확인 | 실제 인쇄본 색·조명에서 채도 (위 다음 주 2번) |
 | 빈 초록 시트 | 자세 선(나사·너트·번호) 없이 마커·100 mm 선만 있는 판 (`render_pose_sheet(..., plan=[], green=True)`, `green_sheet_blank.pdf`). 시연·자유 배치용. 같은 확인: 297.0 × 210.0 mm, 마커 4/4, 초록 설정 오검출 0개 |
+
+### 2026-11-23 스폰 시 "없는 모델 삭제" 오류 메시지 제거 (`object_spawner.py`)
+
+성민 님 11-23 기록(TEAM2_PROGRESS "없는 모델 초기 삭제 메시지")의 원인. 부품을 놓을 때 `spawn_all()` → `clear()` 가 `obj_0 ~ obj_{n-1}` 을 있든 없든 전부 지웠다.
+Gazebo 는 없는 이름에도 `true` 로 응답해 동작은 정상이지만, 서버 로그에 슬롯마다
+`[Err] [UserCommands.cc:1119] Entity named [obj_k] of type [2] not found, so not removed.` 가 찍혔다 (10개 설정이면 시작할 때 10줄).
+
+| 항목 | 내용 |
+|---|---|
+| 수정 | `clear()` 가 이미 구독 중인 `pose/info` 로 **지금 있는 슬롯만** 지운다 (`existing_slots`, `GzSpawner.present_slots`). `pose/info` 를 0.5 초 안에 못 받았으면(노드가 막 떴거나 시뮬레이션 정지) 있는지 모르므로 예전처럼 전부 지운다 — 이전 실행에서 남은 모델을 못 지우면 같은 이름 스폰이 실패하기 때문 |
+| 확인 (headless Gazebo, 10슬롯) | 빈 장면 clear: `[Err]` **0줄** (예전 방식 같은 조건 9줄). 2개 스폰 후 1개로 다시 놓기: 0줄, 남은 슬롯 `obj_0` 만. 단위 테스트 1개 추가, `ur5e_pick_place` 테스트 59개 통과 |
+
+### 2026-11-23 가영 담당 전체 점검 (다른 담당 코드 수정 없음)
+
+HEAD `0b48711` + 위 스폰 수정. `colcon build` 후 headless 시뮬레이션(`sim.launch.py gazebo_gui:=false launch_rviz:=false`).
+
+| 항목 | 결과 |
+|---|---|
+| 단위 테스트 전체 (`pytest src`) | **204개 통과** (성민 님 203개 + 스폰 1개). 경고 3개는 protobuf·datetime 사용 중단 예고 |
+| 3주차 스폰·흡착·TF (`check_spawn_week3.py`) | **통과**. TF = 패킷 위치·각도, 미보정 패킷 거부, 팔이 지나가도 부품 안 따라옴, 150 mm 거리 진공 거부, 너트 큰 컵 거부, 링 컵 너트·5 mm 컵 나사 2개 옮김 (놓인 위치 오차 0.5~0.7 mm), 같은 이름 재스폰, 삭제 시 마커 제거. Gazebo 로그 "not found, so not removed" **0줄** |
+| 2주차 `vision_node` (Gazebo 가상 카메라, `params_sim.yaml`) | 스폰한 3개 모두 검출·분류: 나사 (100.0, 104.9) 30.0°, 너트 (200.0, 149.9), 나사 (229.3, 50.8) 135.0° — 스폰 위치와 0.7 mm 안, 각도 일치. 시작할 때 첫 프레임 전 "프레임을 읽지 못했습니다" 1줄(정상) |
+| 주의 | `check_spawn_week3.py` 가 끝나면 팔이 매트 위(패드 끝 100 mm)에 남아 카메라를 가린다. 그 상태로 `vision_node` 를 켜면 회색 팔을 너트 1개로 잘못 검출했다. 팔을 대기 위치(148.5, −80 mm)로 옮긴 뒤 정상 |
+| `collect_ground_truth.py --print-plan` | 30개 자세 정상 출력 |
+| 폰 카메라 | 미연결이라 실물 입력은 확인 못 함 (내일 인쇄 시트 수집 때 확인) |
+| 종료 (Ctrl+C) | 성민 님 기록과 같은 현상 재현: `move_group` 종료 코드 −11 (`rclcpp::Executor` 소멸 중 segfault), Gazebo 5초 안에 안 꺼져 SIGTERM, `team2_pick_place_node` "Destroyable" 예외 메시지. 모두 종료 단계이고 가영 담당 노드(스폰·vision_node)에서는 오류 없음 |
