@@ -9,7 +9,7 @@
 |---|---|---|---|
 | 팀원 1 (동경) | KPI: `evaluate_kpi.py`, 100회 송신 테스트 + 모델 비교 | 🟡 `evaluate_kpi.py` 완성 (11-20). 임시 정답 30장으로 가영 님 결과 재현 (위치 1.86 mm, 각도 6.34°) | 인쇄 시트 정답으로 최종 KPI, 실물 폰 입력 100회 송신·P95, 초록 시트 PDF, 자체 사진 모델 재평가 |
 | 팀원 2 (성민) | Pick & Place 한 사이클 통합 (`pick_place_node`) | (팀원 2 작성) | |
-| 팀원 3 (가영) | 실측 정답 30+ 자세 수집, 시연 준비 | 🟡 임시 정답(화면 안내선 방식) 30장 수집·평가 (위치 MAE 1.85 mm, 각도 6.34°, 분류 100%). 인쇄 시트 PDF 준비 | 다음 주 인쇄 시트로 최종 정답 수집, 시연 준비 |
+| 팀원 3 (가영) | 실측 정답 30+ 자세 수집, 시연 준비 | 🟡 임시 정답(화면 안내선 방식) 30장 수집·평가 (위치 MAE 1.85 mm, 각도 6.34°, 분류 100%). 인쇄 시트 PDF 준비. **최종 정답은 초록 시트로 결정** (11-23), `pose_sheet_green.pdf` 생성 | 초록 시트 인쇄·채도 확인 후 최종 정답 수집, 시연 준비 |
 
 ## 2. 실행 방법
 
@@ -133,7 +133,26 @@ SIM_ARGS="gazebo_gui:=false launch_rviz:=false" logs/start_demo.sh   # 권장
 
 #### 다음 주 (최종 정답)
 
-1. `pose_sheet.pdf` 를 100% 배율로 인쇄, 100 mm 선 확인 → 지금 시트 자리에 테이프로 고정.
-2. 시트 사진 → `compute_homography.py --aruco` → `homography.npz` 갱신.
-3. `collect_ground_truth.py --rotate 270 --method print` 로 30장. 부품을 인쇄된 선·십자에 맞춤.
-4. `evaluate_kpi.py`(팀원 1) 에 `poses.csv` 를 넘김.
+> 11-23 변경: 흰 시트 대신 **초록 시트** 로 한다 (아래 11-23 기록). `pose_sheet.pdf`(흰 시트)는 쓰지 않는다.
+
+1. `pose_sheet_green.pdf` 를 100% 배율로 인쇄, 100 mm 선 확인 → 지금 시트 자리에 테이프로 고정.
+2. 폰으로 한 장 찍어 초록 바탕이 `params_green.yaml` 의 `hsv_max_saturation`(70) 로 배경 처리되는지 확인 (인쇄 초록이 연하면 조정 필요, 동경 님과 공유).
+3. 시트 사진 → `compute_homography.py --aruco` → `homography.npz` 갱신.
+4. `collect_ground_truth.py --rotate 270 --method print --params $G` 로 30장 (`G="src/vision_pick_place/config/params.yaml src/vision_pick_place/config/params_green.yaml"`). 부품을 인쇄된 선·십자에 맞춤.
+5. `evaluate_kpi.py`(팀원 1) 에 `poses.csv` 와 같은 `--params $G` 를 넘김.
+
+### 2026-11-23 초록 시트로 결정, `pose_sheet_green.pdf` 생성
+
+흰 시트에서 은색 나사 그림자가 같이 검출되어 위치가 치우치는 문제(WEEK3 동경 11-20, x −1.26 mm) 때문에 최종 정답은 초록 시트로 수집하기로 했다.
+
+```bash
+PYTHONPATH=src/vision_pick_place python3 scripts/collect_ground_truth.py --print-sheet data/ground_truth/pose_sheet_green.pdf --green
+```
+
+| 항목 | 결과 |
+|---|---|
+| 출력 | `data/ground_truth/pose_sheet_green.pdf` (+ `.png`, 12 px/mm) |
+| 크기 | PDF 297.0 × 210.0 mm (A4 가로) |
+| 카메라 배율 확인 (PNG 를 2.6·3.0 px/mm 로 줄임) | 마커 4/4 검출, 시트 호모그래피 RMS 0.043 mm (2.6) / 0.027 mm (3.0) |
+| 오검출 (자세 선·번호가 부품으로 잡히는지) | 초록 설정(`params.yaml` + `params_green.yaml`) **0개**, 흰 시트 설정만 쓰면 1개 → 초록 시트에는 반드시 초록 설정을 겹쳐 쓴다 |
+| 남은 확인 | 실제 인쇄본 색·조명에서 채도 (위 다음 주 2번) |
