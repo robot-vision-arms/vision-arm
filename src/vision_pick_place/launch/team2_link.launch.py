@@ -39,6 +39,15 @@ def start_link(context):
             probe.bind(('127.0.0.1', port))
         except OSError as exc:
             raise RuntimeError(f'TCP port {port} is unavailable. Use a free port or stop its existing launch.') from exc
+    asset_prefix = LaunchConfiguration('asset_prefix').perform(context)
+    spawner_env = {}
+    if asset_prefix:
+        asset_prefix = str(Path(asset_prefix).resolve(strict=True))
+        marker = Path(asset_prefix)/'share/ament_index/resource_index/packages/ur5e_pick_place'
+        if not marker.is_file():
+            raise ValueError('Invalid team2 asset overlay prefix')
+        # 모델 탐색 경로만 스폰 프로세스에 주입한다. 팀원 3 원본 파일·알고리즘은 바꾸지 않는다.
+        spawner_env['AMENT_PREFIX_PATH'] = asset_prefix + os.pathsep + os.environ.get('AMENT_PREFIX_PATH', '')
     share = get_package_share_directory('vision_pick_place')
     return [LogInfo(msg=f"Team 2 link: domain={session.get('ros_domain_id', '0')}, "
                     f"GZ_PARTITION={session['gz_partition']}; spawning remains service-triggered"),
@@ -48,7 +57,7 @@ def start_link(context):
                 launch_arguments={'port': LaunchConfiguration('port'),
                                   'log_dir': LaunchConfiguration('log_dir')}.items()),
             ExecuteProcess(cmd=[sys.executable, '-m', 'ur5e_pick_place.object_spawner',
-                '--ros-args', '-p', f'config_file:={config}'], output='screen'),
+                '--ros-args', '-p', f'config_file:={config}'], output='screen', additional_env=spawner_env),
             # 최신 팀원 3 노드가 /sim/vacuum도 제공한다. 중복 노드나 별도 attach 우회 경로를 만들지 않는다.
         ], scoped=True)]
 
@@ -59,6 +68,7 @@ def generate_launch_description():
         DeclareLaunchArgument('sim_params', default_value=os.path.join(
             get_package_share_directory('ur5e_pick_place'), 'config', 'sim.yaml')),
         DeclareLaunchArgument('port', default_value='9000'),
+        DeclareLaunchArgument('asset_prefix', default_value=''),
         DeclareLaunchArgument('log_dir', default_value='logs'),
         OpaqueFunction(function=start_link),
     ])

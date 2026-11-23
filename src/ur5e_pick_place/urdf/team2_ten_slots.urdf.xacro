@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<!-- 기존 흡착 패드는 포함만 한다. 추가 슬롯 3..9를 더해 총 10개 물체에 대응한다. -->
+<robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="$(arg ur_type)">
+  <xacro:include filename="$(find ur5e_pick_place)/urdf/ur5e_vacuum.urdf.xacro"/>
+  <xacro:vacuum_slot k="3"/>
+  <xacro:vacuum_slot k="4"/>
+  <xacro:vacuum_slot k="5"/>
+  <xacro:vacuum_slot k="6"/>
+  <xacro:vacuum_slot k="7"/>
+  <xacro:vacuum_slot k="8"/>
+  <xacro:vacuum_slot k="9"/>
+</robot>

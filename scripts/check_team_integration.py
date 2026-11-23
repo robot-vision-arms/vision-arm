@@ -49,7 +49,7 @@ def main():
                     warmup_messages=0, warmup_errors=[], boundary_excluded_source_packets=0)
     warmup_sequences = set()
     measuring = args.settle_s == 0
-    # A fresh run must never leave a previous PASS looking like its result.
+    # 새 검사가 실패·중단돼도 이전 성공 결과가 남지 않도록 시작 상태부터 저장한다.
     save_report(args.out, dict(ok=False, status='running', **metadata))
     node = None
     context_started = False
@@ -65,6 +65,7 @@ def main():
                 try:
                     value = json.loads(msg.data)
                     if isinstance(value, dict) and type(value.get('seq')) is int:
+                        # 원본뿐 아니라 ACK·목표에서 먼저 본 번호도 준비 구간에 속한 것으로 묶는다.
                         warmup_sequences.add(value['seq'])
                     if kind == 'log' and (value.get('error') or value.get('acked') is not True):
                         metadata['warmup_errors'].append(value)

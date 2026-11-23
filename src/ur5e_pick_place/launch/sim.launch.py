@@ -42,11 +42,13 @@ def configure_world(context):
             LogInfo(msg=f'Workcell SDF: {world}; GZ_PARTITION={partition}')]
 
 
-def generate_launch_description():
+def launch_sim(context):
     share = get_package_share_directory('ur5e_pick_place')
-    params_file = os.path.join(share, 'config', 'sim.yaml')
+    params_file = str(Path(LaunchConfiguration('sim_params').perform(context)).resolve(strict=True))
     with open(params_file) as f:
         p = yaml.safe_load(f)['pick_place_node']['ros__parameters']
+
+    world_file = LaunchConfiguration('world_file').perform(context) or p.get('world_file') or os.path.join(share, 'worlds', 'workcell.sdf')
 
     # GroupAction(scoped=True) 로 감싸야 한다. IncludeLaunchDescription 에 넘긴 인자는 바깥 설정까지 덮어써서,
     # 감싸지 않으면 아래 launch_rviz:='false' 가 새어 나와 MoveIt 쪽 RViz 도 뜨지 않는다 (2026-11-16 확인).
@@ -55,7 +57,7 @@ def generate_launch_description():
             os.path.join(get_package_share_directory('ur_simulation_gz'), 'launch', 'ur_sim_control.launch.py')),
         launch_arguments={
             'ur_type': UR_TYPE,
-            'description_file': os.path.join(share, 'urdf', 'ur5e_vacuum.urdf.xacro'),
+            'description_file': LaunchConfiguration('description_file'),
             'world_file': LaunchConfiguration('world_file'),
             'gazebo_gui': LaunchConfiguration('gazebo_gui'),
             'launch_rviz': 'false',   # RViz 는 MoveIt 쪽에서 MotionPlanning 패널과 함께 띄운다
@@ -64,7 +66,8 @@ def generate_launch_description():
     moveit = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
             os.path.join(share, 'launch', 'moveit.launch.py')),
-        launch_arguments={'launch_rviz': LaunchConfiguration('launch_rviz')}.items())
+        launch_arguments={'launch_rviz': LaunchConfiguration('launch_rviz'),
+                          'description_file': LaunchConfiguration('description_file')}.items())
 
     # 흡착 on/off: ROS std_msgs/Empty → Gazebo gz.msgs.Empty (']' = ROS 에서 Gazebo 한 방향)
     # 가상 카메라: Gazebo → ROS ('[' = Gazebo 에서 ROS 한 방향). workcell.sdf 의 top_camera
@@ -87,15 +90,8 @@ def generate_launch_description():
                       parameters=[params_file, {'world_file': LaunchConfiguration('world_file'),
                                                'cycle_scene_mode': LaunchConfiguration('cycle_scene_mode')}])
 
-    return LaunchDescription([
-        DeclareLaunchArgument('gazebo_gui', default_value='true', description='false 면 Gazebo 창 없이 서버만'),
-        DeclareLaunchArgument('launch_rviz', default_value='true', description='RViz 실행 여부'),
-        DeclareLaunchArgument('cycle_scene_mode', default_value='existing',
-                             description='existing: 기존 부품 집기; respawn: 사진 좌표 재현용 재스폰'),
-        DeclareLaunchArgument('world_file', default_value=p.get('world_file') or os.path.join(share, 'worlds', 'workcell.sdf')),
-        DeclareLaunchArgument('gz_partition', default_value=os.environ.get(
-            'GZ_PARTITION') or f'vision_arm_{uuid.uuid4().hex[:12]}',
-            description='Gazebo server/GUI/bridge partition; fresh by default unless GZ_PARTITION is set'),
+    return [
+        SetLaunchConfiguration('world_file', world_file),
         OpaqueFunction(function=configure_world),
         AppendEnvironmentVariable('GZ_SIM_RESOURCE_PATH', os.path.join(share, 'models')),
         GroupAction([ur_sim], scoped=True),
@@ -106,4 +102,18 @@ def generate_launch_description():
         Node(package='ur5e_pick_place', executable='team2_workcell_visuals',
              condition=IfCondition(LaunchConfiguration('launch_rviz')),
              parameters=[{'world_file': LaunchConfiguration('world_file')}]),
+    ]
+
+
+def generate_launch_description():
+    share = get_package_share_directory('ur5e_pick_place')
+    return LaunchDescription([
+        DeclareLaunchArgument('sim_params', default_value=os.path.join(share, 'config', 'sim.yaml')),
+        DeclareLaunchArgument('description_file', default_value=os.path.join(share, 'urdf', 'ur5e_vacuum.urdf.xacro')),
+        DeclareLaunchArgument('gazebo_gui', default_value='true'),
+        DeclareLaunchArgument('launch_rviz', default_value='true'),
+        DeclareLaunchArgument('cycle_scene_mode', default_value='existing'),
+        DeclareLaunchArgument('world_file', default_value=''),
+        DeclareLaunchArgument('gz_partition', default_value=os.environ.get('GZ_PARTITION') or f'vision_arm_{uuid.uuid4().hex[:12]}'),
+        OpaqueFunction(function=launch_sim),
     ])

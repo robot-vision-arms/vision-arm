@@ -16,7 +16,7 @@ def generate_launch_description():
     sim_share = get_package_share_directory('ur_simulation_gz')
     ur_moveit = get_package_share_directory('ur_moveit_config')
     description = ParameterValue(Command([
-        'xacro ', os.path.join(share, 'urdf', 'ur5e_vacuum.urdf.xacro'),
+        'xacro ', LaunchConfiguration('description_file'),
         ' ur_type:=ur5e name:=ur simulation_controllers:=',
         os.path.join(sim_share, 'config', 'ur_controllers.yaml'),
     ]), value_type=str)
@@ -31,6 +31,7 @@ def generate_launch_description():
                   'use_sim_time': True, 'publish_robot_description_semantic': True}]
     return LaunchDescription([
         DeclareLaunchArgument('launch_rviz', default_value='true'),
+        DeclareLaunchArgument('description_file', default_value=os.path.join(share, 'urdf', 'ur5e_vacuum.urdf.xacro')),
         Node(package='moveit_ros_move_group', executable='move_group', output='log', parameters=parameters),
         Node(package='rviz2', executable='rviz2', name='rviz2_moveit',
              condition=IfCondition(LaunchConfiguration('launch_rviz')),

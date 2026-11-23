@@ -5,6 +5,7 @@ respawn: explicitly use the original photo-to-simulation replication cycle.
 """
 from dataclasses import replace
 import math
+import json
 import time
 
 import rclpy
@@ -12,11 +13,15 @@ from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from visualization_msgs.msg import Marker, MarkerArray
 from rclpy.time import Time
-from tf2_ros import TransformException
+from tf2_ros import TransformException, TransformListener
 from moveit_msgs.srv import GetPositionIK
 from moveit_msgs.msg import MoveItErrorCodes
+from std_msgs.msg import String
+from std_srvs.srv import Trigger
+from rclpy.qos import QoSProfile, DurabilityPolicy
 
-from ur5e_pick_place.object_spawner import marker_shape, model_file, plan_spawns
+from ur5e_pick_place.object_spawner import marker_shape, model_file, plan_spawns, rotate
+from ur5e_pick_place.workcell_scene import collision_boxes
 from ur5e_pick_place.pick_place_node import PickPlaceNode, UR_JOINTS
 
 
@@ -24,6 +29,8 @@ def bind_existing_targets(targets, observed, tolerance=0.005):
     """Match by position first; reject wrong classification instead of replacing models."""
     bound, used = [], set()
     for target in targets:
+        # 검출 id는 화면의 나열 순서이므로 Gazebo의 obj_k 번호와 같다고 가정하지 않는다.
+        # 단위는 m이며, 5 mm 안에 후보가 하나뿐일 때만 기존 물체로 대응시킨다.
         candidates = [(name, obj) for name, obj in observed.items()
                       if math.hypot(target.x-obj['x'], target.y-obj['y']) <= tolerance]
         if len(candidates) != 1:
@@ -32,20 +39,36 @@ def bind_existing_targets(targets, observed, tolerance=0.005):
         if name in used:
             raise ValueError(f'하나의 물체에 검출이 중복 대응됨: {name}')
         if obj['part_type'] != target.part_type:
+            # 분류가 틀렸다고 모델을 교체하면 오류가 가려지므로 실제 집기 전에 거부한다.
             raise ValueError(f'기존 물체 종류 불일치: {name}, 검출={target.part_type}, 모델={obj["part_type"]}')
         used.add(name)
+        # 검출 좌표는 유지하고, 흡착·TF 조회에 쓸 이름만 실제 Gazebo 이름으로 바꾼다.
         bound.append(replace(target, name=name))
     return bound
 
 
 def ready_reached(actual, expected, tolerance=0.05):
+    # 투입 성공과 복귀 성공을 구분한다. 6개 관절 모두 0.05 rad 이내여야 복귀로 본다.
     return (len(actual) == len(expected) == 6
             and all(math.isfinite(a) and abs(a-b) < tolerance for a,b in zip(actual, expected)))
+
+
+def cylinder_extents(axis, radius, half_length):
+    """원기둥 자세를 반영한 월드 XYZ 반폭. 중심만 보고 상자 안이라고 판정하지 않는다."""
+    return [abs(v)*half_length + radius*math.sqrt(max(0.,1-v*v)) for v in axis]
 
 
 class Team2PickPlaceNode(PickPlaceNode):
     def __init__(self):
         super().__init__()
+        # 원본이 시작한 TF 전용 실행기를 끝내고 메인 4스레드 실행기에만 노드를 둔다.
+        # 같은 action client를 두 실행기에서 기다리면 wait-set 인덱스 예외가 날 수 있다.
+        previous_listener = self.tf_listener
+        previous_listener.executor.shutdown()
+        previous_listener.dedicated_listener_thread.join()
+        del self.tf_listener
+        del previous_listener
+        self.tf_listener = TransformListener(self.tf_buffer, self, spin_thread=False)
         self.declare_parameter('cycle_scene_mode', 'existing')
         self.declare_parameter('target_max_age_s', 3.0)
         self.declare_parameter('bin_inward_drop_m', 0.035)
@@ -54,9 +77,19 @@ class Team2PickPlaceNode(PickPlaceNode):
         self.marker_received = None
         self.object_types = {}
         self._cycle_routing = False
+        self._compact_return_active = False
+        self.declare_parameter('compact_cycle_return', False)
+        self._scene_counter = 0
+        self.declare_parameter('scene_seed', -1)
+        self.declare_parameter('team2_world_bin_check', False)
+        self.scene_pub = None
+        self.truth_pub = self.create_publisher(String, '/team2/scene_truth',
+                    QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
+        self.scene_srv = self.create_service(Trigger, '/team2/spawn_scene', self.on_spawn_scene,
+                                             callback_group=self.cb_group)
         self.shapes = {p: marker_shape(model_file(self.models_dir, p))
                        for p in self.get_parameter('part_types').value}
-        # Marker callbacks must still run while a service waits for TF or motion.
+        # 집기 서비스가 이동 응답을 기다리는 동안에도 물체 마커 수신을 계속 처리한다.
         self.markers_sub = self.create_subscription(
             MarkerArray, '/sim/object_markers', self.on_markers, 10,
             callback_group=ReentrantCallbackGroup())
@@ -65,7 +98,102 @@ class Team2PickPlaceNode(PickPlaceNode):
         previous = self.latest
         super().on_targets(msg)
         if self.latest is not previous:
+            # 원본 노드가 이동 중 입력을 무시한 경우에는 수신 시각도 갱신하지 않는다.
             self.target_received = time.monotonic()
+
+    def world_bin_contains(self, target, bin_xy):
+        boxes=collision_boxes(self.get_parameter('world_file').value)
+        floors=[b for b in boxes if b.id==target.part_type+'_bin/floor']
+        if len(floors)!=1:raise ValueError('통 바닥 충돌 모델을 찾을 수 없습니다.')
+        floor=floors[0]
+        walls=[b for b in boxes if b.id.startswith(target.part_type+'_bin/wall')]
+        if not walls or any(abs(v)>1e-6 for v in floor.quat_xyzw[:3]):
+            raise ValueError('월드 기반 통 판정에는 축 정렬된 바닥·벽이 필요합니다.')
+        if math.hypot(floor.position[0]-bin_xy[0],floor.position[1]-bin_xy[1])>.001:
+            raise ValueError('실제 통 중심과 설정 좌표가 다릅니다.')
+        pose=self.tf_buffer.lookup_transform('base_link',target.name,Time()).transform
+        q=(pose.rotation.x,pose.rotation.y,pose.rotation.z,pose.rotation.w)
+        shape=marker_shape(model_file(self.models_dir,target.part_type))
+        if shape is None or shape.shape!='cylinder':raise ValueError('지원하지 않는 부품 충돌 형상')
+        offset=rotate(q,shape.xyz)
+        center=[v+o for v,o in zip((pose.translation.x,pose.translation.y,pose.translation.z),offset)]
+        axis=rotate(q,rotate(shape.quat,(0.,0.,1.)))
+        extents=cylinder_extents(axis,shape.scale[0]/2,shape.scale[2]/2)
+        thickness=min(min(w.size) for w in walls)
+        inside=all(abs(center[k]-floor.position[k])+extents[k] <= floor.size[k]/2-thickness+.001 for k in [0,1])
+        bottom=floor.position[2]+floor.size[2]/2
+        top=max(w.position[2]+w.size[2]/2 for w in walls)
+        return inside and center[2]-extents[2]>=bottom-.002 and center[2]+extents[2]<=top+.001
+
+    def pick_one(self, target, bin_xy, seq, is_last):
+        self._compact_return_active = (not is_last and self.get_parameter('compact_cycle_return').value)
+        try:
+            return self.pick_one_with_world_check(target,bin_xy,seq,is_last)
+        finally:
+            self._compact_return_active = False
+
+    def pick_one_with_world_check(self, target, bin_xy, seq, is_last):
+        started=time.monotonic()
+        row=super().pick_one(target,bin_xy,seq,is_last)
+        if not self.get_parameter('team2_world_bin_check').value or 'final_x' not in row:
+            return row
+        # 원본의 15 cm 통 고정 기준 대신 프로필 SDF와 실제 부품 자세로 독립 판정한다.
+        # 다른 종류의 이동·흡착 실패를 성공으로 바꾸지는 않는다.
+        legacy_outside='상자 밖에 떨어짐' in row['error']
+        if row['result']=='ok' or legacy_outside:
+            try:
+                if not self.world_bin_contains(target,bin_xy):
+                    row.update(result='failed',error='실제 통 경계 밖이거나 부품이 벽 위로 나왔습니다.')
+                elif legacy_outside:
+                    self.go_ready()
+                    row.update(result='ok',error='')
+            except (ValueError,RuntimeError,TransformException) as exc:
+                row.update(result='failed',error=str(exc))
+        row['plan_ms']=(time.monotonic()-started)*1000
+        return row
+
+    def on_spawn_scene(self, request, response):
+        # 장면 초기화와 집기를 같은 잠금으로 묶어 이동 중 부품이 교체되지 않게 한다.
+        if not self.motion_lock.acquire(blocking=False):
+            response.success, response.message = False, '이동 중에는 장면을 초기화할 수 없습니다.'
+            return response
+        try:
+            self.scene_pub = self.create_publisher(String, '/robot/targets', 10)
+            from ur5e_pick_place.team2_demo_profile import scene_packet
+            fixed_seed = int(self.get_parameter('scene_seed').value)
+            packet = scene_packet(int(self.get_parameter('max_objects').value),
+                                  self._scene_counter if fixed_seed < 0 else fixed_seed)
+            self._scene_counter += 1
+            packet.update(seq=time.time_ns(), t_capture=time.time())
+            if not self.spawn_client.wait_for_service(timeout_sec=10):
+                raise RuntimeError('/sim/spawn_objects 서비스가 없습니다.')
+            future = None
+            started = time.monotonic()
+            # 합성 패킷은 장면 배치용이다. 실제 검출 결과로 위장하지 않고 표식을 남긴다.
+            # 스폰 응답에서 같은 seq를 확인한 뒤 발행을 끝내고 실제 카메라 입력을 기다린다.
+            while time.monotonic()-started < 60:
+                self.scene_pub.publish(String(data=json.dumps(packet)))
+                if (future is None and time.monotonic()-started > 1.0
+                        and any(i.node_name == 'object_spawner' for i in self.get_subscriptions_info_by_topic('/robot/targets'))):
+                    future = self.spawn_client.call_async(Trigger.Request())
+                if future is not None and future.done():
+                    result = future.result()
+                    if not result.success or f'seq={packet["seq"]} ' not in result.message:
+                        raise RuntimeError('요청한 장면의 스폰을 확인하지 못함: '+result.message)
+                    # 학습용 클래스는 검출 예측이 아니라 실제로 생성한 모델 종류에서 가져온다.
+                    self.truth_pub.publish(String(data=json.dumps(packet)))
+                    response.success, response.message = True, result.message
+                    return response
+                time.sleep(.02)
+            raise RuntimeError('장면 초기화 시간 초과')
+        except (ValueError, RuntimeError) as exc:
+            response.success, response.message = False, str(exc)
+            return response
+        finally:
+            if self.scene_pub is not None:
+                self.destroy_publisher(self.scene_pub)
+                self.scene_pub = None
+            self.motion_lock.release()
 
     def nearby_ik(self, position, quat_xyzw):
         # pymoveit2의 외부 응답 대기 시간과 IK 서버의 계산 제한은 서로 다르다.
@@ -73,6 +201,7 @@ class Team2PickPlaceNode(PickPlaceNode):
         current = self.current_joints()
         seeds = [current]
         if self.ready_joints is not None:
+            # 초기 관절값에 따라 IK가 실패할 수 있어 대기 자세도 별도 초기값으로 시도한다.
             seeds.append(self.ready_joints)
         for seed in seeds:
             request = GetPositionIK.Request()
@@ -94,6 +223,7 @@ class Team2PickPlaceNode(PickPlaceNode):
             joints = []
             for name, start in zip(UR_JOINTS, current):
                 value = values[name]
+                # 같은 자세의 ±360도 해 중 현재 각도에 가까운 값을 골라 불필요한 회전을 줄인다.
                 near = value + 2*math.pi*round((start-value)/(2*math.pi))
                 limit = math.pi if name == 'elbow_joint' else 2*math.pi
                 joints.append(near if abs(near) <= limit else value)
@@ -101,6 +231,7 @@ class Team2PickPlaceNode(PickPlaceNode):
         return None
 
     def move_tip(self, x, y, tip_z, yaw_deg=0.0, straight=False):
+        # 자동 사이클에만 경유점·놓기 보정을 적용해 수동 지정 좌표의 의미를 유지한다.
         # 작업면→좌우 끝 상자로 한 번에 이동하면, 현재 자세에 따라 IK가 실패할 수 있다.
         # 먼저 상자 안쪽의 높은 경유점으로 가서 같은 충돌 검사 아래 바깥쪽으로 접근한다.
         if (self._cycle_routing and not straight and abs(tip_z-self.value('bin_drop_z')) < 1e-6
@@ -132,9 +263,14 @@ class Team2PickPlaceNode(PickPlaceNode):
                 self.get_logger().info('상자→안쪽 높은 경유점→정면→대기 자세 복귀')
                 super().move_tip(0.20, math.copysign(0.55, y), height)
                 super().move_tip(0.40, 0.0, height)
+                # 중간 부품은 안전한 정면 경유점에서 다음 대상으로 이어간다.
+                # 마지막 부품은 기존 대기 관절값까지 복귀해 최종 판정을 받는다.
+                if self._compact_return_active:
+                    return
         return super().go_ready()
 
     def on_markers(self, msg):
+        # 카메라 분류 결과와 별개로 기존 모델의 형상·크기를 읽어 종류 대조에 사용한다.
         kinds = {'box': Marker.CUBE, 'cylinder': Marker.CYLINDER, 'sphere': Marker.SPHERE}
         current = {}
         for marker in msg.markers:
@@ -166,6 +302,8 @@ class Team2PickPlaceNode(PickPlaceNode):
                 raise ValueError('target_max_age_s는 양수여야 합니다.')
             if self.target_received is None or time.monotonic()-self.target_received > age:
                 raise ValueError('최신 로봇 목표가 없습니다. 카메라·TCP 연결을 확인하세요.')
+            # 한 사이클은 이 패킷을 기준으로 끝낸다. 이동 중 새 검출로 목표를 바꾸지 않는다.
+            # 위의 age는 이 노드가 목표를 받아들인 뒤의 시간이며 촬영 프레임 나이는 아니다.
             packet = self.latest
             part_types = list(self.get_parameter('part_types').value)
             xs, ys = self.get_parameter('bin_x').value, self.get_parameter('bin_y').value
@@ -183,11 +321,12 @@ class Team2PickPlaceNode(PickPlaceNode):
             observed = {}
             for name, part_type in self.object_types.copy().items():
                 x,y,z = self.wait_object_xyz(name)
-                # Only objects on the work plane participate, not past bin contents.
+                # 먼저 작업면 부근 높이로 좁히고, 아래 수평 위치 대응에서 실제 대상을 고른다.
+                # 상자 바닥도 낮으므로 높이 조건만으로 상자 속 부품이 제외되는 것은 아니다.
                 if abs(z-self.value('work_plane_z')) < 0.025:
                     observed[name] = dict(x=x,y=y,z=z,part_type=part_type)
             targets = bind_existing_targets(targets, observed)
-            # No /sim/spawn_objects call here: model names and identities persist.
+            # 재스폰을 호출하지 않으므로 인식 전에 있던 물체의 이름과 모델 ID가 유지된다.
             self.get_logger().info('기존 물체 대응: ' + ', '.join(
                 f'id={t.source_id}→{t.name}({t.part_type})' for t in targets))
             self.prepare_motion()
@@ -212,6 +351,7 @@ class Team2PickPlaceNode(PickPlaceNode):
         except (ValueError, RuntimeError) as exc:
             response.success, response.message = False, str(exc)
         finally:
+            # 실패해도 실행 상태를 해제해 다음 요청이 계속 '이동 중'으로 막히지 않게 한다.
             self._cycle_routing = False
             self.motion_lock.release()
         self.get_logger().info(response.message)
@@ -228,6 +368,7 @@ def main(args=None):
     except KeyboardInterrupt:
         pass
     finally:
+        executor.shutdown()
         node.destroy_node()
         rclpy.try_shutdown()
 

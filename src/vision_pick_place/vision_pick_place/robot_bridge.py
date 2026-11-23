@@ -47,6 +47,8 @@ class RobotBridge(Node):
                   'clock_sample_span_ms', 'clock_scope', 'queue_wait_ms', 'processing_ms']
         self.writer = csv.DictWriter(self.log_file, fieldnames=fields)
         self.writer.writeheader()
+        # 실시간 검사기가 첫 결과보다 먼저 열어도 CSV 열 이름을 읽을 수 있게 한다.
+        self.log_file.flush()
         self.pub_log = self.create_publisher(String, '/robot/log', 10)
         # ROS 수신 콜백에서 TCP ACK를 기다리지 않는다. 짧은 실행 지연은 제한된 큐로 흡수한다.
         self.sub = self.create_subscription(String, '/vision/detections', self.on_detections, depth)
@@ -56,10 +58,12 @@ class RobotBridge(Node):
     def on_detections(self, msg):
         if self.stopping.is_set():
             return
+        # 수신 콜백은 큐에 넣고 바로 반환한다. TCP 응답 대기로 다음 수신이 막히지 않게 한다.
         item = (msg, time.monotonic())
         try:
             self.pending.put_nowait(item)
         except queue.Full:
+            # 무한히 쌓는 대신 가장 오래 대기한 항목을 실패로 기록하고 새 좌표를 받는다.
             try:
                 old, received = self.pending.get_nowait()
             except queue.Empty:
@@ -75,6 +79,7 @@ class RobotBridge(Node):
             except queue.Empty:
                 continue
             if time.monotonic() - received > self.max_queue_age:
+                # 이 제한은 큐 수신 이후의 대기 시간이다. 촬영 시점부터의 전체 지연과 구분한다.
                 self.drop(msg, received, 'queue_expired')
             elif not self.stopping.is_set():
                 self.process(msg, received)
@@ -124,10 +129,12 @@ class RobotBridge(Node):
             result['latency_valid'] = False
         # 같은 결과를 GUI 연결용 토픽과 사후 분석용 CSV에 남긴다. 실제 로봇 집기 성공 로그는 아니다.
         result['queue_wait_ms'] = (processing_started-received)*1000
+        # 처리 시간은 디코딩·TCP 교환 등을 포함한다. 전체 지연과 비교해 병목 구간을 구분한다.
         result['processing_ms'] = (time.monotonic()-processing_started)*1000
         self.record(result)
 
     def destroy_node(self):
+        # 워커가 CSV나 소켓을 사용 중일 때 닫지 않도록 종료 신호→대기→자원 정리 순서를 지킨다.
         self.stopping.set()
         self.worker.join(timeout=float(self.get_parameter('ack_timeout_s').value) + 2.0)
         if self.worker.is_alive():

@@ -7,6 +7,7 @@ No synthetic vision packets are published. Stops on the first cycle failure.
 """
 import argparse
 import json
+import math
 import os
 from pathlib import Path
 import subprocess
@@ -21,9 +22,15 @@ def main():
     parser.add_argument('--execute', action='store_true', required=True)
     parser.add_argument('--cycles', type=int, default=5)
     parser.add_argument('--transport-trials', type=int, default=3)
+    parser.add_argument('--profile',default='')
+    parser.add_argument('--dataset-dir',default='')
+    parser.add_argument('--objects',type=int,default=3)
+    parser.add_argument('--spawn-service',default='/sim/spawn_random')
+    parser.add_argument('--cycle-timeout',type=float,default=240)
     parser.add_argument('--out', default='logs/team2_existing_cycles.json')
     args = parser.parse_args()
-    if not 1 <= args.cycles <= 100 or not 0 <= args.transport_trials <= 10:
+    if (not 1 <= args.cycles <= 100 or not 0 <= args.transport_trials <= 10
+            or not 1 <= args.objects <= 10 or not math.isfinite(args.cycle_timeout) or args.cycle_timeout <= 0):
         parser.error('cycles: 1..100; transport-trials: 0..10')
     import rclpy
     from std_msgs.msg import String
@@ -35,7 +42,7 @@ def main():
     from vision_pick_place.team2_session import load_session
 
     report = dict(ok=False,status='running',mode='existing',synthetic_vision_packets=False,
-                  scene_initialization='Gazebo spawn_random',cycles=[],transport=[],
+                  scene_initialization=args.spawn_service,objects_per_cycle=args.objects,cycles=[],transport=[],
                   real_hardware_tested=False)
     save_report(args.out,report)
     try:
@@ -60,7 +67,7 @@ def main():
         joints.update(zip(msg.name,msg.position))
     subs.append(node.create_subscription(JointState,'/joint_states',on_joints,10))
     params_client=node.create_client(GetParameters,'/pick_place_node/get_parameters')
-    spawn=node.create_client(Trigger,'/sim/spawn_random')
+    spawn=node.create_client(Trigger,args.spawn_service)
     cycle=node.create_client(Trigger,'/sim/run_cycle')
     def wait(predicate,seconds=30):
         end=time.monotonic()+seconds
@@ -77,6 +84,7 @@ def main():
         wait(lambda:f.done(),timeout)
         return f.result()
     def identities():
+        # obj_0 같은 이름은 재생성 후에도 같을 수 있어 Gazebo 내부 모델 ID를 비교한다.
         p=subprocess.run(['gz','service','-s',f"/world/{session['world_name']}/scene/info",
                           '--reqtype','gz.msgs.Empty','--reptype','gz.msgs.Scene',
                           '--timeout','4000','--req',''],capture_output=True,text=True,env=env,timeout=7)
@@ -94,14 +102,15 @@ def main():
         if len(ready)!=6:raise RuntimeError('Explicit ready_joints are required for repeat verification')
         for index in range(args.cycles):
             row=dict(cycle=index+1,ok=False);report['cycles'].append(row);save_report(args.out,report)
+            # 각 시험 시작에만 장면을 새로 배치한다. 실제 집기 중에는 모델이 유지돼야 한다.
             seeded=call(spawn)
             row['scene_setup']={'success':seeded.success,'message':seeded.message}
             if not seeded.success:raise RuntimeError('Random placement failed: '+seeded.message)
             spin(3)
-            # Require both real source and TCP-delivered targets after settling.
+            # 이전 장면의 패킷을 쓰지 않도록 안착 뒤의 검출·TCP 전달 결과를 모두 기다린다.
             after=time.monotonic()
             wait(lambda:all(k in latest and latest[k][1]>after and latest[k][0].get('calib_ok')
-                            and len(latest[k][0].get('objects',[]))==3 for k in ['vision','targets']))
+                            and len(latest[k][0].get('objects',[]))==args.objects and not latest[k][0].get('synthetic',False) for k in ['vision','targets']))
             row['detections']=latest['vision'][0]
             if index==0:
                 for trial in range(args.transport_trials):
@@ -117,15 +126,21 @@ def main():
                     save_report(args.out,report)
                     print('Transport',trial+1,'ok',report['transport'][-1]['ok'],flush=True)
             row['model_ids_before']=identities()
-            if len(row['model_ids_before'])!=3:raise RuntimeError('Expected exactly three existing models')
-            before=len(rows);started=time.monotonic();response=call(cycle,240)
+            if len(row['model_ids_before'])!=args.objects:raise RuntimeError('Expected configured number of existing models')
+            if args.dataset_dir:
+                if not args.profile:raise ValueError('--dataset-dir requires --profile')
+                capture=subprocess.Popen([sys.executable,'scripts/capture_team2_scene.py','--profile',args.profile,'--out',str(Path(args.dataset_dir)/f'cycle_{index+1:02d}')])
+                wait(lambda:capture.poll() is not None,30)
+                if capture.returncode:raise RuntimeError('Dataset capture failed')
+            before=len(rows);started=time.monotonic();response=call(cycle,args.cycle_timeout)
             spin(2)
             row.update(success=response.success,message=response.message,elapsed_s=time.monotonic()-started,
                        pick_rows=rows[before:],model_ids_after=identities())
             row['identity_preserved']=row['model_ids_before']==row['model_ids_after']
             row['ready_joint_errors_rad']={name:abs(joints[name]-value) if name in joints else None for name,value in ready.items()}
             row['ready_after']=all(v is not None and v < 0.05 for v in row['ready_joint_errors_rad'].values())
-            row['ok']=(response.success and row['identity_preserved'] and row['ready_after'] and len(row['pick_rows'])==3
+            # 서비스 응답만 믿지 않고 모델 ID·부품별 결과·실제 복귀 관절값을 함께 확인한다.
+            row['ok']=(response.success and row['identity_preserved'] and row['ready_after'] and len(row['pick_rows'])==args.objects
                        and all(r['result']=='ok' and not r.get('error') for r in row['pick_rows']))
             save_report(args.out,report);print('Cycle',index+1,row['ok'],response.message,flush=True)
             if not row['ok']:raise RuntimeError('Existing-object cycle failed; stopped without retry')
