@@ -79,8 +79,10 @@ class Team2PickPlaceNode(PickPlaceNode):
         self._cycle_routing = False
         self._compact_return_active = False
         self.declare_parameter('compact_cycle_return', False)
+        self.declare_parameter('team2_acceleration_scaling', 0.5)
         self._scene_counter = 0
         self.declare_parameter('scene_seed', -1)
+        self.declare_parameter('scene_position_jitter_mm', 0.0)
         self.declare_parameter('team2_world_bin_check', False)
         self.scene_pub = None
         self.truth_pub = self.create_publisher(String, '/team2/scene_truth',
@@ -93,6 +95,14 @@ class Team2PickPlaceNode(PickPlaceNode):
         self.markers_sub = self.create_subscription(
             MarkerArray, '/sim/object_markers', self.on_markers, 10,
             callback_group=ReentrantCallbackGroup())
+
+    def prepare_motion(self):
+        acceleration = self.value('team2_acceleration_scaling')
+        if not math.isfinite(acceleration) or not 0 < acceleration <= 1:
+            raise ValueError('team2_acceleration_scaling은 (0, 1]이어야 합니다.')
+        super().prepare_motion()
+        # pymoveit2 기본값 0은 MoveIt에서 1로 대체된다. 실제 요청에 유효한 배율을 명시한다.
+        self.moveit2.max_acceleration = acceleration
 
     def on_targets(self, msg):
         previous = self.latest
@@ -162,7 +172,8 @@ class Team2PickPlaceNode(PickPlaceNode):
             from ur5e_pick_place.team2_demo_profile import scene_packet
             fixed_seed = int(self.get_parameter('scene_seed').value)
             packet = scene_packet(int(self.get_parameter('max_objects').value),
-                                  self._scene_counter if fixed_seed < 0 else fixed_seed)
+                                  self._scene_counter if fixed_seed < 0 else fixed_seed,
+                                  self.value('scene_position_jitter_mm'))
             self._scene_counter += 1
             packet.update(seq=time.time_ns(), t_capture=time.time())
             if not self.spawn_client.wait_for_service(timeout_sec=10):

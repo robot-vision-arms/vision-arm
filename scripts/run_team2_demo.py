@@ -7,6 +7,7 @@ All child processes use one ROS domain/one Gazebo partition. Other domains are u
 """
 import argparse
 import json
+import math
 import os
 from pathlib import Path
 import signal
@@ -25,18 +26,24 @@ def main():
     parser.add_argument('--domain',type=int,default=70);parser.add_argument('--port',type=int,default=19070)
     parser.add_argument('--capture-only',action='store_true')
     parser.add_argument('--objects',type=int,default=10)
+    parser.add_argument('--position-jitter-mm',type=float,default=0.)
+    parser.add_argument('--acceleration',type=float,default=.5)
     parser.add_argument('--compact-return',action='store_true')
     parser.add_argument('--speed',type=float,default=.5);parser.add_argument('--cycles',type=int,default=0)
+    parser.add_argument('--transport-trials',type=int,default=0)
+    parser.add_argument('--latency-limit-ms',type=float,default=300.)
     parser.add_argument('--compare-speeds',type=float,nargs='+')
     parser.add_argument('--out',default='logs/team2_demo')
     args=parser.parse_args()
-    if not 0 <= args.domain <= 232 or not 1 <= args.port <= 65535 or args.cycles<0 or not 1<=args.objects<=10:
+    if not math.isfinite(args.latency_limit_ms) or args.latency_limit_ms<=0:
+        parser.error('Latency limit must be finite and positive')
+    if not 0 <= args.domain <= 232 or not 1 <= args.port <= 65535 or args.cycles<0 or args.transport_trials<0 or not 1<=args.objects<=10:
         parser.error('Invalid domain, port or cycle count')
     root=Path(__file__).resolve().parents[1];os.chdir(root)
     out=Path(args.out).resolve();out.mkdir(parents=True,exist_ok=True)
     speeds=args.compare_speeds or [args.speed]
     if any(not .1<=v<=.7 for v in speeds):parser.error('Speed range: 0.1..0.7')
-    profile=generate_profile(out/'profile',root,realistic=args.realistic,randomize=args.randomize,seed=args.seed,speed=speeds[0],count=args.objects,compact=args.compact_return)
+    profile=generate_profile(out/'profile',root,realistic=args.realistic,randomize=args.randomize,seed=args.seed,speed=speeds[0],count=args.objects,compact=args.compact_return,position_jitter_mm=args.position_jitter_mm,acceleration=args.acceleration)
     env=dict(os.environ,ROS_DOMAIN_ID=str(args.domain));env.pop('GZ_PARTITION',None)
     os.environ['ROS_DOMAIN_ID']=str(args.domain)
     import rclpy
@@ -64,7 +71,7 @@ def main():
         while time.monotonic()<end:
             rclpy.spin_once(node,timeout_sec=.1)
             if predicate():return
-            if any(c.poll() not in (None,0) for c in children):raise RuntimeError('Child process failed; inspect log files')
+            if any(c.poll() not in (None,0) and not getattr(c,'allow_failed',False) for c in children):raise RuntimeError('Child process failed; inspect log files')
         raise RuntimeError('Readiness or response timeout')
     def spin(seconds):
         end=time.monotonic()+seconds
@@ -106,6 +113,21 @@ def main():
                          '--screenshot',str(out/'gui.png'),'--objects',str(args.objects),
                          '--ros-args','-r','/sim/spawn_random:=/team2/spawn_scene'])
         print(f'ROS_DOMAIN_ID={args.domain}; profile={out}; GUI spawn button initializes {args.objects} parts',flush=True)
+        # 집기 준비용 합성 패킷이 측정에 섞이지 않도록 장면 초기화 전에 통신을 검사한다.
+        # 지연 실패도 원본 JSON에 보존하고 집기 결과와 분리하여 전체 판정에 반영한다.
+        report['transport']=[]
+        for index in range(args.transport_trials):
+            result=out/f'transport_{index}.json'
+            observer=start(f'transport_{index}',[sys.executable,'scripts/check_team_integration.py',
+                '--count','100','--settle-s','2','--timeout','60','--out',str(result)])
+            observer.allow_failed=True
+            wait(lambda:observer.poll() is not None,75)
+            record=json.loads(result.read_text())
+            # 기존 latency_ok는 측정 유효성이다. 300 ms 목표 충족 여부를 별도로 판정한다.
+            p95=record.get('latency_p95_ms')
+            record['latency_kpi_limit_ms']=args.latency_limit_ms
+            record['latency_kpi_passed']=bool(record.get('latency_ok') and p95 is not None and p95<=args.latency_limit_ms)
+            report['transport'].append(record);save()
         if args.capture_only:
             detection=[]
             def receive_detection(msg):
@@ -142,12 +164,21 @@ def main():
                     '--profile',str(Path(profile['sim_params']).parent/'profile.json'),
                     '--dataset-dir',str(out/f'dataset_speed_{index}'),'--out',str(result)])
                 wait(lambda:trial.poll() is not None,1200*max(1,args.cycles))
-                record=json.loads(result.read_text());report['trials'].append(dict(speed=speed,result=record));save()
+                record=json.loads(result.read_text())
+                trial_report=dict(speed=speed,result=record)
+                if args.objects==9:
+                    # 집기 성공과 150초 목표는 별개다. 기능 통과를 시간 통과로 오해하지 않게 남긴다.
+                    trial_report['cycle_time_limit_s']=150.
+                    trial_report['cycle_time_kpi_passed']=bool(record.get('ok') and all(
+                        c.get('elapsed_s',float('inf'))<=150 for c in record.get('cycles',[])))
+                report['trials'].append(trial_report);save()
                 if trial.returncode:raise RuntimeError('Existing-object trial failed; stopped without hiding failure')
             report['ok']=all(t['result']['ok'] for t in report['trials']);save()
         else:
             report['ok']=True;save()
-            while all(c.poll() is None for c in children):rclpy.spin_once(node,timeout_sec=.2)
+            # 완료된 통신 검사 프로세스 때문에 대화형 GUI까지 곧바로 종료하지 않는다.
+            while all(c.poll() is None for c in children if not getattr(c,'allow_failed',False)):
+                rclpy.spin_once(node,timeout_sec=.2)
     except KeyboardInterrupt:
         report['stopped_by_user']=True
     except Exception as exc:
@@ -158,6 +189,8 @@ def main():
         if failure_frames:cv2.imwrite(str(out/'failure_camera.png'),CvBridge().imgmsg_to_cv2(failure_frames[-1],'bgr8'))
         node.destroy_subscription(failure_sub)
     finally:
+        if report.get('transport'):
+            report['ok']=report['ok'] and all(r['ok'] and r['latency_kpi_passed'] for r in report['transport'])
         # ros2 launch 자체에 SIGINT를 보내 한 번만 자식에게 전달하게 한다.
         for child in reversed(children):
             if child.poll() is None:
@@ -176,6 +209,8 @@ def main():
             try:os.killpg(child.pid,signal.SIGKILL)
             except ProcessLookupError:pass
         for stream in streams:stream.close()
+        from review_team2_runtime import review
+        report['runtime_log_review']=review(out)
         if old_session is None:session.unlink(missing_ok=True)
         else:session.write_bytes(old_session)
         save();node.destroy_node();rclpy.try_shutdown()

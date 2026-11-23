@@ -83,3 +83,37 @@ def test_compact_return_skips_only_intermediate_ready_joint_move(monkeypatch):
     node.go_ready();assert calls==['waypoint','waypoint']
     calls.clear();node._compact_return_active=False;node.go_ready()
     assert calls==['waypoint','waypoint','ready']
+
+
+@pytest.mark.parametrize('acceleration', [.5, 0., -1., float('nan'), 1.1])
+def test_acceleration_is_validated_before_motion(monkeypatch, acceleration):
+    from types import SimpleNamespace
+    from ur5e_pick_place.team2_pick_place_node import Team2PickPlaceNode
+    from ur5e_pick_place.pick_place_node import PickPlaceNode
+    node=object.__new__(Team2PickPlaceNode)
+    node.value=lambda name:acceleration
+    node.moveit2=SimpleNamespace(max_acceleration=0.)
+    prepared=[]
+    monkeypatch.setattr(PickPlaceNode,'prepare_motion',lambda self:prepared.append(True))
+    if acceleration==.5:
+        node.prepare_motion()
+        assert prepared and node.moveit2.max_acceleration==.5
+    else:
+        with pytest.raises(ValueError):node.prepare_motion()
+        assert not prepared
+
+
+def test_position_variation_is_bounded_reproducible_and_rejects_unsafe_range():
+    for seed in range(20):
+        plain=scene_packet(10,seed)
+        varied=scene_packet(10,seed,5.)
+        assert varied==scene_packet(10,seed,5.) and varied!=plain
+        for a,b in zip(plain['objects'],varied['objects']):
+            assert abs(a['x_mm']-b['x_mm'])<=5
+            assert abs(a['y_mm']-b['y_mm'])<=5
+            assert a['part_type']==b['part_type'] and a['angle_deg']==b['angle_deg']
+        for i,a in enumerate(varied['objects']):
+            for b in varied['objects'][i+1:]:
+                assert math.hypot(a['x_mm']-b['x_mm'],a['y_mm']-b['y_mm'])>=35
+    for invalid in [-1.,6.,float('nan')]:
+        with pytest.raises(ValueError):scene_packet(10,0,invalid)

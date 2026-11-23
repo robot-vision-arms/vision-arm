@@ -12,16 +12,24 @@ import numpy as np
 import yaml
 
 
-def scene_packet(count=10, seed=0):
+def scene_packet(count=10, seed=0, position_jitter_mm=0.):
     if not 1 <= count <= 10:
         raise ValueError('This A4 fixture supports 1..10 objects')
+    if not math.isfinite(position_jitter_mm) or not 0 <= position_jitter_mm <= 5:
+        raise ValueError('Position jitter must be 0..5 mm')
     rng=random.Random(seed)
     kinds=['screw' if k%2==0 else 'nut' for k in range(count)];rng.shuffle(kinds)
     # 5열×2행. 나사 길이 40 mm와 마커 여백을 고려해 서로 붙지 않게 배치한다.
-    return dict(seq=seed,calib_ok=True,synthetic=True,source='team2_scene_initialization',objects=[
+    packet=dict(seq=seed,calib_ok=True,synthetic=True,source='team2_scene_initialization',objects=[
         dict(id=k,part_type=kind,x_mm=60.+45*(k%5),y_mm=70.+60*(k//5),
              angle_deg=rng.uniform(65,115) if kind=='screw' else None)
         for k,kind in enumerate(kinds)])
+    # 마커 여백·부품 간격을 지키는 작은 위치 변동이다. 임의 밀집·겹침 배치 검증은 아니다.
+    if position_jitter_mm:
+        for obj in packet['objects']:
+            obj['x_mm']+=rng.uniform(-position_jitter_mm,position_jitter_mm)
+            obj['y_mm']+=rng.uniform(-position_jitter_mm,position_jitter_mm)
+    return packet
 
 
 def write_mesh(path, kind):
@@ -64,10 +72,13 @@ def write_mesh(path, kind):
     path.write_text(f'mtllib {path.with_suffix(".mtl").name}\nusemtl Metal\n'+''.join('v %.9f %.9f %.9f\n'%v for v in vertices)+''.join('f %d %d %d\n'%f for f in faces))
 
 
-def generate_profile(output, root, *, realistic=False, randomize=False, seed=0, speed=.5, count=10, compact=False):
+def generate_profile(output, root, *, realistic=False, randomize=False, seed=0, speed=.5, count=10, compact=False, position_jitter_mm=0., acceleration=.5):
     output=Path(output).resolve();root=Path(root).resolve();output.mkdir(parents=True,exist_ok=True)
     if not .1 <= speed <= .7:raise ValueError('Demo speed must be 0.1..0.7')
+    if not math.isfinite(acceleration) or not 0 < acceleration <= 1:
+        raise ValueError('Acceleration must be finite and in (0, 1]')
     if not 1 <= count <= 10:raise ValueError('Object count must be 1..10')
+    scene_packet(count,seed,position_jitter_mm)  # 파일 생성 전에 위치 변동 범위를 검증한다.
     rng=random.Random(seed)
     source=root/'src/ur5e_pick_place'
     prefix=output/'assets';share=prefix/'share/ur5e_pick_place';models=share/'models'
@@ -118,7 +129,7 @@ def generate_profile(output, root, *, realistic=False, randomize=False, seed=0, 
     w.find("include[name='work_mat']/uri").text=(models/'work_mat').as_uri()
     world_path=output/'workcell.sdf';world.write(world_path,encoding='unicode')
     config=yaml.safe_load((source/'config/sim.yaml').read_text());p=config['pick_place_node']['ros__parameters']
-    p.update(max_objects=count,world_file=str(world_path),max_velocity_scaling=float(speed),bin_drop_z=.10,settle_s=2.0,team2_world_bin_check=True,compact_cycle_return=compact)
+    p.update(max_objects=count,world_file=str(world_path),max_velocity_scaling=float(speed),team2_acceleration_scaling=float(acceleration),scene_position_jitter_mm=float(position_jitter_mm),bin_drop_z=.10,settle_s=2.0,team2_world_bin_check=True,compact_cycle_return=compact)
     config_path=output/'sim.yaml';config_path.write_text(yaml.safe_dump(config,sort_keys=False))
     calibration=output/'calib';calibration.mkdir(exist_ok=True)
     base=root/'data/calib/sim'
@@ -135,6 +146,6 @@ def generate_profile(output, root, *, realistic=False, randomize=False, seed=0, 
     manifest=dict(sim_params=str(config_path),world_file=str(world_path),asset_prefix=str(prefix),
                   description_file=str(source/'urdf/team2_ten_slots.urdf.xacro'),vision_params=str(vision_path),
                   calibration_dir=str(calibration),max_objects=count,slot_capacity=10,compact_return=compact,bin_width_m=.22,camera_height_m=values[2],
-                  speed=speed,seed=seed,realistic_visuals=realistic,randomized=randomize,
+                  speed=speed,acceleration=acceleration,seed=seed,position_jitter_mm=position_jitter_mm,realistic_visuals=realistic,randomized=randomize,
                   physical_contact_geometry='unchanged primitive approximation',calibration_method='known camera height projection; validate using rendered ArUco')
     (output/'profile.json').write_text(json.dumps(manifest,indent=2));return manifest
