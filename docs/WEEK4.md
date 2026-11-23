@@ -156,3 +156,4 @@ PYTHONPATH=src/vision_pick_place python3 scripts/collect_ground_truth.py --print
 | 카메라 배율 확인 (PNG 를 2.6·3.0 px/mm 로 줄임) | 마커 4/4 검출, 시트 호모그래피 RMS 0.043 mm (2.6) / 0.027 mm (3.0) |
 | 오검출 (자세 선·번호가 부품으로 잡히는지) | 초록 설정(`params.yaml` + `params_green.yaml`) **0개**, 흰 시트 설정만 쓰면 1개 → 초록 시트에는 반드시 초록 설정을 겹쳐 쓴다 |
 | 남은 확인 | 실제 인쇄본 색·조명에서 채도 (위 다음 주 2번) |
+| 빈 초록 시트 | 자세 선(나사·너트·번호) 없이 마커·100 mm 선만 있는 판 (`render_pose_sheet(..., plan=[], green=True)`, `green_sheet_blank.pdf`). 시연·자유 배치용. 같은 확인: 297.0 × 210.0 mm, 마커 4/4, 초록 설정 오검출 0개 |
