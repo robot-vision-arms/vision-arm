@@ -1,0 +1,9 @@
+# 재학습한 YOLO 로 검출 (초록 시트). 시트 여백은 초록 시트 값이 필요하므로 세 파일을 순서대로 겹친다:
+#   ros2 run vision_pick_place vision_node --ros-args --params-file src/vision_pick_place/config/params.yaml \
+#       --params-file src/vision_pick_place/config/params_green.yaml --params-file src/vision_pick_place/config/params_yolo.yaml
+# 모델은 data/models/yolo_green.onnx (git 제외). 같은 부품·시트·조명에서만 확인했다 (WEEK4 동경 11-24).
+vision_node:
+  ros__parameters:
+    detector: "yolo"
+    yolo_model_path: "data/models/yolo_green.onnx"
+    yolo_conf: 0.3

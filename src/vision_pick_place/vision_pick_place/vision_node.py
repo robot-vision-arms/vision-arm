@@ -26,6 +26,7 @@ from vision_pick_place.packet import encode
 from vision_pick_place.part_check import RANGE_PARAMS, limits_from_params
 from vision_pick_place.vision_pipeline import process_frame
 from vision_pick_place.workspace_roi import sheet_roi_mask
+from vision_pick_place.yolo_detector import detector_from_params
 
 
 class TopicFrameSource:
@@ -84,6 +85,14 @@ class VisionNode(Node):
                                                ('reject_unknown', 'nut_min_hole_ratio', *RANGE_PARAMS)})
         if self.part_limits is not None:
             self.get_logger().info(f'unknown 거르기 켬: {self.part_limits}')
+        # 부품 찾는 방법: rule(기본, 전처리·윤곽·길이 비) / yolo(재학습 모델, config/params_yolo.yaml)
+        self.declare_parameter('detector', 'rule')
+        self.declare_parameter('yolo_model_path', 'data/models/yolo_green.onnx')
+        self.declare_parameter('yolo_conf', 0.3)
+        self.detector = detector_from_params({name: self.get_parameter(name).value for name in
+                                              ('detector', 'yolo_model_path', 'yolo_conf', 'reject_unknown')})
+        if self.detector is not None:
+            self.get_logger().info(f"검출: YOLO {self.get_parameter('yolo_model_path').value}, 신뢰도 {self.detector.conf}")
         self.pub_det = self.create_publisher(String, '/vision/detections', 10)
         self.pub_image = self.create_publisher(Image, '/vision/debug_image', 10)
         self.cv_bridge = CvBridge()
@@ -121,7 +130,7 @@ class VisionNode(Node):
         try:
             packet, debug = process_frame(frame, self.calibrator, self.seq, t_capture,
                                           roi_mask=self.sheet_roi(frame), part_heights_mm=self.part_heights(),
-                                          part_limits=self.part_limits, **options)
+                                          part_limits=self.part_limits, detector=self.detector, **options)
         except (ValueError, RuntimeError, cv2.error) as exc:
             self.get_logger().error(f'프레임 처리 실패: {exc}', throttle_duration_sec=5.0)
             return

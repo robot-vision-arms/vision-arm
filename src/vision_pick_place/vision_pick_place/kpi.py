@@ -149,11 +149,13 @@ def predict_from_images(truth_rows: list[dict], image_for, intrinsics_path: str,
     from vision_pick_place.part_check import limits_from_params
     from vision_pick_place.vision_pipeline import process_frame
     from vision_pick_place.workspace_roi import sheet_roi_mask
+    from vision_pick_place.yolo_detector import detector_from_params
 
     options = {k: params[k] for k in ('blur_ksize', 'threshold', 'min_area_px', 'nut_max_aspect', 'segmentation_mode',
                                       'hsv_max_saturation', 'hsv_max_dark_value', 'close_ksize', 'open_ksize')
                if k in params}
     out = {}
+    detector = detector_from_params(params)
     with tempfile.TemporaryDirectory() as tmp:
         fixed = Calibrator(intrinsics_path, homography_path) if homography_path else None
         for t in truth_rows:
@@ -172,6 +174,6 @@ def predict_from_images(truth_rows: list[dict], image_for, intrinsics_path: str,
                                  params.get('sheet_edge_margin_mm', 3.0), params.get('sheet_marker_margin_mm', 5.0)) \
                 if params.get('sheet_roi', True) else None
             packet, _ = process_frame(frame, calib, 0, 0.0, roi_mask=roi, part_heights_mm=part_heights_mm,
-                                      part_limits=limits_from_params(params), **options)
+                                      part_limits=limits_from_params(params), detector=detector, **options)
             out[t['sample_id']] = packet['objects']
     return out

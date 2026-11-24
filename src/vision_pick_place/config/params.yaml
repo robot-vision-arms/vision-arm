@@ -33,6 +33,10 @@ vision_node:
     nut_length_mm: [0.0, 0.0]
     nut_width_mm: [0.0, 0.0]
     nut_min_hole_ratio: 0.0
+    # 부품 찾는 방법. rule: 위의 전처리·윤곽·길이 비 (기본) / yolo: 재학습 모델 (켤 때는 params_yolo.yaml 을 겹쳐 쓴다)
+    detector: "rule"
+    yolo_model_path: "data/models/yolo_green.onnx"   # scripts/export_yolo_onnx.py 출력 (git 제외, 같은 이름 .json 도 필요)
+    yolo_conf: 0.3               # 이 신뢰도 이상만. val 사진에서 정한 값 (WEEK4 동경 11-24)
 
 robot_bridge:
   ros__parameters:

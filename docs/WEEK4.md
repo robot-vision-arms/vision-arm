@@ -237,9 +237,36 @@ $P scripts/finetune_obb.py evaluate --data $D --split test_new --draw   # 학습
 - train·val·test 가 모두 **같은 부품 8개, 같은 시트·조명, 약 7분 30초 동안** 찍은 사진이다. 다른 조명, 처음 보는 부품, 빈 시트, 나사·너트가 아닌 물체에서의 성능은 모른다 (`test_new` 사진 없음).
 - test 부품 56개 → 맞힘 98.2 % 의 95 % 구간은 약 90.6~99.7 % (부품끼리 독립이라고 본 값, 실제로는 더 넓을 수 있음).
 - val 은 신뢰도와 best epoch 을 고른 사진이라 실제보다 좋게 나온다. 라벨 초안이 자동이고 초안 값은 50장 전체를 보고 정했다.
-- 실제 mm 정확도와 Pick 성공률은 재지 않았다. `vision_node` 는 아직 규칙 방식이다.
+- 실제 mm 정확도와 Pick 성공률은 재지 않았다. `vision_node` 기본은 규칙이고 YOLO 는 선택이다 (아래).
 
 결과 파일(git 제외): `data/models/runs/green/eval_val.csv`, `eval_test.csv`, `draw_val/`, `draw_test/`.
+
+### 2026-11-24 `vision_node` 에 YOLO 선택 옵션 (`yolo_detector.py`, 기본은 규칙)
+
+```bash
+# 모델 만들기 (재학습한 .pt 가 있는 PC 에서 한 번). data/models/yolo_green.onnx · .json · _reference.json (git 제외)
+.venv-ml/bin/pip install onnx
+.venv-ml/bin/python scripts/export_yolo_onnx.py
+python3 scripts/export_yolo_onnx.py --verify               # ROS 환경(OpenCV 4.6)에서 원본과 같은지 확인
+
+# 실행: 세 파일을 순서대로 겹친다 (초록 시트 여백 + YOLO). params_yolo.yaml 을 빼면 규칙
+C=src/vision_pick_place/config
+ros2 run vision_pick_place vision_node --ros-args --params-file $C/params.yaml --params-file $C/params_green.yaml --params-file $C/params_yolo.yaml
+```
+
+- ROS 쪽 `.venv` 에 torch 를 넣지 않는다. **ONNX 를 OpenCV DNN 으로** 추론한다. OpenCV 4.6 은 Ultralytics ONNX 를 그대로는 돌리지 못해(forward 오류), 마지막 상자 계산을 잘라 내고 NumPy 로 계산한다.
+- 다른 PC 는 `yolo_green.onnx` 와 `yolo_green.json` 두 파일만 받아 `data/models/` 에 넣으면 된다.
+- 패킷 형식은 그대로다 (신뢰도는 영상에만 표시, 너트 각도 `null`). 시트 ROI 는 상자 중심으로 거른다. `evaluate_kpi.py` 도 같은 설정을 따른다.
+- `reject_unknown` 과 같이 켜면 시작할 때 오류를 낸다 (기준값이 규칙 윤곽용). 모델 파일이 없어도 시작할 때 오류를 낸다 (몰래 규칙으로 바꾸지 않음).
+
+| 확인 | 결과 |
+|---|---|
+| 원본(.pt)과 비교, val 7장 57개 | 개수·종류 같음, 꼭짓점 차이 0.001 px 미만 (각도를 1.7° 틀면 검사가 잡음) |
+| 기본(규칙) 동작 | 실물 사진 254회 비교에서 이전 코드와 패킷·그림이 완전히 같음 |
+| 실제 `vision_node`, val 사진 재생 | 10.0 Hz 유지. 프레임 → 수신 중앙값 64 ms, P95 79 ms (규칙 6 / 9 ms). Gazebo 없이 잰 값 |
+| 테스트 | `vision_pick_place` 188개, `ur5e_pick_place` 77개 통과 |
+
+아직 안 한 것: 폰 실시간 영상, Gazebo 와 같이 돌릴 때 속도 (둘 다 CPU 를 쓴다. 스레드 2개면 추론만 약 120 ms), 가상 모드(`team2_shaft_vision`, 규칙만), 정답 30장 KPI.
 
 ### 2026-11-24 나사·너트가 아닌 물체를 unknown 으로 (`part_check.py`, 기본 꺼짐)
 
