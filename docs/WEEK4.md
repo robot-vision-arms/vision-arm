@@ -339,3 +339,18 @@ python scripts/run_team2_demo.py --gui --realistic --randomize --seed 5 --object
 | 측정 장비 | i5-12400, OpenCV 4.6.0, 1280×720 (폰 세로 영상 270° 회전) |
 
 다음: 동경 님 KPI 표에 반영 (같은 `--params` 두 파일, 시차 보정 끈 값 사용). 인쇄 품질 좋은 자세 시트를 다시 뽑으면 `--method print` 로 다시 수집할 수 있다.
+
+### 2026-11-24 YOLO 재학습용 초록 시트 사진 50장 촬영 (동경 님 요청)
+
+동경 님 재학습(`label_obb.py` → `finetune_obb.py`)에 쓸 실물 사진. 촬영만 했고 라벨·학습은 동경 님 담당이다.
+
+```bash
+python3 scripts/live_view.py rtsp://172.20.10.1:8554/live data/captures/green/train   # 창에서 r 두 번 = 270° (params.yaml 회전이 0 이라)
+```
+
+| 항목 | 내용 |
+|---|---|
+| 장수·위치 | **50장**, 모두 `data/captures/green/train/` (val·test 로 나누지 않음, 나눌지는 동경 님이 정함). 전달용 `green_train_50_20261124.zip` (data 는 Git 제외) |
+| 조건 | 실측 정답과 같은 진한 빈 초록 시트·폰 고정 위치·실내등. 1280×720 (270° 회전), 50장 모두 가로 확인 |
+| 배치 | 사진마다 나사·너트를 섞어 4~8개, 위치·각도를 매번 바꿈. 일부는 부품끼리 가깝게. 시트 아래쪽 밝은 영역 포함 |
+| 확인 | 축소 모음으로 50장을 모두 봄: 마커 4개 보임, 손 없음 |
