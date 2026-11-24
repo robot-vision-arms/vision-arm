@@ -159,6 +159,24 @@ IMAGE_DIR=<사진 폴더> CALIB_DIR=<보정 폴더> logs/start_demo.sh   # 폰 �
 
 남은 확인: 폰을 연결한 실물 모드, 실물 모드 `existing`, 부품 10개 사이클.
 
+### 2026-11-24 재학습용 라벨 도구 `gui/label_obb.py` (계산은 `obb_labels.py`)
+
+규칙 검출로 초안 회전 상자를 만들고 사람이 고친 뒤 YOLO-OBB 학습 데이터로 내보낸다. 클래스는 나사·너트 2종.
+
+```bash
+source env.sh
+python3 scripts/live_view.py rtsp://172.20.10.1:8554/live data/captures/green/train   # 촬영 (val, test 도 폴더만 바꿔서)
+python3 -m vision_pick_place.gui.label_obb data/captures/green                         # 라벨
+python3 -m vision_pick_place.gui.label_obb data/captures/green --status                # 진행 상황
+python3 -m vision_pick_place.gui.label_obb data/captures/green --export data/models/green_yolo_obb
+```
+
+- **확인 완료([Enter])가 아닌 사진이 하나라도 있으면 내보내지 않는다.** 초안이 정답으로 섞이거나 빠뜨린 부품이 배경으로 학습되는 것을 막는다. 고치면 다시 확인 전이 된다. 같은 파일이 두 폴더에 있어도 막는다.
+- 나사·너트가 아닌 물체는 라벨하지 않는다. 상자 0개로 확인한 사진은 배경 사진으로 내보낸다.
+- 초안 영역은 사진 속 마커로 구하므로 보정 파일이 필요 없다. 초안 기본 설정은 초록 시트용이다 (흰 시트는 `--params src/vision_pick_place/config/params.yaml`).
+- 확인: 단위·창 테스트 13개, 흰 시트 사진 8장 사본에서 초안 8/8개(사진당 나사 1개), 내보낸 데이터로 YOLO 1 epoch 실행(형식 확인용, 성능 아님). 초록 실물 사진과 사람이 직접 쓰는 확인은 아직이다.
+- 초안 상자는 그림자까지 포함해 헐거울 수 있다. 붙은 부품은 한 상자로 나오므로 지우고 새로 그린다.
+
 ## 4. 팀원 2 (성민) 기록
 
 2026-11-23: 10개 슬롯·22 cm 상자 프로필, 기존 물체 20/20 투입 및 모델 ID 유지, 외형 개선·환경 무작위화 장면 9/9·123.17초 통과. 실물 시험·전체 환경 성공률 검증은 아니다. 구현 파일·실행 명령·오류 및 남은 제한은 [TEAM2_PROGRESS.md](TEAM2_PROGRESS.md#team2-20261123-demo)에 기록했다. 다른 담당 원본 대신 팀원 2 어댑터로 연결했다.
