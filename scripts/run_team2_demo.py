@@ -27,6 +27,7 @@ def main():
     parser.add_argument('--domain',type=int,default=70);parser.add_argument('--port',type=int,default=19070)
     parser.add_argument('--capture-only',action='store_true')
     parser.add_argument('--objects',type=int,default=10)
+    parser.add_argument('--screw-length-mm',type=float,default=os.environ.get('TEAM2_SCREW_LENGTH_MM','40'))
     parser.add_argument('--position-jitter-mm',type=float,default=0.)
     parser.add_argument('--acceleration',type=float,default=.5)
     parser.add_argument('--test-lost-create-reply',default='',help='Explicit fault injection, e.g. obj_7:2')
@@ -47,7 +48,7 @@ def main():
     out=Path(args.out).resolve();out.mkdir(parents=True,exist_ok=True)
     speeds=args.compare_speeds or [args.speed]
     if any(not .1<=v<=.7 for v in speeds):parser.error('Speed range: 0.1..0.7')
-    profile=generate_profile(out/'profile',root,realistic=args.realistic,randomize=args.randomize,seed=args.seed,speed=speeds[0],count=args.objects,compact=args.compact_return,position_jitter_mm=args.position_jitter_mm,acceleration=args.acceleration)
+    profile=generate_profile(out/'profile',root,realistic=args.realistic,randomize=args.randomize,seed=args.seed,speed=speeds[0],count=args.objects,compact=args.compact_return,position_jitter_mm=args.position_jitter_mm,acceleration=args.acceleration,screw_length_mm=args.screw_length_mm)
     env=dict(os.environ,ROS_DOMAIN_ID=str(args.domain));env.pop('GZ_PARTITION',None)
     env.pop('TEAM2_TEST_LOST_CREATE_REPLY',None)
     if args.test_lost_create_reply:env['TEAM2_TEST_LOST_CREATE_REPLY']=args.test_lost_create_reply

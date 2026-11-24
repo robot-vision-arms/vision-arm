@@ -8,6 +8,7 @@ import math
 import json
 import time
 import signal
+from pathlib import Path
 
 import rclpy
 from rclpy.callback_groups import ReentrantCallbackGroup
@@ -24,6 +25,7 @@ from rclpy.qos import QoSProfile, DurabilityPolicy
 from ur5e_pick_place.object_spawner import marker_shape, model_file, plan_spawns, rotate
 from ur5e_pick_place.workcell_scene import collision_boxes
 from ur5e_pick_place.pick_place_node import PickPlaceNode, UR_JOINTS
+from ur5e_pick_place.team2_part_sizes import ensure_length_model, length_key, MIN_LENGTH_MM, MAX_LENGTH_MM
 
 
 def bind_existing_targets(targets, observed, tolerance=0.005):
@@ -62,6 +64,10 @@ def cylinder_extents(axis, radius, half_length):
 class Team2PickPlaceNode(PickPlaceNode):
     def __init__(self):
         super().__init__()
+        self.declare_parameter('team2_models_dir', '')
+        models = self.get_parameter('team2_models_dir').value
+        if models:
+            self.models_dir = Path(models).resolve(strict=True)
         # 원본이 시작한 TF 전용 실행기를 끝내고 메인 4스레드 실행기에만 노드를 둔다.
         # 같은 action client를 두 실행기에서 기다리면 wait-set 인덱스 예외가 날 수 있다.
         previous_listener = self.tf_listener
@@ -77,6 +83,7 @@ class Team2PickPlaceNode(PickPlaceNode):
         self.target_received = None
         self.marker_received = None
         self.object_types = {}
+        self.object_lengths = {}
         self._cycle_routing = False
         self._compact_return_active = False
         self.declare_parameter('compact_cycle_return', False)
@@ -128,7 +135,7 @@ class Team2PickPlaceNode(PickPlaceNode):
             raise ValueError('실제 통 중심과 설정 좌표가 다릅니다.')
         pose=self.tf_buffer.lookup_transform('base_link',target.name,Time()).transform
         q=(pose.rotation.x,pose.rotation.y,pose.rotation.z,pose.rotation.w)
-        shape=marker_shape(model_file(self.models_dir,target.part_type))
+        shape=marker_shape(model_file(self.models_dir,self.sized_target(target).part_type))
         if shape is None or shape.shape!='cylinder':raise ValueError('지원하지 않는 부품 충돌 형상')
         offset=rotate(q,shape.xyz)
         center=[v+o for v,o in zip((pose.translation.x,pose.translation.y,pose.translation.z),offset)]
@@ -149,7 +156,8 @@ class Team2PickPlaceNode(PickPlaceNode):
 
     def pick_one_with_world_check(self, target, bin_xy, seq, is_last):
         started=time.monotonic()
-        row=super().pick_one(target,bin_xy,seq,is_last)
+        row=super().pick_one(self.sized_target(target),bin_xy,seq,is_last)
+        row['part_type']=target.part_type
         if not self.get_parameter('team2_world_bin_check').value or 'final_x' not in row:
             return row
         # 원본의 15 cm 통 고정 기준 대신 프로필 SDF와 실제 부품 자세로 독립 판정한다.
@@ -166,6 +174,24 @@ class Team2PickPlaceNode(PickPlaceNode):
                 row.update(result='failed',error=str(exc))
         row['plan_ms']=(time.monotonic()-started)*1000
         return row
+
+    def sized_target(self, target):
+        if target.part_type!='screw':
+            return target
+        # 이미 생성된 모델의 마커 치수를 우선한다. 기존 물체 집기 모드에서는
+        # 영상 추정으로 물체 형상을 바꾸지 않고 실제 생성 형상에 맞춰 집는다.
+        length=getattr(self,'object_lengths',{}).get(target.name)
+        if length is None:
+            packet=getattr(self,'latest',None) or {}
+            obj=next((o for o in packet.get('objects',[]) if o.get('id')==target.source_id),{})
+            length=obj.get('length_mm')
+        if length is None:
+            return target
+        base=marker_shape(model_file(self.models_dir,'screw'))
+        if length_key(length)==length_key(base.scale[2]*1000):
+            return target
+        key,_=ensure_length_model(self.models_dir,length)
+        return replace(target,part_type=key)
 
     def on_scene_request_ack(self, msg):
         try:self.scene_ack=json.loads(msg.data)
@@ -320,6 +346,7 @@ class Team2PickPlaceNode(PickPlaceNode):
         # 카메라 분류 결과와 별개로 기존 모델의 형상·크기를 읽어 종류 대조에 사용한다.
         kinds = {'box': Marker.CUBE, 'cylinder': Marker.CYLINDER, 'sphere': Marker.SPHERE}
         current = {}
+        lengths = {}
         for marker in msg.markers:
             if marker.action != Marker.ADD:
                 continue
@@ -327,9 +354,18 @@ class Team2PickPlaceNode(PickPlaceNode):
                        and kinds.get(shape.shape) == marker.type
                        and all(abs(a-b) < 1e-6 for a,b in zip(
                            shape.scale, (marker.scale.x, marker.scale.y, marker.scale.z))) ]
+            screw=self.shapes.get('screw')
+            if (not matches and screw is not None and marker.type==Marker.CYLINDER
+                    and abs(marker.scale.x-screw.scale[0])<1e-6
+                    and abs(marker.scale.y-screw.scale[1])<1e-6
+                    and MIN_LENGTH_MM <= marker.scale.z*1000 <= MAX_LENGTH_MM):
+                matches=['screw']
             if len(matches) == 1:
                 current[marker.header.frame_id] = matches[0]
+                if matches[0]=='screw':
+                    lengths[marker.header.frame_id]=marker.scale.z*1000
         self.object_types = current
+        self.object_lengths = lengths
         self.marker_received = time.monotonic()
 
     def on_run_cycle(self, request, response):

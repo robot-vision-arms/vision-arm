@@ -5,8 +5,11 @@ import subprocess
 import time
 import os
 import signal
+from pathlib import Path
 
 from ur5e_pick_place import object_spawner as original
+from ur5e_pick_place.team2_spawn_safety import assert_spawn_clear
+from ur5e_pick_place.team2_part_sizes import apply_packet_sizes
 
 
 def created_model_matches(model, request):
@@ -37,6 +40,11 @@ def created_model_matches(model, request):
 
 
 class VerifiedGzSpawner(original.GzSpawner):
+    def spawn_all(self, requests):
+        # 기존 물체를 지우기 전에 검사한다. 겹친 물체를 만든 뒤 물리엔진이 밀어내게 두지 않는다.
+        assert_spawn_clear(requests,self.models_dir)
+        return super().spawn_all(requests)
+
     def scene(self):
         from google.protobuf import text_format
         from gz.msgs10.scene_pb2 import Scene
@@ -110,6 +118,26 @@ class SceneRequestLatch:
 def main():
     import rclpy
     import tf2_ros
+    from ament_index_python.packages import get_package_share_directory
+    planner_factory=original.plan_spawns
+    models=Path(get_package_share_directory('ur5e_pick_place'))/'models'
+    active_node=[None]
+    def checked_plan(*args,**kwargs):
+        requests,skipped=planner_factory(*args,**kwargs)
+        packet=args[0] if args else kwargs['packet']
+        requests=apply_packet_sizes(requests,packet,models)
+        # ROS 노드가 slot_types를 바꾸기 전에도 검사해, 실패 시 이전 장면·마커를 보존한다.
+        assert_spawn_clear(requests,models)
+        if active_node[0] is not None:
+            for request in requests:
+                if request.part_type not in active_node[0].shapes:
+                    path=original.model_file(models,request.part_type)
+                    # 원본 마커·진공 코드는 모델 키별 형상과 질량을 읽는다.
+                    # 개별 나사 키도 같은 표에 등록해 표시와 흡착 판정이 일치하게 한다.
+                    active_node[0].shapes[request.part_type]=original.marker_shape(path)
+                    active_node[0].masses[request.part_type]=original.part_mass(path)
+        return requests,skipped
+    original.plan_spawns=checked_plan
     # 이 프로세스에서 생성할 클래스만 교체한다. 원본 파일·ROS 서비스·흡착 판정은 그대로 재사용한다.
     spawner_factory=original.GzSpawner
     original.GzSpawner=VerifiedGzSpawner
@@ -121,6 +149,7 @@ def main():
         kwargs['spin_thread']=False
         return listener_factory(*args,**kwargs)
     def managed_spin(node):
+        active_node[0]=node
         from rclpy.executors import MultiThreadedExecutor
         from rclpy.clock import Clock,ClockType
         from rclpy.signals import uninstall_signal_handlers
@@ -154,6 +183,7 @@ def main():
     rclpy.spin=managed_spin
     try:original.main()
     finally:
+        original.plan_spawns=planner_factory
         original.GzSpawner=spawner_factory
         tf2_ros.TransformListener=listener_factory
         rclpy.spin=original_spin

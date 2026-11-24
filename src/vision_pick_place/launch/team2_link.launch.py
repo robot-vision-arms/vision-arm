@@ -40,12 +40,21 @@ def start_link(context):
         except OSError as exc:
             raise RuntimeError(f'TCP port {port} is unavailable. Use a free port or stop its existing launch.') from exc
     asset_prefix = LaunchConfiguration('asset_prefix').perform(context)
+    configured_models=params.get('team2_models_dir','')
+    if configured_models and not asset_prefix:
+        models=Path(configured_models).resolve(strict=True)
+        if models.parts[-3:] != ('share','ur5e_pick_place','models'):
+            raise ValueError('team2_models_dir must belong to a generated team2 asset prefix')
+        # 프로필만 지정한 경우도 스폰과 집기 판정이 같은 모델을 읽게 한다.
+        asset_prefix=str(models.parents[2])
     spawner_env = {}
     if asset_prefix:
         asset_prefix = str(Path(asset_prefix).resolve(strict=True))
         marker = Path(asset_prefix)/'share/ament_index/resource_index/packages/ur5e_pick_place'
         if not marker.is_file():
             raise ValueError('Invalid team2 asset overlay prefix')
+        if configured_models and Path(configured_models).resolve() != Path(asset_prefix)/'share/ur5e_pick_place/models':
+            raise ValueError('Spawner asset_prefix and pick node team2_models_dir differ')
         # 모델 탐색 경로만 스폰 프로세스에 주입한다. 팀원 3 원본 파일·알고리즘은 바꾸지 않는다.
         spawner_env['AMENT_PREFIX_PATH'] = asset_prefix + os.pathsep + os.environ.get('AMENT_PREFIX_PATH', '')
     share = get_package_share_directory('vision_pick_place')

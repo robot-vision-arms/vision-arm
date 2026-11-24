@@ -622,3 +622,93 @@ python scripts/run_team2_demo.py --gui --realistic --randomize --seed 5 --object
 - 전체 Python 회귀 테스트 **222개 통과**, native 두 패키지 빌드 통과. 다른 세션을 종료하지 않는 검사와 별도 RViz 오류 수집 검사를 포함한다.
 - 근거: `logs/team2_remaining_issues_recheck/final_review.json`과 각 실행 폴더. 중간 실패는 보존했다. seed 6/7은 부품 종류·각도·조명 변경이며 위치 격자는 같고, 실제 위치 변경 검증은 seed 8의 ±4 mm 시험이다. 모든 배치·부하에서 무충돌/정상 종료/150초 이내를 보장한 결과는 아니다. 종료 후 별도로 시도한 상태 유효성 조회는 서버 부재로 수행되지 않아 충돌 거부의 별도 음성 시험 결과로 사용하지 않는다.
 - 이 항목은 후속 구현과 로컬 검증 결과의 기록이다. `logs/`의 실행 근거 자료는 Git에 포함하지 않는다.
+
+### 나사 길이 선택과 생성 전 부품 겹침 검사
+
+- 실물 모드에서 고정 40 mm 나사 모델이 서로 파고들어 밀려나는 문제를 대상으로 팀원 2 코드만 보완했다. 비전 패킷에는 길이 정보가 없어 개별 실물 크기 자동 추정 기능을 추가한 것은 아니다.
+- `make_team2_demo_profile.py --screw-length-mm 20` 또는 `TEAM2_SCREW_LENGTH_MM=20`으로 복사 모델의 길이를 선택한다(10~40 mm, 기본 40 mm). 원본 모델은 그대로다. 외형 primitive·상세 mesh와 충돌 길이를 함께 조정하며, 지름 8 mm·흡착 높이·질량 20 g는 유지하고 관성만 재계산한다. 너트는 링 컵 조건 때문에 줄이지 않는다.
+- `team2_models_dir`로 집기 노드가 프로필 모델을 읽게 했고, 팀원 2 link는 모델 overlay를 자동 선택·대조한다. 스폰·RViz 마커·흡착 판정의 치수 불일치를 방지한다.
+- `team2_spawn_safety.py`는 SDF collision과 link/collision pose를 읽어 생성 전 평면 형상을 검사한다. 나사의 방향과 너트의 원형 형상을 반영하며 1 mm 여유를 둔다. 화면의 사각 박스가 겹쳐도 실제 충돌 형상이 떨어져 있으면 허용한다. 남은 실제 겹침은 기존 장면을 지우기 전에 실패 응답으로 알린다. 좌표 이동·충돌 비활성화·비전 패킷 변경은 하지 않는다.
+- 전체 회귀 테스트 273개 통과·1개 건너뜀(로컬 모델/사진이 필요한 YOLO 비교). 관련 테스트는 길이 방향 겹침 해소, 폭 방향 겹침 거부, 삭제 전 검사, 회전 형상, 잘못된 길이, 영상 박스 겹침과 물리 겹침 구분을 포함한다.
+- 실제 Gazebo의 별도 ROS 도메인에서 가까운 부품 8개를 20 mm 모델로 생성했다. 같은 좌표에서 원래 40 mm 모델이면 2쌍이 겹치지만 단축 모델은 정지 관찰 중 이동 0 mm, 목표 XY 오차 사실상 0이었다. 일부러 폭 방향 2 mm 겹침을 만든 요청은 거부했고 남은 프로세스 0개로 종료했다. 근거: `logs/team2_short_screw_check/summary.json`.
+- 이 검증은 알려진 좌표의 정지 물리 시험이다. 실물 YOLO 입력·실물 크기 측정·8개 자동 집기 완료를 검증한 결과가 아니다. 축 길이를 줄여도 폭/너트끼리 실제로 겹치면 배치를 바꿔야 한다.
+- 적용 전 시뮬레이션을 종료하고 새 프로필로 다시 실행한다. `start_demo.sh`가 매번 프로필을 생성한다면, 최신 팀원 2 생성기를 쓰는 환경에서 실행 전에 `export TEAM2_SCREW_LENGTH_MM=20`을 설정한다. 다른 PC의 하드코딩된 프로젝트 경로는 해당 PC 경로로 확인해야 하며, 가져온 `data/robot_vision` 백업 코드는 수정하지 않았다. 아직 커밋·푸시하지 않았다.
+
+### 2026-11-24 — 실물 검출 나사 길이를 개별 Gazebo 모델에 반영
+
+- 원본 `vision_node.py`·`vision_pipeline.py`·YOLO·GUI·`object_spawner.py`는 수정하지 않았다. 팀원 2 전용 `team2_sized_vision.py`가 기존 비전 노드를 상속하며 `team2_length_measurement.py`에서 검출 장축 양 끝점을 보정 좌표로 변환한다. YOLO 추론은 프레임당 한 번이다.
+- 좌표·각도·분류·ID는 기존 결과를 유지하고 나사에만 `length_mm`, `length_status`, `length_source`를 추가한다. 3프레임의 길이 변동이 2mm 이내일 때 중앙값을 1mm 단위로 반영한다. 위치로 대응하므로 검출 ID 순서가 바뀌어도 길이를 섞지 않는다.
+- 현재 지원 범위는 나사 **전체 길이 추정 10~60mm**이다. 지름·머리 크기·높이·질량 및 너트 크기는 추정하지 않고 기존 값을 유지한다. 검출 박스에는 나사 머리도 포함되므로 나사 규격의 호칭 길이와는 다를 수 있다.
+- `team2_part_sizes.py`가 생성 프로필 안에 `screw__length_015mm`처럼 길이별 모델을 만든다. 시각 메시, 물리 충돌 길이, 관성, 마커 및 흡착 판정이 같은 길이 모델을 사용한다. 원본 모델 폴더에 변형 모델을 쓰는 요청은 거부한다.
+- `team2_spawner_adapter.py`는 개별 길이를 스폰에 적용하고 실제 충돌 형상의 겹침을 기존 장면 삭제 전에 검사한다. 측정 모드에서 `warming_up`·`unstable`·`unavailable`이면 기본 40mm로 대체하지 않고 스폰을 거부한다. 길이 필드가 아예 없는 기존 패킷은 이전 기본 모델과 호환된다.
+- `team2_pick_place_node.py`는 실제 마커의 개별 길이를 우선 사용한다. 기존 장면을 집는 모드에서 새 카메라 추정값만으로 이미 생성된 물체의 크기를 바꾸지 않는다. 원래 `screw`/`nut` 분류와 결과 로그를 유지한다.
+
+실행 방법(WSL Ubuntu-24.04, 프로젝트 루트):
+
+1. 기존 시연을 먼저 정상 종료한다. 기존 `start_demo.sh`/원본 비전 노드와 전용 비전 노드를 동시에 실행하지 않는다. 자동 시작 스크립트의 원본 비전 명령이 이 전용 명령으로 자동 교체되는 것은 아니다.
+2. 한 번 빌드하고 별도 프로필을 만든다. `data/robot_vision`은 별도 복사본이라 패키지 검색 범위를 `src`로 제한한다.
+
+```bash
+cd ~/vision-arm
+source env.sh
+colcon build --base-paths src --packages-select vision_pick_place ur5e_pick_place --symlink-install
+source env.sh
+python scripts/make_team2_demo_profile.py --realistic --out logs/team2_camera_sizes
+```
+
+3. 터미널 1에서 Gazebo·MoveIt를 실행한다. 아래 경로는 위에서 생성한 프로필이다.
+
+```bash
+cd ~/vision-arm
+source env.sh
+ros2 launch ur5e_pick_place sim.launch.py \
+  sim_params:=$HOME/vision-arm/logs/team2_camera_sizes/sim.yaml \
+  description_file:=$HOME/vision-arm/src/ur5e_pick_place/urdf/team2_ten_slots.urdf.xacro \
+  move_group_package:=team2_move_group move_group_executable:=team2_move_group \
+  team2_native_gazebo:=true gazebo_gui:=true launch_rviz:=false
+```
+
+4. 터미널 2에서 팀원 2 링크를 실행한다. 프로필의 모델 경로가 스폰과 집기에 함께 적용된다.
+
+```bash
+cd ~/vision-arm
+source env.sh
+ros2 launch vision_pick_place team2_link.launch.py \
+  sim_params:=$HOME/vision-arm/logs/team2_camera_sizes/sim.yaml
+```
+
+5. 터미널 3에서 실물 카메라 전용 비전을 실행한다. `params.yaml`의 카메라 주소와 `data/calib`의 실물 보정을 사용한다. 아래 모델 경로는 현재 PC에서 확인한 복사본 안의 모델을 읽기만 한다. 다른 PC에서는 실제 ONNX 경로로 바꾼다. **실물 카메라에는 생성 프로필의 Gazebo용 `vision.yaml` 보정을 사용하지 않는다.** 초록 시트 조건이므로 `params_green.yaml`을 적용했다.
+
+```bash
+cd ~/vision-arm
+source env.sh
+python -m vision_pick_place.team2_sized_vision --ros-args \
+  --params-file src/vision_pick_place/config/params.yaml \
+  --params-file src/vision_pick_place/config/params_green.yaml \
+  --params-file src/vision_pick_place/config/params_yolo.yaml \
+  -p yolo_model_path:=$HOME/vision-arm/data/robot_vision/data/models/yolo_green.onnx
+```
+
+6. 터미널 4에서 길이를 확인한 뒤 부품을 생성한다. 검출 영상에도 `L~25 mm`처럼 추정 길이가 표시된다. 기존 GUI를 사용한다면 원본 GUI만 별도로 실행하고 비전 노드를 중복 시작하지 않는다.
+
+```bash
+cd ~/vision-arm
+source env.sh
+ros2 topic echo /vision/detections --once
+# 모든 나사가 length_status: stable이고 length_mm가 맞는지 확인한 후 실행
+ros2 service call /sim/spawn_objects std_srvs/srv/Trigger "{}"
+# GUI가 필요할 때: 다른 터미널에서 실행
+python -m vision_pick_place.gui.main_window --source real
+```
+
+GUI 자동 동기화는 기존 위치·분류 판정을 사용하므로, 같은 자리에서 길이만 바뀌었다면 물체 배치 버튼이나 위 서비스를 직접 호출한다. GUI·다른 팀원의 자동 시작 스크립트는 수정하지 않았다. 겹침 오류가 나오면 부품을 조금 떨어뜨리고 다시 측정한다. 위치를 임의로 벌리거나 충돌을 꺼서 실물 좌표와 Gazebo 좌표를 다르게 만들지 않는다.
+
+검증 및 한계:
+
+- 개별 15/35mm 모델의 충돌·시각 축척·질량 보존, 원본 패킷·원본 모델 보존, 마커의 원래 분류 유지, 실패한 측정의 기본 길이 대체 금지 등을 테스트했다.
+- 실제 ROS 토픽 테스트에서 보정된 합성 영상의 20mm 장축이 안정화 후 `length_mm=20`으로 발행되고 영상도 발행됨을 확인했다.
+- `logs/team2_measured_lengths/scene_check.json`: 별도 ROS 도메인 184, TCP를 거친 시험용 15/35mm 패킷으로 실제 Gazebo의 `obj_0=15mm`, `obj_1=35mm`, 너트 높이 6mm 및 마커 일치를 확인했다. 팔에는 이동 명령을 보내지 않았다. 정상 종료, 강제 종료·잔여 프로세스 없음.
+- 저장 실물 사진 재생 결과는 `logs/team2_measured_lengths/photo_packet.json`과 `photo_overlay.png`이다. 일부 나사는 지원 범위를 벗어나 `unavailable`이었다. 사진과 보정의 일치 및 실측 길이 정답을 검증하지 않았으므로 여기의 44/43/28/49mm는 정확도 성적이 아니다.
+- **실시간 실물 카메라와 자/캘리퍼스 정답 비교, 개별 크기를 적용한 반복 자동 집기는 아직 미검증**이다. 실제 부품을 측정해 길이 표시와 비교한 후 집기를 진행해야 한다. 가림·잘린 박스·보정 오차로 안정적으로 틀린 길이가 나올 수도 있다.
+
+최종 확인: 두 패키지 빌드 성공. 전체 pytest **287 passed, 1 skipped**. 건너뛴 1개는 원래 YOLO 모델 경로가 없는 조건부 테스트이며, 이번 기능의 길이 측정·ROS 발행·모델 변형 테스트는 통과했다. 실물용 시작 프로필은 `logs/team2_camera_sizes`에 생성했다. 커밋·푸시는 아직 하지 않았다.

@@ -56,28 +56,37 @@ def write_mesh(path, kind):
         for a,b in zip(rings,rings[1:]+rings[:1]):connect(a,b)
     else:
         previous=None
-        for layer in range(145):
+        tip=len(vertices)+1;vertices.append((0.,0.,-.02))
+        for layer in range(1,145):
             z=-.02+.036*layer/144;indices=[]
             for k in range(48):
                 angle=2*math.pi*k/48
                 phase=(z/.00125-k/48)%1
                 radius=.0036+.0008*(1-abs(2*phase-1))
+                # 끝 6 mm만 점차 가늘게 만들어 나사산이 이어지는 뾰족한 끝을 표현한다.
+                # 시각 메시만 바꾸며 충돌 원기둥·질량·흡착 높이는 변경하지 않는다.
+                radius*=min(1.,(z+.02)/.006)
                 indices.append(len(vertices)+1);vertices.append((radius*math.cos(angle),radius*math.sin(angle),z))
             if previous:connect(previous,indices)
+            else:
+                for k in range(len(indices)):
+                    faces.append((tip,indices[(k+1)%len(indices)],indices[k]))
             previous=indices
         bottom=ring(.0065,.016,6,math.pi/6);top=ring(.0065,.02,6,math.pi/6)
         connect(bottom,top)
         for k in range(1,5):faces.extend([(top[0],top[k],top[k+1]),(bottom[0],bottom[k+1],bottom[k])])
-    path.with_suffix('.mtl').write_text('newmtl Metal\nKa 0.15 0.15 0.17\nKd 0.45 0.45 0.48\nKs 0.25 0.25 0.25\nNs 64\nillum 2\n')
+    path.with_suffix('.mtl').write_text('newmtl Metal\nKa 0.22 0.22 0.22\nKd 0.58 0.58 0.58\nKs 0.45 0.45 0.45\nNs 96\nillum 2\n')
     path.write_text(f'mtllib {path.with_suffix(".mtl").name}\nusemtl Metal\n'+''.join('v %.9f %.9f %.9f\n'%v for v in vertices)+''.join('f %d %d %d\n'%f for f in faces))
 
 
-def generate_profile(output, root, *, realistic=False, randomize=False, seed=0, speed=.5, count=10, compact=False, position_jitter_mm=0., acceleration=.5):
+def generate_profile(output, root, *, realistic=False, randomize=False, seed=0, speed=.5, count=10, compact=False, position_jitter_mm=0., acceleration=.5, screw_length_mm=40.):
     output=Path(output).resolve();root=Path(root).resolve();output.mkdir(parents=True,exist_ok=True)
     if not .1 <= speed <= .7:raise ValueError('Demo speed must be 0.1..0.7')
     if not math.isfinite(acceleration) or not 0 < acceleration <= 1:
         raise ValueError('Acceleration must be finite and in (0, 1]')
     if not 1 <= count <= 10:raise ValueError('Object count must be 1..10')
+    if not math.isfinite(screw_length_mm) or not 10 <= screw_length_mm <= 40:
+        raise ValueError('Screw length must be finite and in 10..40 mm')
     scene_packet(count,seed,position_jitter_mm)  # 파일 생성 전에 위치 변동 범위를 검증한다.
     rng=random.Random(seed)
     source=root/'src/ur5e_pick_place'
@@ -88,16 +97,38 @@ def generate_profile(output, root, *, realistic=False, randomize=False, seed=0, 
     for folder in (source/'models').iterdir():
         if folder.is_dir():shutil.copytree(folder,models/folder.name,dirs_exist_ok=True)
     for kind in ['screw','nut']:
+        path=models/kind/'model.sdf';tree=ET.parse(path);link=tree.getroot().find('model/link')
+        # 원본 모델은 그대로 두고 프로필의 두 부품 모두 무채색 금속 재질로 맞춘다.
+        for visual in link.findall('visual'):
+            material=visual.find('material')
+            if material is None:material=ET.SubElement(visual,'material')
+            for tag,value in [('ambient','0.22 0.22 0.22 1'),('diffuse','0.58 0.58 0.58 1'),('specular','0.45 0.45 0.45 1')]:
+                element=material.find(tag)
+                if element is None:element=ET.SubElement(material,tag)
+                element.text=value
         if realistic:
-            path=models/kind/'model.sdf';tree=ET.parse(path);link=tree.getroot().find('model/link')
             # 첫 visual은 기존 형상 메타데이터용으로 남긴다. Gazebo에서는 투명하게 하고 메쉬를 표시한다.
             visual=link.find('visual');ET.SubElement(visual,'transparency').text='1'
             detail=copy.deepcopy(visual);detail.set('name','team2_detail');detail.remove(detail.find('transparency'))
-            detail.find('material/ambient').text='0.15 0.15 0.17 1'
-            detail.find('material/diffuse').text='0.45 0.45 0.48 1'
             detail.remove(detail.find('geometry'));geom=ET.SubElement(detail,'geometry');mesh=ET.SubElement(geom,'mesh')
             mesh_path=models/kind/'detail.obj';write_mesh(mesh_path,kind)
             ET.SubElement(mesh,'uri').text=mesh_path.as_uri();link.append(detail);tree.write(path,encoding='unicode')
+        else:
+            tree.write(path,encoding='unicode')
+    if screw_length_mm != 40.:
+        path=models/'screw/model.sdf';tree=ET.parse(path);link=tree.getroot().find('model/link')
+        length=screw_length_mm/1000.
+        # 복사한 나사만 장축을 줄인다. 지름·높이·질량은 유지해 기존 흡착 조건을 약화하지 않는다.
+        for cylinder in link.findall('collision/geometry/cylinder')+link.findall('visual/geometry/cylinder'):
+            cylinder.find('length').text=str(length)
+        for mesh in link.findall('visual/geometry/mesh'):
+            ET.SubElement(mesh,'scale').text=f'1 1 {length/.04}'
+        radius=float(link.findtext('collision/geometry/cylinder/radius'))
+        mass=float(link.findtext('inertial/mass'))
+        for axis in ['ixx','iyy']:
+            link.find(f'inertial/inertia/{axis}').text=str(mass*(3*radius**2+length**2)/12)
+        link.find('inertial/inertia/izz').text=str(mass*radius**2/2)
+        tree.write(path,encoding='unicode')
     world=ET.parse(source/'worlds/workcell.sdf');w=world.getroot().find('world')
     # 큰 통도 Gazebo·MoveIt가 같은 SDF를 읽는다. 중심 좌표는 유지하고 내측 폭만 늘린다.
     for name in ['screw_bin','nut_bin']:
@@ -130,6 +161,8 @@ def generate_profile(output, root, *, realistic=False, randomize=False, seed=0, 
     world_path=output/'workcell.sdf';world.write(world_path,encoding='unicode')
     config=yaml.safe_load((source/'config/sim.yaml').read_text());p=config['pick_place_node']['ros__parameters']
     p.update(max_objects=count,world_file=str(world_path),max_velocity_scaling=float(speed),team2_acceleration_scaling=float(acceleration),scene_position_jitter_mm=float(position_jitter_mm),bin_drop_z=.10,settle_s=2.0,team2_world_bin_check=True,compact_cycle_return=compact)
+    # 스폰·RViz 마커·집기 판정이 같은 프로필 모델 치수를 사용하게 한다.
+    p['team2_models_dir']=str(models)
     config_path=output/'sim.yaml';config_path.write_text(yaml.safe_dump(config,sort_keys=False))
     calibration=output/'calib';calibration.mkdir(exist_ok=True)
     base=root/'data/calib/sim'
@@ -146,6 +179,6 @@ def generate_profile(output, root, *, realistic=False, randomize=False, seed=0, 
     manifest=dict(sim_params=str(config_path),world_file=str(world_path),asset_prefix=str(prefix),
                   description_file=str(source/'urdf/team2_ten_slots.urdf.xacro'),vision_params=str(vision_path),
                   calibration_dir=str(calibration),max_objects=count,slot_capacity=10,compact_return=compact,bin_width_m=.22,camera_height_m=values[2],
-                  speed=speed,acceleration=acceleration,seed=seed,position_jitter_mm=position_jitter_mm,realistic_visuals=realistic,randomized=randomize,
-                  physical_contact_geometry='unchanged primitive approximation',calibration_method='known camera height projection; validate using rendered ArUco')
+                  speed=speed,acceleration=acceleration,seed=seed,position_jitter_mm=position_jitter_mm,realistic_visuals=realistic,randomized=randomize,screw_length_mm=screw_length_mm,
+                  physical_contact_geometry=('unchanged primitive approximation' if screw_length_mm==40. else 'shorter screw primitive; original diameter, height and mass'),calibration_method='known camera height projection; validate using rendered ArUco')
     (output/'profile.json').write_text(json.dumps(manifest,indent=2));return manifest
