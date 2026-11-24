@@ -266,7 +266,32 @@ ros2 run vision_pick_place vision_node --ros-args --params-file $C/params.yaml -
 | 실제 `vision_node`, val 사진 재생 | 10.0 Hz 유지. 프레임 → 수신 중앙값 64 ms, P95 79 ms (규칙 6 / 9 ms). Gazebo 없이 잰 값 |
 | 테스트 | `vision_pick_place` 188개, `ur5e_pick_place` 77개 통과 |
 
-아직 안 한 것: 폰 실시간 영상, Gazebo 와 같이 돌릴 때 속도 (둘 다 CPU 를 쓴다. 스레드 2개면 추론만 약 120 ms), 가상 모드(`team2_shaft_vision`, 규칙만), 정답 30장 KPI.
+아직 안 한 것: 폰 실시간 영상, Gazebo 와 같이 돌릴 때 속도 (둘 다 CPU 를 쓴다. 스레드 2개면 추론만 약 120 ms), 가상 모드(`team2_shaft_vision`, 규칙만).
+
+### 2026-11-24 정답 30장 KPI: 규칙과 YOLO (`overlay_green_20261124`, 가영 님 촬영)
+
+```bash
+G=data/ground_truth/overlay_green_20261124; C=src/vision_pick_place/config
+python3 scripts/evaluate_kpi.py --truth $G/poses.csv --homography $G/homography_gayoung_20261124_green_blank_v4.npz \
+    --params $C/params.yaml $C/params_green.yaml $C/params_yolo.yaml --out logs/kpi_green30_yolo_20261124.json   # 규칙은 params_yolo.yaml 을 뺌
+```
+
+| 지표 (시차 보정 끔) | 기준 | 규칙 (기본) | YOLO |
+|---|---|---|---|
+| 위치 MAE (필수) | ≤ 2 mm | 1.99 mm 달성 | **1.55 mm 달성** |
+| 각도 MAE (필수, 나사) | ≤ 3° | 3.72° 미달 (22개) | **2.29° 달성** (24개) |
+| 분류 정확도 (선택) | ≥ 95 % | 93.3 % 미달 (2장 놓침) | **100 % 달성** (30/30) |
+| 오검출 | | 0개 | 0개 |
+| 최대 오차 | | 3.81 mm, 12.6° | 3.48 mm, 6.3° |
+| 치우침 (x, y) | | −0.93, +0.20 mm | −0.06, −0.46 mm |
+| 위치 MAE, 시차 보정 켬 | ≤ 2 mm | 2.47 mm 미달 | 1.80 mm 달성 |
+
+- 모델과 신뢰도(0.30)는 이 사진을 쓰기 전에 고정했고, **한 번 재고 바꾸지 않았다.** 규칙 값은 가영 님 기록과 같다.
+- 규칙이 놓친 2장(gt004, gt007, 시트 아래쪽 밝은 곳)을 YOLO 는 찾았다. 각도 오차 5° 넘는 나사는 6 → 2개.
+- **차이의 확실성은 작다.** 둘 다 찾은 28장에서 위치 차(YOLO − 규칙) −0.39 mm (95 % 구간 −0.76~−0.02), 각도 차 −1.45° (−3.00~−0.03). 더 나은 사진 수는 위치 18/28, 각도 13/22. YOLO 자체는 위치 1.28~1.83 mm, 각도 1.67~2.95° (재표집 5000회).
+- x 치우침이 거의 없어진 것은 "규칙이 그림자를 부품에 넣는다" 는 추정과 맞지만 원인을 확인한 것은 아니다.
+- **한계**: 화면 안내선 정답이라 보정과 독립이 아니다 (둘 다 해당). 학습 사진과 같은 날·시트·폰 위치·실내등이고 같은 부품일 가능성이 크다 (사진은 겹치지 않음). 사진마다 부품 하나라서 붙은 부품의 mm 정확도는 알 수 없다. gt007 은 시트 밖에 손이 찍혔으나 빼지 않았다.
+- 공식 KPI 를 규칙·YOLO 중 무엇으로 낼지는 셋이 정한다. 그때까지 두 값을 나란히 적는다.
 
 ### 2026-11-24 나사·너트가 아닌 물체를 unknown 으로 (`part_check.py`, 기본 꺼짐)
 
