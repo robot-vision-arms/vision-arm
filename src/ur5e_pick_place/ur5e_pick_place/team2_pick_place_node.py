@@ -342,6 +342,14 @@ class Team2PickPlaceNode(PickPlaceNode):
                     return
         return self._timed_motion('최종 대기 자세 복귀', super().go_ready)
 
+    def recover_ready(self):
+        # 상자 쪽에서 멈췄으면 사이클과 같은 경유점으로 돌아온다. motion_lock 을 잡은 상태에서만 불린다.
+        self._cycle_routing = True
+        try:
+            super().recover_ready()
+        finally:
+            self._cycle_routing = False
+
     def on_markers(self, msg):
         # 카메라 분류 결과와 별개로 기존 모델의 형상·크기를 읽어 종류 대조에 사용한다.
         kinds = {'box': Marker.CUBE, 'cylinder': Marker.CYLINDER, 'sphere': Marker.SPHERE}

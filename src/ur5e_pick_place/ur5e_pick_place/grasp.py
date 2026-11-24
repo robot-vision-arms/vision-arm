@@ -56,6 +56,14 @@ def cup_tool_xy(part_x: float, part_y: float, cup_offset_m: float, tool_yaw_deg:
     return part_x - cup_offset_m * math.cos(yaw), part_y - cup_offset_m * math.sin(yaw)
 
 
+MAT_SIDE_Y_M = 0.65    # base_link |y| 가 이보다 크면 상자 쪽 (작업 매트가 아님). 팔 도달 끝이라 곧게 못 올릴 수 있다
+
+
+def needs_lift(y_m: float, tip_z_m: float, travel_z_m: float) -> bool:
+    """대기 자세로 돌아가기 전에 먼저 곧게 올려야 하는지: 작업 매트 쪽이고 컵 끝이 이동 높이보다 낮을 때."""
+    return abs(y_m) <= MAT_SIDE_Y_M and tip_z_m < travel_z_m - 0.01
+
+
 def inside_bin(xyz, bin_x: float, bin_y: float, half_width_m: float = 0.068,
                z_range_m: tuple[float, float] = (0.003, 0.04)) -> bool:
     """부품 위치가 상자 안쪽인지. 벽 안쪽 면이 중심에서 ±0.07 m (workcell.sdf: 벽 중심 0.0725, 두께 5 mm) 라 ±0.068 m.

@@ -1,7 +1,7 @@
 """PySide6 메인 윈도우 (3주차). 과제 GUI 필수 화면 4가지 (docs/PROJECT.md 2.2) + Gazebo 시연 화면.
 11-10 목업의 두 판(GUI 대시보드 + Gazebo 창)을 한 창에: 왼쪽 = 휴대폰 카메라 검출, 오른쪽 = Gazebo 시연.
 
-    ┌ 헤더: 제목·입력 │ 연결 상태 │ [실물 → Gazebo 자동 반영] [보정 다시 읽기] [사이클 실행] ┐
+    ┌ 헤더: 제목·입력 │ 연결 상태 │ [실물 → Gazebo 자동 반영] [처음부터 다시] [집기 시작] ┐
     ├──────────────────────┬──────────────────────┬──────────────────────┤
     │ ① 실물 카메라 · 검출   │ ⑤ Gazebo 전경          │ ⑥ Gazebo 위 카메라      │
     │ (/vision/debug_image) │ (/sim/overview/image) │ (/sim/camera/image)   │
@@ -13,6 +13,9 @@
 실물 → Gazebo 자동 반영: 휴대폰 화면의 부품 배치가 STABLE_FRAMES 패킷 동안 그대로면 (손이 들어와 흔들리는 동안은 안 함)
 /sim/spawn_objects 로 같은 위치에 가상 부품을 만든다. 다 치우면 /sim/clear_objects. 사이클 중에는 멈추고,
 사이클 뒤에도 실물 배치가 그대로면 다시 만들지 않는다 (MIRROR_MOVE_MM 넘게 바뀌어야 다시 반영).
+
+처음부터 다시 (집기가 실패해 멈췄을 때): /sim/go_ready (진공 끄기·대기 자세) → /sim/clear_objects → 실물은 지금 배치가
+안정되면 /sim/spawn_objects, 가상은 바로 /sim/spawn_random. 중간에 실패하면 거기서 멈추고 이유를 보여 준다.
 
     source env.sh   # venv (PySide6) 를 켠다
     python3 -m vision_pick_place.gui.main_window                                         # 실물 (휴대폰, data/calib)
@@ -55,6 +58,8 @@ INK, MUTED, BLUE = '#16191D', '#5B6470', '#1D5FD1'
 OK_FG, OK_BG, BAD_FG, BAD_BG, OFF_FG, OFF_BG = '#13734B', '#E6F4EC', '#B42318', '#FDECEA', '#5B6470', '#E4E7EB'
 PART_BADGE = {'screw': ('나사', BLUE, '#E8EFFB'), 'nut': ('너트', '#A34808', '#FBEDE3'),
               'unknown': ('모름', MUTED, '#EEF0F3')}
+SERVICE_NAMES = {'/sim/run_cycle': '집기 시작', '/sim/spawn_objects': 'Gazebo 에 부품 놓기', '/sim/clear_objects': 'Gazebo 부품 지우기',
+                 '/sim/spawn_random': '부품 놓기 (무작위)', '/sim/go_ready': '로봇 대기 자세로'}
 CONSOLE = {'time': '#8B95A1', 'ack': '#6FD3A0', 'err': '#FF8A80', 'sim': '#F5B27A'}
 MONO = "'JetBrains Mono', 'DejaVu Sans Mono', monospace"
 
@@ -196,6 +201,8 @@ class MainWindow(QMainWindow):
         self.picks = []                             # Gazebo 집기 결과 True/False
         self.pending_acks = []                      # 아직 콘솔에 안 쓴 ACK (seq, latency_ms). 1초마다 한 줄로 묶는다
         self.gazebo = False
+        self.resetting = False                      # [처음부터 다시] 진행 중 (로봇 복귀·부품 지우기)
+        self.reset_waiting = False                  # 지운 뒤 실물 배치가 안정되기를 기다리는 중 (자동 반영이 꺼져 있어도 한 번 반영)
 
         root = QWidget()
         root.setObjectName('root')
@@ -268,17 +275,18 @@ class MainWindow(QMainWindow):
         self.auto_sync.setChecked(self.source == 'real')
         self.auto_sync.setVisible(self.source == 'real')
         layout.addWidget(self.auto_sync)
-        reload_button = QPushButton('보정 다시 읽기')
-        reload_button.clicked.connect(self.load_calibration)
         # 시뮬 시연용: 사이클이 끝나면 매트가 비므로 새 부품을 놓는다 (실물에서는 사람이 놓는다)
         self.spawn_button = QPushButton('부품 놓기 (무작위)')
         self.spawn_button.clicked.connect(self.request_spawn)
         self.spawn_button.setVisible(self.source == 'sim')
         layout.addWidget(self.spawn_button)
-        self.cycle_button = QPushButton('사이클 실행 (/sim/run_cycle)')
+        self.reset_button = QPushButton('처음부터 다시')
+        self.reset_button.setToolTip('집기가 실패해 멈췄을 때: 로봇을 대기 자세로 돌리고 Gazebo 부품을 지운 뒤 다시 놓습니다')
+        self.reset_button.clicked.connect(self.request_reset)
+        layout.addWidget(self.reset_button)
+        self.cycle_button = QPushButton('집기 시작')
         self.cycle_button.setObjectName('primary')
         self.cycle_button.clicked.connect(self.request_cycle)
-        layout.addWidget(reload_button)
         layout.addWidget(self.cycle_button)
         return bar
 
@@ -297,10 +305,9 @@ class MainWindow(QMainWindow):
     def _overview_card(self) -> Card:
         """⑤ Gazebo 전경 카메라 (11-10 목업의 Gazebo 판). Gazebo 창을 띄우지 않아도 스폰·집기 과정을 본다."""
         self.overview_card = Card('⑤ Gazebo 시연')
-        self.overview_card.meta.setText('/sim/overview/image')
         self.overview = VideoPanel('/sim/overview/image')
         self.overview_card.body.addWidget(self.overview, 1)
-        self.sync_status = QLabel('실물 배치를 기다리는 중' if self.source == 'real' else '가상 카메라 입력: [부품 놓기] → [사이클 실행]')
+        self.sync_status = QLabel('실물 배치를 기다리는 중' if self.source == 'real' else '가상 카메라 입력: [부품 놓기] → [집기 시작]')
         self.sync_status.setObjectName('note')
         self.overview_card.body.addWidget(self.sync_status)
         return self.overview_card
@@ -308,7 +315,6 @@ class MainWindow(QMainWindow):
     def _sim_top_card(self) -> Card:
         """⑥ Gazebo 위 카메라 원본: 실물과 같은 자리(작업 매트)를 위에서 본 Gazebo. ① 과 나란히 보면 반영이 맞는지 바로 보인다."""
         card = Card('⑥ Gazebo 위 카메라')
-        card.meta.setText('/sim/camera/image')
         self.sim_top = VideoPanel('/sim/camera/image')
         card.body.addWidget(self.sim_top, 1)
         note = QLabel('실물 시트와 같은 자리 · 같은 마커의 Gazebo 작업 매트')
@@ -318,11 +324,11 @@ class MainWindow(QMainWindow):
 
     def _detection_card(self) -> Card:
         self.det_card = Card('② 좌표 · 회전각 · 부품 종류')
-        self.det_card.meta.setText('기준: 작업 평면 (work_plane)')
+        self.det_card.meta.setText('기준: 작업 시트 왼쪽 아래 = (0, 0)')
         self.det_status = QLabel('패킷 대기 중 (/vision/detections)')
         self.det_status.setObjectName('note')
         self.det_table = QTableWidget(0, 5)
-        self.det_table.setHorizontalHeaderLabels(['#', '종류', 'px (u, v)', 'mm (X, Y)', '각도'])
+        self.det_table.setHorizontalHeaderLabels(['#', '종류', '화면 위치', '시트 위 위치 (mm)', '각도'])
         header = self.det_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.Stretch)
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
@@ -332,25 +338,24 @@ class MainWindow(QMainWindow):
         self.det_card.body.addWidget(self.det_status)
         self.det_card.body.addWidget(self.det_table, 1)
         tiles = QHBoxLayout()
-        self.tile_rule = Tile('나사 / 너트 기준', '장축/단축 > 1.5 → 나사')
-        self.tile_angle = Tile('각도 기준', 'mm 평면, [0°, 180°)')
+        self.tile_parts = Tile('찾은 부품')   # 판정 기준은 검출 방식(규칙·YOLO)마다 달라 적지 않는다
+        self.tile_angle = Tile('각도 기준', '시트 가로축에서 0~180°')
         self.tile_target = Tile('송신 대상', '—')
-        for tile in (self.tile_rule, self.tile_angle, self.tile_target):
+        for tile in (self.tile_parts, self.tile_angle, self.tile_target):
             tiles.addWidget(tile)
         self.det_card.body.addLayout(tiles)
         return self.det_card
 
     def _log_card(self) -> Card:
         card = Card('③ 가상 로봇 송수신 · Gazebo 집기 결과')
-        card.meta.setText('/robot/log · /sim/pick_log')
         self.console = QPlainTextEdit()
         self.console.setObjectName('console')
         self.console.setReadOnly(True)
         self.console.setMaximumBlockCount(LOG_LINES)
         card.body.addWidget(self.console, 1)
         tiles = QHBoxLayout()
-        self.tile_ack = Tile('ACK 성공률')
-        self.tile_p95 = Tile('지연 P95')
+        self.tile_ack = Tile('로봇 수신 성공률')
+        self.tile_p95 = Tile('검출→송신 지연 (P95)')
         self.tile_pick = Tile('집기 성공')
         for tile in (self.tile_ack, self.tile_p95, self.tile_pick):
             tiles.addWidget(tile)
@@ -368,8 +373,8 @@ class MainWindow(QMainWindow):
         rows.setContentsMargins(0, 0, 0, 0)
         rows.setSpacing(0)
         self.calib_labels = {}
-        items = [('dir', '보정 폴더'), ('intrinsics', '내부 파라미터 (ChArUco)'),
-                 ('homography', '호모그래피 (ArUco 작업 시트 px → mm)'), ('error', '재투영 오차'),
+        items = [('dir', '보정 폴더'), ('intrinsics', '카메라 렌즈 보정'),
+                 ('homography', '작업 시트 보정 (화면 → mm)'), ('error', '보정 정확도 (작을수록 좋음)'),
                  ('camera', '카메라 높이 (시차 보정)'), ('saved', '보정 저장 시각')]
         for i, (key, name) in enumerate(items):
             row = QFrame()
@@ -387,13 +392,16 @@ class MainWindow(QMainWindow):
             rows.addWidget(row)
             self.calib_labels[key] = value
         card.body.addWidget(box)
-        note = QLabel('카메라나 작업 시트가 움직이면 시트 사진을 다시 찍어 호모그래피를 다시 계산합니다. '
-                      '보정이 안 돼 있으면 calib_ok=false 로 송신되고, 로봇은 그 패킷을 거부합니다.')
+        note = QLabel('카메라나 작업 시트가 움직이면 시트 사진을 다시 찍어 보정합니다. 보정이 필요하면 로봇은 그 위치를 받지 않습니다.')
         note.setObjectName('note')
         note.setWordWrap(True)
         card.body.addWidget(note)
+        self.reload_button = QPushButton('보정 정보 새로고침')
+        self.reload_button.setToolTip('이 칸의 표시만 새로 읽습니다. 새 보정을 검출에 쓰려면 vision_node 를 다시 시작해야 합니다')
+        self.reload_button.clicked.connect(self.load_calibration)
+        card.body.addWidget(self.reload_button)
         card.body.addStretch(1)
-        _pill(self.calib_pill, 'calib_ok 대기', 'off')
+        _pill(self.calib_pill, '보정 확인 중', 'off')
         return card
 
     # ---------- ④ ----------
@@ -452,12 +460,13 @@ class MainWindow(QMainWindow):
                     item.setBackground(QBrush(QColor(bg)))
                 self.det_table.setItem(row, col, item)
         rate = f' · {1 / np.mean(self.packet_times):.1f} Hz' if self.packet_times else ''
-        self.det_card.meta.setText(f'seq {packet.get("seq")} · 기준: 작업 평면 (work_plane)')
-        self.det_status.setText(f'물체 {len(objects)}개{rate}' + ('' if calib_ok else '  [미보정 — mm·각도 없음]'))
+        self.det_status.setText(f'물체 {len(objects)}개{rate}' + ('' if calib_ok else '  [보정 필요 — 위치·각도 없음]'))
         self.video_card.meta.setText(f'부품 {len(objects)}개{rate}')
+        kinds = [o.get('part_type') for o in objects]
+        self.tile_parts.value.setText(f'나사 {kinds.count("screw")} · 너트 {kinds.count("nut")}')
         sendable = sum(o.get('part_type') in ('screw', 'nut') and o.get('x_mm') is not None for o in objects)
-        self.tile_target.value.setText(f'{sendable}개 (집기 최대 3)')
-        _pill(self.calib_pill, f'calib_ok = {"true" if calib_ok else "false"}', 'ok' if calib_ok else 'bad')
+        self.tile_target.value.setText(f'{sendable}개')
+        _pill(self.calib_pill, '보정 완료' if calib_ok else '보정 필요', 'ok' if calib_ok else 'bad')
         if self.video.frame_size:
             name = '휴대폰 카메라 (실물)' if self.source == 'real' else 'Gazebo 가상 카메라'
             self.input_label.setText(f'입력: {name} · {self.video.frame_size[0]}×{self.video.frame_size[1]}')
@@ -471,11 +480,16 @@ class MainWindow(QMainWindow):
             self.stable_count += 1
         else:
             self.candidate, self.stable_count = current, 1
-        if not self.auto_sync.isChecked() or self.busy or self.worker is None:
+        if not (self.auto_sync.isChecked() or self.reset_waiting) or self.busy or self.worker is None:
             return
         if self.stable_count < STABLE_FRAMES or same_layout(current, self.mirrored, MIRROR_MOVE_MM):
             return
         self.mirrored = current
+        if self.reset_waiting and not current:   # 이미 지웠으니 놓을 것이 없다
+            self.reset_waiting = False
+            self.sync_status.setText('처음 상태로 돌아옴. 시트에 부품이 없습니다')
+            return
+        self.reset_waiting = False
         if current:
             names = ', '.join(PART_BADGE[k][0] for k, _, _ in current)
             self.sync_status.setText(f'실물 배치 반영 중: {names}')
@@ -500,17 +514,15 @@ class MainWindow(QMainWindow):
             self.pending_acks.append((log.get('seq'), log.get('latency_ms')))
         else:
             self.flush_acks()   # 순서를 지키려고 모아 둔 ACK 를 먼저 쓴다
-            self.log_line('ERR', CONSOLE['err'], f'seq={log.get("seq")}  {log.get("error") or "응답 없음"}')
+            self.log_line('ERR', CONSOLE['err'], f'로봇 응답 없음  {log.get("error") or ""}'.rstrip())
         self.update_tiles()
 
     def flush_acks(self):
-        """모아 둔 ACK 를 한 줄로: 'ACK  seq 120~124  5건, 평균 14 ms'."""
+        """모아 둔 ACK 를 한 줄로: '로봇  수신 확인 5건 · 응답 14 ms' (검출부터 ACK 까지 걸린 시간의 평균)."""
         if not self.pending_acks:
             return
-        seqs = [s for s, _ in self.pending_acks]
         ms = [v for _, v in self.pending_acks if v is not None]
-        span = f'seq {seqs[0]}' if len(seqs) == 1 else f'seq {seqs[0]}~{seqs[-1]}'
-        self.log_line('ACK', CONSOLE['ack'], f'{span}  {len(seqs)}건' + (f', 평균 {np.mean(ms):.0f} ms' if ms else ''))
+        self.log_line('로봇', CONSOLE['ack'], f'수신 확인 {len(self.pending_acks)}건' + (f' · 응답 {np.mean(ms):.0f} ms' if ms else ''))
         self.pending_acks = []
 
     def on_sim_log(self, log: dict):
@@ -545,9 +557,9 @@ class MainWindow(QMainWindow):
     def update_status(self):
         now = time.monotonic()
         fresh = self.last_packet_time is not None and now - self.last_packet_time < STALE_S
-        _pill(self.pill_ros, 'ROS2 비전' if fresh else 'ROS2 비전 대기', 'ok' if fresh else 'off')
+        _pill(self.pill_ros, '카메라 검출' if fresh else '카메라 검출 대기', 'ok' if fresh else 'off')
         acked = self.last_ack_time is not None and now - self.last_ack_time < STALE_S
-        _pill(self.pill_robot, 'robot_server ACK' if acked else 'robot_server 대기', 'ok' if acked else 'off')
+        _pill(self.pill_robot, '로봇 수신' if acked else '로봇 수신 대기', 'ok' if acked else 'off')
         _pill(self.pill_gazebo, 'Gazebo' if self.gazebo else 'Gazebo 없음', 'ok' if self.gazebo else 'off')
         if self.last_packet_time is not None and not fresh:
             self.det_status.setText(f'[주의] {now - self.last_packet_time:.0f}초째 패킷 없음 (vision_node 확인)')
@@ -555,8 +567,8 @@ class MainWindow(QMainWindow):
     def request_cycle(self):
         if self.worker is None:
             return
-        self.cycle_button.setEnabled(False)
-        self.cycle_button.setText('사이클 실행 중...')
+        self.set_buttons(False)
+        self.cycle_button.setText('집는 중...')
         self.call_service('/sim/run_cycle')
 
     def call_service(self, name: str):
@@ -564,27 +576,72 @@ class MainWindow(QMainWindow):
             return
         self.busy.add(name)
         self.flush_acks()
-        self.log_line('SIM', CONSOLE['sim'], f'{name} 요청')
+        self.log_line('SIM', CONSOLE['sim'], f'{SERVICE_NAMES.get(name, name)} 요청')
         self.worker.request_service(name)
 
     def request_spawn(self):
-        self.spawn_button.setEnabled(False)
+        if self.worker is None:
+            return
+        self.set_buttons(False)
         self.call_service('/sim/spawn_random')
+
+    def set_buttons(self, enabled: bool):
+        for button in (self.cycle_button, self.spawn_button, self.reset_button):
+            button.setEnabled(enabled)
+
+    def request_reset(self):
+        """처음부터 다시 (모듈 설명). 로봇이 움직이는 동안에는 버튼이 꺼져 있다."""
+        if self.worker is None:
+            return
+        self.resetting, self.reset_waiting = True, False
+        self.set_buttons(False)
+        self.reset_button.setText('되돌리는 중...')
+        self.sync_status.setText('처음부터 다시: 로봇을 대기 자세로 돌리는 중')
+        self.call_service('/sim/go_ready')
+
+    def on_reset_step(self, name: str, ok: bool, message: str):
+        if ok and name == '/sim/go_ready':
+            self.sync_status.setText('처음부터 다시: Gazebo 부품 지우는 중')
+            self.call_service('/sim/clear_objects')
+            return
+        if ok and name == '/sim/clear_objects' and self.source == 'sim':
+            self.sync_status.setText('처음부터 다시: 부품을 새로 놓는 중')
+            self.call_service('/sim/spawn_random')
+            return
+        self.resetting = False
+        self.set_buttons(True)
+        self.reset_button.setText('처음부터 다시')
+        if not ok:
+            self.sync_status.setText(f'처음부터 다시 실패 ({SERVICE_NAMES.get(name, name)}): {message[:80]}')
+        elif name == '/sim/clear_objects':   # 실물: 손이 없고 배치가 안정되면 mirror() 가 다시 놓는다
+            self.candidate, self.stable_count, self.mirrored, self.reset_waiting = None, 0, None, True
+            self.sync_status.setText('처음부터 다시: 실물 배치를 확인하는 중')
+        else:
+            self.sync_status.setText('처음 상태로 돌아옴. [집기 시작] 을 누르세요')
 
     def on_service_result(self, name: str, ok: bool, message: str):
         self.busy.discard(name)
         self.flush_acks()
         self.log_line('SIM', CONSOLE['ack'] if ok else CONSOLE['err'], message)
-        if name == '/sim/run_cycle':
-            self.cycle_button.setEnabled(True)
-            self.cycle_button.setText('사이클 실행 (/sim/run_cycle)')
+        if self.resetting and name in ('/sim/go_ready', '/sim/clear_objects', '/sim/spawn_random'):
+            self.on_reset_step(name, ok, message)
+        elif name == '/sim/run_cycle':
+            self.set_buttons(True)
+            self.cycle_button.setText('집기 시작')
             # 사이클 뒤 Gazebo 매트는 비지만 실물 배치는 그대로다. 실물이 바뀌기 전까지는 다시 반영하지 않는다
             self.mirrored = self.candidate
-            self.sync_status.setText('사이클 끝. 실물 배치를 바꾸면 다시 반영합니다' if self.source == 'real' else self.sync_status.text())
+            if not ok:
+                self.sync_status.setText('집기가 멈췄습니다. [처음부터 다시] 를 누르면 되돌립니다')
+            elif self.source == 'real':
+                self.sync_status.setText('집기 끝. 실물 배치를 바꾸면 다시 반영합니다')
         elif name == '/sim/spawn_random':
-            self.spawn_button.setEnabled(True)
+            self.set_buttons(True)
         elif name in ('/sim/spawn_objects', '/sim/clear_objects'):
-            self.sync_status.setText(('반영 완료' if ok else '반영 실패') + f': {message[:80]}')
+            if ok:
+                self.sync_status.setText(f'Gazebo 에 부품 {len(self.mirrored or [])}개 반영 완료' if name == '/sim/spawn_objects'
+                                         else 'Gazebo 부품을 지웠습니다')
+            else:
+                self.sync_status.setText(f'{SERVICE_NAMES[name]} 실패: {message[:80]}')
             if not ok:
                 self.mirrored = None   # 다음 안정된 배치에서 다시 시도
 

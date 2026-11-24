@@ -13,7 +13,7 @@ from vision_pick_place.gui.main_window import MainWindow,configure_korean_font
 class Team2DemoWindow(MainWindow):
     def __init__(self, calib_dir, maximum, start_worker=True):
         self.maximum=maximum
-        super().__init__(calib_dir,start_worker=start_worker)
+        super().__init__(calib_dir,start_worker=start_worker,source='sim')  # 실물 자동 반영은 끈다 (가상 카메라 시연)
 
     def on_detections(self, packet):
         super().on_detections(packet)
@@ -40,7 +40,6 @@ def main():
     app.aboutToQuit.connect(window.close)
     window.setWindowTitle(f'팀원 2 — {args.objects}개 부품 분류 시연')
     window.spawn_button.setText(f'부품 {args.objects}개 배치')
-    window.video_tabs.setCurrentIndex(1)
     window.resize(1440,960);window.show()
     def capture():
         path=Path(args.screenshot);path.parent.mkdir(parents=True,exist_ok=True)

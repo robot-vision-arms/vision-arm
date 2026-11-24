@@ -48,3 +48,11 @@ def test_inside_bin():
     assert inside_bin((0.0, 0.911, 0.013), 0.0, 0.85)       # 벽 근처, 다른 부품 위 (11-20 실제 사례)
     assert not inside_bin((0.0, 0.77, 0.005), 0.0, 0.85)    # 상자 밖 (벽 너머)
     assert not inside_bin((0.0, 0.85, 0.10), 0.0, 0.85)     # 아직 공중
+
+
+def test_needs_lift_only_when_low_over_the_mat():
+    from ur5e_pick_place.grasp import needs_lift
+    assert needs_lift(-0.1, 0.01, 0.25)            # 부품 옆에서 멈춤
+    assert not needs_lift(-0.1, 0.25, 0.25)        # 이미 이동 높이 (대기 자세)
+    assert not needs_lift(0.82, 0.15, 0.25)        # 상자 위에서 멈춤: 경유점으로 돌아간다
+    assert not needs_lift(0.0, 0.9, 0.25)          # 시작 자세 (팔을 세움)

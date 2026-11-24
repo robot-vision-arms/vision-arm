@@ -51,7 +51,7 @@ from std_msgs.msg import String
 from std_srvs.srv import SetBool, Trigger
 from tf2_ros import Buffer, TransformException, TransformListener
 
-from ur5e_pick_place.grasp import PlanePose, cup_tool_xy, inside_bin, tool_down_quaternion, work_to_base
+from ur5e_pick_place.grasp import PlanePose, cup_tool_xy, inside_bin, needs_lift, tool_down_quaternion, work_to_base
 from ur5e_pick_place.object_spawner import (HOLE_RADIUS_M, SuctionLimits, marker_shape, model_file, part_top_m,
                                             plan_spawns)
 from ur5e_pick_place.workcell_scene import collision_boxes
@@ -129,6 +129,7 @@ class PickPlaceNode(Node):
         self.srv = self.create_service(Trigger, '/sim/run_cycle', self.on_run_cycle, callback_group=self.cb_group)
         self.move_srv = self.create_service(Trigger, '/sim/move_to_target', self.on_move_to_target,
                                             callback_group=self.cb_group)
+        self.ready_srv = self.create_service(Trigger, '/sim/go_ready', self.on_go_ready, callback_group=self.cb_group)
         self.spawn_client = self.create_client(Trigger, '/sim/spawn_objects', callback_group=self.cb_group)
         self.vacuum_client = self.create_client(SetBool, '/sim/vacuum', callback_group=self.cb_group)
         self.tf_buffer = Buffer()
@@ -438,6 +439,33 @@ class PickPlaceNode(Node):
             self.motion_lock.release()
         self.get_logger().info(response.message)
         return response
+
+    def on_go_ready(self, request, response):
+        """집기가 실패해 멈춘 뒤 되돌리기 (GUI [처음부터 다시]): 진공 끄기 → 작업 매트 위면 곧게 들어 올림 → 대기 자세."""
+        if not self.motion_lock.acquire(blocking=False):
+            response.success, response.message = False, '이미 이동 중입니다.'
+            return response
+        try:
+            self.prepare_motion()
+            released = self.call(self.vacuum_client, SetBool.Request(data=False))
+            if not released.success:
+                raise RuntimeError(f'진공 끄기 실패: {released.message}')
+            self.recover_ready()
+            response.success, response.message = True, f'대기 자세로 복귀 ({released.message})'
+        except (ValueError, RuntimeError, TransformException) as exc:
+            response.success, response.message = False, f'대기 자세 복귀 실패: {exc}'
+        finally:
+            self.motion_lock.release()
+        self.get_logger().info(response.message)
+        return response
+
+    def recover_ready(self):
+        """부품 옆에서 바로 관절 이동을 하면 팔이 부품을 칠 수 있어, 낮은 곳이면 먼저 곧게 올린다 (사이클과 같은 툴 yaw 0)."""
+        p = self.tf_buffer.lookup_transform(BASE_LINK, EE_LINK, Time()).transform.translation
+        travel = self.value('work_plane_z') + self.value('travel_height_m')
+        if needs_lift(p.y, p.z - self.value('tool_length_m'), travel):
+            self.move_tip(p.x, p.y, travel, straight=True)
+        self.go_ready()
 
     def go_ready(self):
         """대기 자세로. 처음에는 작업 시트 위 좌표 목표로 가서 그 관절 각도를 저장하고, 다음부터는 관절 목표로 간다."""

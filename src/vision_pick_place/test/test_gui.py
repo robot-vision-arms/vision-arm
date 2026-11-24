@@ -59,12 +59,13 @@ def test_detections_table_and_uncalibrated_warning(window):
     assert table.rowCount() == 2
     assert [cell(table, 0, c) for c in range(5)] == ['0', '나사', '640.2, 360.8', '102.4, 55.0', '37.5°']
     assert cell(table, 1, 1) == '너트' and cell(table, 1, 4) == '—'
-    assert 'calib_ok = true' in window.calib_pill.text()
+    assert '보정 완료' in window.calib_pill.text()
     assert window.tile_target.value.text().startswith('2개')
+    assert window.tile_parts.value.text() == '나사 1 · 너트 1'
     window.on_detections({'seq': 8, 'calib_ok': False, 'objects': [
         {'id': 0, 'part_type': 'screw', 'x_mm': None, 'y_mm': None, 'angle_deg': None, 'u_px': 1.0, 'v_px': 2.0}]})
-    assert '미보정' in window.det_status.text() and cell(window.det_table, 0, 3) == '—, —'
-    assert 'calib_ok = false' in window.calib_pill.text()
+    assert '보정 필요' in window.det_status.text() and cell(window.det_table, 0, 3) == '—, —'
+    assert '보정 필요' in window.calib_pill.text()
 
 
 def test_log_rows_and_summary(window):
@@ -77,9 +78,9 @@ def test_log_rows_and_summary(window):
     lines = window.console.toPlainText().splitlines()
     # ACK 는 묶어서 쓰고, ERR·SIM 이 오면 그 전까지 모은 ACK 를 먼저 쓴다
     assert len(lines) == 5
-    assert 'ACK' in lines[0] and 'seq 0~2' in lines[0] and '3건' in lines[0]
+    assert '로봇' in lines[0] and '수신 확인 3건 · 응답 11 ms' in lines[0]
     assert 'ERR' in lines[1] and 'ACK timeout' in lines[1]
-    assert 'seq 4~9' in lines[2] and '6건' in lines[2] and '평균 16 ms' in lines[2]
+    assert '수신 확인 6건 · 응답 16 ms' in lines[2]
     assert 'SIM' in lines[-1] and '실패' in lines[-1] and '흡착 실패' in lines[-1]
     assert window.tile_ack.value.text() == '90 % (9/10)'
     assert window.tile_p95.value.text().endswith('ms')
@@ -136,3 +137,72 @@ def test_real_layout_is_mirrored_to_gazebo_only_when_stable(window):
     for i in range(STABLE_FRAMES):
         window.on_detections(_packet(40 + i, []))
     assert worker.requests[-1] == '/sim/clear_objects'
+
+
+SCENE = [('screw', 100.0, 80.0), ('nut', 180.0, 140.0)]
+
+
+def test_words_for_first_time_viewers(window):
+    headers = [window.det_table.horizontalHeaderItem(c).text() for c in range(5)]
+    assert headers[2:4] == ['화면 위치', '시트 위 위치 (mm)']
+    assert window.cycle_button.text() == '집기 시작'
+    assert window.reload_button.text() == '보정 정보 새로고침'
+
+
+def test_reset_returns_robot_clears_and_places_current_layout(window):
+    from vision_pick_place.gui.main_window import STABLE_FRAMES
+    worker = window.worker = FakeWorker()
+    for i in range(STABLE_FRAMES):
+        window.on_detections(_packet(i, SCENE))
+    window.on_service_result('/sim/spawn_objects', True, '스폰 2개')
+    window.request_cycle()
+    assert not window.reset_button.isEnabled()                         # 로봇이 움직이는 동안은 못 누른다
+    window.on_service_result('/sim/run_cycle', False, '1/2 개 상자 투입')
+    assert window.reset_button.isEnabled() and '처음부터 다시' in window.sync_status.text()
+    worker.requests.clear()
+    window.auto_sync.setChecked(False)                                 # 자동 반영이 꺼져 있어도 한 번은 다시 놓는다
+    window.request_reset()
+    assert worker.requests == ['/sim/go_ready'] and not window.cycle_button.isEnabled()
+    for i in range(STABLE_FRAMES + 2):                                 # 되돌리는 동안에는 반영하지 않는다
+        window.on_detections(_packet(20 + i, SCENE))
+    window.on_service_result('/sim/go_ready', True, '대기 자세로 복귀')
+    window.on_service_result('/sim/clear_objects', True, '삭제')
+    assert worker.requests == ['/sim/go_ready', '/sim/clear_objects'] and window.cycle_button.isEnabled()
+    for i in range(STABLE_FRAMES + 3):
+        window.on_detections(_packet(40 + i, SCENE))
+    assert worker.requests == ['/sim/go_ready', '/sim/clear_objects', '/sim/spawn_objects']
+    window.on_service_result('/sim/spawn_objects', True, '스폰 2개')
+    moved = [(k, x + 40, y) for k, x, y in SCENE]
+    for i in range(STABLE_FRAMES + 3):                                 # 그 뒤로는 자동 반영이 꺼진 그대로
+        window.on_detections(_packet(60 + i, moved))
+    assert worker.requests[-1] == '/sim/spawn_objects' and len(worker.requests) == 3
+
+
+def test_reset_with_empty_sheet_and_failure(window):
+    from vision_pick_place.gui.main_window import STABLE_FRAMES
+    worker = window.worker = FakeWorker()
+    window.request_reset()
+    window.on_service_result('/sim/go_ready', False, '대기 자세 복귀 실패')   # 실패하면 부품을 지우지 않고 멈춘다
+    assert worker.requests == ['/sim/go_ready'] and window.reset_button.isEnabled()
+    assert '실패' in window.sync_status.text() and window.reset_button.text() == '처음부터 다시'
+    window.request_reset()
+    window.on_service_result('/sim/go_ready', True, '')
+    window.on_service_result('/sim/clear_objects', True, '')
+    for i in range(STABLE_FRAMES + 2):
+        window.on_detections(_packet(i, []))
+    assert worker.requests == ['/sim/go_ready'] * 2 + ['/sim/clear_objects']
+    assert '부품이 없습니다' in window.sync_status.text()
+
+
+def test_reset_in_virtual_mode_places_random_parts():
+    app, MainWindow = _qt()
+    win = MainWindow('none', start_worker=False, source='sim')
+    worker = win.worker = FakeWorker()
+    win.request_reset()
+    win.on_service_result('/sim/go_ready', True, '')
+    win.on_service_result('/sim/clear_objects', True, '')
+    assert worker.requests[-1] == '/sim/spawn_random' and not win.reset_button.isEnabled()
+    win.on_service_result('/sim/spawn_random', True, '무작위 배치')
+    assert win.reset_button.isEnabled() and '집기 시작' in win.sync_status.text()
+    win.close()
+    app.processEvents()

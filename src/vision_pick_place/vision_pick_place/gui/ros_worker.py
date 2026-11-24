@@ -18,7 +18,8 @@ from PySide6.QtCore import QThread, Signal
 SERVICES = ('/sim/run_cycle',       # 집기 한 사이클 (pick_place_node)
             '/sim/spawn_objects',   # 최신 /robot/targets 대로 Gazebo 에 부품 (실물 → Gazebo 반영)
             '/sim/clear_objects',   # Gazebo 부품 지우기 (실물에서 다 치웠을 때)
-            '/sim/spawn_random')    # 시뮬 시연용 무작위 배치
+            '/sim/spawn_random',    # 시뮬 시연용 무작위 배치
+            '/sim/go_ready')        # 진공 끄고 대기 자세로 ([처음부터 다시])
 
 
 class RosWorker(QThread):
