@@ -146,6 +146,7 @@ def predict_from_images(truth_rows: list[dict], image_for, intrinsics_path: str,
 
     from vision_pick_place import aruco_calib
     from vision_pick_place.calibrator import Calibrator
+    from vision_pick_place.part_check import limits_from_params
     from vision_pick_place.vision_pipeline import process_frame
     from vision_pick_place.workspace_roi import sheet_roi_mask
 
@@ -170,6 +171,7 @@ def predict_from_images(truth_rows: list[dict], image_for, intrinsics_path: str,
             roi = sheet_roi_mask(calib, (frame.shape[1], frame.shape[0]),
                                  params.get('sheet_edge_margin_mm', 3.0), params.get('sheet_marker_margin_mm', 5.0)) \
                 if params.get('sheet_roi', True) else None
-            packet, _ = process_frame(frame, calib, 0, 0.0, roi_mask=roi, part_heights_mm=part_heights_mm, **options)
+            packet, _ = process_frame(frame, calib, 0, 0.0, roi_mask=roi, part_heights_mm=part_heights_mm,
+                                      part_limits=limits_from_params(params), **options)
             out[t['sample_id']] = packet['objects']
     return out

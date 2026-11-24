@@ -6,15 +6,17 @@ import numpy as np
 
 from vision_pick_place.camera_stream import preprocess
 from vision_pick_place.packet import make_pose_packet
+from vision_pick_place.part_check import measure, reject_reason
 from vision_pick_place.vision_detector import classify_part, find_objects, normalize_angle_deg
 
 
 def process_frame(frame, calibrator, seq, t_capture, *, blur_ksize=5, threshold=-1,
                   min_area_px=500, nut_max_aspect=1.5, segmentation_mode='gray',
                   hsv_max_saturation=70, hsv_max_dark_value=70, close_ksize=0, open_ksize=0,
-                  roi_mask=None, part_heights_mm=None):
+                  roi_mask=None, part_heights_mm=None, part_limits=None):
     """roi_mask: 원본 영상 크기의 uint8 마스크(255 = 검출할 곳, workspace_roi.sheet_roi_mask). None 이면 영상 전체.
-    part_heights_mm: {part_type: 윤곽 중심 높이 mm}. 주면 그 높이로 시차를 보정한다 (calibrator 설명). 없는 종류는 0."""
+    part_heights_mm: {part_type: 윤곽 중심 높이 mm}. 주면 그 높이로 시차를 보정한다 (calibrator 설명). 없는 종류는 0.
+    part_limits: part_check.limits_from_params 결과. 주면 나사·너트 크기·구멍이 아닌 것을 unknown 으로 바꾼다."""
     if calibrator.image_size is not None and calibrator.image_size != (frame.shape[1], frame.shape[0]):
         raise ValueError('입력 영상과 보정 사진의 해상도가 다릅니다. 같은 해상도로 다시 보정하세요.')
     mask = preprocess(frame, blur_ksize, threshold, segmentation_mode=segmentation_mode,
@@ -31,7 +33,12 @@ def process_frame(frame, calibrator, seq, t_capture, *, blur_ksize=5, threshold=
     detections = find_objects(mask, min_area_px)
     objects = []
     for index, det in enumerate(detections):
-        part_type = classify_part(det, nut_max_aspect)
+        part_type, reason = classify_part(det, nut_max_aspect), None
+        if part_limits is not None:
+            features = measure(mask, det, calibrator.px_to_mm if calibrator.status.ready else None)
+            reason = reject_reason(part_type, features, part_limits)
+            if reason:
+                part_type = 'unknown'
         center = np.asarray(det.center_px)
         endpoint = center + np.asarray(det.long_axis_px) * det.length_px / 2
         x_mm = y_mm = angle = None
@@ -44,11 +51,12 @@ def process_frame(frame, calibrator, seq, t_capture, *, blur_ksize=5, threshold=
                 angle = normalize_angle_deg(math.degrees(math.atan2(delta[1], delta[0])))
         objects.append(dict(id=index, part_type=part_type, x_mm=x_mm, y_mm=y_mm,
                             angle_deg=angle, u_px=float(center[0]), v_px=float(center[1])))
-        cv2.polylines(debug, [np.rint(det.box_px).astype(np.int32)], True, (0, 255, 0), 2)
+        cv2.polylines(debug, [np.rint(det.box_px).astype(np.int32)], True,
+                      (150, 150, 150) if part_type == 'unknown' else (0, 255, 0), 2)
         start = tuple(np.rint(center).astype(int))
         cv2.circle(debug, start, 3, (0, 0, 255), -1)
         if part_type == 'screw':
             cv2.arrowedLine(debug, start, tuple(np.rint(endpoint).astype(int)), (255, 0, 0), 2)
-        cv2.putText(debug, f'{index}: {part_type}', start, cv2.FONT_HERSHEY_SIMPLEX,
+        cv2.putText(debug, f'{index}: {part_type}' + (f' ({reason})' if reason else ''), start, cv2.FONT_HERSHEY_SIMPLEX,
                     0.5, (0, 120, 255), 1)
     return make_pose_packet(seq, t_capture, calibrator.status.ready, objects), debug

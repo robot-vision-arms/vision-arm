@@ -31,6 +31,7 @@ sys.path.insert(0, str(ROOT / 'src' / 'vision_pick_place'))
 
 from vision_pick_place import aruco_calib, obb_eval, obb_labels  # noqa: E402
 from vision_pick_place.kpi import load_vision_params  # noqa: E402
+from vision_pick_place.part_check import limits_from_params  # noqa: E402
 from vision_pick_place.workspace_roi import sheet_roi_mask  # noqa: E402
 
 RUNS = ROOT / 'data/models/runs'
@@ -149,11 +150,11 @@ def load_split(data: Path, split: str, params: dict) -> dict:
     return dict(frames=frames, truths=truths, rois=rois, to_mm=to_mm)
 
 
-def rule_preds(d: dict, params: dict):
+def rule_preds(d: dict, params: dict, limits=None):
     out, times = {}, []
     for name, frame in d['frames'].items():
         start = time.perf_counter()
-        boxes, _ = obb_labels.draft_boxes(frame, params)
+        boxes, _ = obb_labels.draft_boxes(frame, params, limits)
         times.append((time.perf_counter() - start) * 1000)
         out[name] = [dict(corners=b.corners(), part_type=b.part_type, conf=1.0) for b in boxes]
     return out, float(np.median(times))
@@ -204,6 +205,10 @@ def evaluate(args):
 
     preds, ms = rule_preds(target, params)
     add('rule', preds, ms)
+    limits = limits_from_params(params)
+    if limits is not None:
+        preds, ms = rule_preds(target, params, limits)
+        add('rule_unknown', preds, ms)
     models = [('mvtec_asis', INITS['mvtec'], 1024, lambda k: 'nut' if k in MVTEC_NUT else 'screw', {})]
     for done_path in sorted(args.out.glob('*/done.json')):
         done = json.loads(done_path.read_text())

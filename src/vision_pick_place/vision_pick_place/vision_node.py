@@ -23,6 +23,7 @@ from std_msgs.msg import String
 from vision_pick_place.calibrator import Calibrator
 from vision_pick_place.camera_stream import FrameSource
 from vision_pick_place.packet import encode
+from vision_pick_place.part_check import RANGE_PARAMS, limits_from_params
 from vision_pick_place.vision_pipeline import process_frame
 from vision_pick_place.workspace_roi import sheet_roi_mask
 
@@ -73,7 +74,16 @@ class VisionNode(Node):
         # 시차 보정: 종류별 윤곽 중심 높이 (mm, 같은 순서의 병렬 배열). 빈 배열이면 보정 안 함 (calibrator.px_to_mm 설명)
         self.declare_parameter('parallax_part_types', [''])
         self.declare_parameter('parallax_heights_mm', [0.0])
+        # 나사·너트가 아닌 물체를 unknown 으로 (part_check). [0, 0] 이면 그 항목은 안 본다
+        self.declare_parameter('reject_unknown', False)
+        self.declare_parameter('nut_min_hole_ratio', 0.0)
+        for name in RANGE_PARAMS:
+            self.declare_parameter(name, [0.0, 0.0])
 
+        self.part_limits = limits_from_params({name: self.get_parameter(name).value for name in
+                                               ('reject_unknown', 'nut_min_hole_ratio', *RANGE_PARAMS)})
+        if self.part_limits is not None:
+            self.get_logger().info(f'unknown 거르기 켬: {self.part_limits}')
         self.pub_det = self.create_publisher(String, '/vision/detections', 10)
         self.pub_image = self.create_publisher(Image, '/vision/debug_image', 10)
         self.cv_bridge = CvBridge()
@@ -111,7 +121,7 @@ class VisionNode(Node):
         try:
             packet, debug = process_frame(frame, self.calibrator, self.seq, t_capture,
                                           roi_mask=self.sheet_roi(frame), part_heights_mm=self.part_heights(),
-                                          **options)
+                                          part_limits=self.part_limits, **options)
         except (ValueError, RuntimeError, cv2.error) as exc:
             self.get_logger().error(f'프레임 처리 실패: {exc}', throttle_duration_sec=5.0)
             return

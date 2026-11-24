@@ -20,6 +20,7 @@ class Detection:
     length_px: float                     # 장축 길이
     width_px: float                      # 단축 길이
     area_px: float
+    contour: np.ndarray | None = None    # 바깥 윤곽선 (part_check 의 구멍·크기 확인용)
 
 
 def find_objects(mask: np.ndarray, min_area_px: float = 500) -> list[Detection]:
@@ -52,7 +53,7 @@ def find_objects(mask: np.ndarray, min_area_px: float = 500) -> list[Detection]:
             axis = -axis
         detections.append(Detection(
             tuple(float(v) for v in rect[0]), box,
-            tuple(float(v) for v in axis), length, width, area,
+            tuple(float(v) for v in axis), length, width, area, contour,
         ))
     # 프레임 내 ID 순서만 고정한다. 프레임 사이의 물체 추적 ID는 아니다.
     return sorted(detections, key=lambda det: (det.center_px[1], det.center_px[0]))

@@ -26,6 +26,7 @@ import numpy as np
 
 from vision_pick_place import aruco_calib
 from vision_pick_place.camera_stream import preprocess
+from vision_pick_place.part_check import measure, reject_reason
 from vision_pick_place.vision_detector import classify_part, find_objects
 from vision_pick_place.workspace_roi import sheet_roi_mask
 
@@ -116,8 +117,8 @@ class SheetMap:
         return cv2.perspectiveTransform(np.asarray(points_mm, float).reshape(-1, 1, 2), self.inverse).reshape(-1, 2)
 
 
-def draft_boxes(frame: np.ndarray, params: dict) -> tuple[list[Box], str]:
-    """vision_node 와 같은 규칙 검출로 초안 상자를 만든다. (상자 목록, 사람에게 보일 안내)"""
+def detect(frame: np.ndarray, params: dict):
+    """vision_node 와 같은 규칙 검출. (마스크, 검출 목록, 시트 H(px → mm) 또는 None, 찾은 마커 수)"""
     options = {k: params[k] for k in ('segmentation_mode', 'hsv_max_saturation', 'hsv_max_dark_value',
                                       'close_ksize', 'open_ksize') if k in params}
     mask = preprocess(frame, params.get('blur_ksize', 5), params.get('threshold', -1), **options)
@@ -125,13 +126,25 @@ def draft_boxes(frame: np.ndarray, params: dict) -> tuple[list[Box], str]:
         H, _, ids = aruco_calib.sheet_homography(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))
         roi = sheet_roi_mask(SheetMap(H), (frame.shape[1], frame.shape[0]),
                              params.get('sheet_edge_margin_mm', 3.0), params.get('sheet_marker_margin_mm', 5.0))
-        mask = cv2.bitwise_and(mask, roi)
-        note = f'마커 {len(ids)}개'
+        mask, markers = cv2.bitwise_and(mask, roi), len(ids)
     except ValueError:
-        note = '마커를 3개 이상 못 찾아 사진 전체에서 초안을 만들었습니다 (시트 밖 오검출 주의)'
+        H, markers = None, 0
+    return mask, find_objects(mask, params.get('min_area_px', 500)), H, markers
+
+
+def mm_mapper(H):
+    return None if H is None else lambda px: cv2.perspectiveTransform(np.asarray(px, float).reshape(-1, 1, 2), H).reshape(-1, 2)
+
+
+def draft_boxes(frame: np.ndarray, params: dict, limits: dict | None = None) -> tuple[list[Box], str]:
+    """규칙 검출로 초안 상자를 만든다. (상자 목록, 사람에게 보일 안내). limits 를 주면 unknown 은 뺀다 (part_check)."""
+    mask, detections, H, markers = detect(frame, params)
+    note = f'마커 {markers}개' if markers else '마커를 3개 이상 못 찾아 사진 전체에서 초안을 만들었습니다 (시트 밖 오검출 주의)'
     boxes = []
-    for det in find_objects(mask, params.get('min_area_px', 500)):
+    for det in detections:
         kind = classify_part(det, params.get('nut_max_aspect', 1.5))
+        if limits is not None and reject_reason(kind, measure(mask, det, mm_mapper(H)), limits):
+            continue
         if kind in CLASSES:
             boxes.append(box_from_corners(kind, det.box_px))
     return boxes, f'{note}, 초안 {len(boxes)}개'
