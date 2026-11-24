@@ -3,12 +3,13 @@
 
     ┌ 헤더: 제목·입력 │ 연결 상태 │ [실물 → Gazebo 자동 반영] [처음부터 다시] [집기 시작] ┐
     ├──────────────────────┬──────────────────────┬──────────────────────┤
-    │ ① 실물 카메라 · 검출   │ ⑤ Gazebo 전경          │ ⑥ Gazebo 위 카메라      │
+    │ ① 실물 카메라 · 검출   │ ② Gazebo 전경          │ ③ Gazebo 위 카메라 (작게) │
     │ (/vision/debug_image) │ (/sim/overview/image) │ (/sim/camera/image)   │
     │                      │                      │ 실물 모드에서만         │
     ├───────────────┬─────────────────┴──┬──────────────────────────────┤
-    │ ② 좌표 표      │ ③ 송수신 콘솔 + 타일   │ ④ 캘리브레이션 상태              │
+    │ ④ 좌표 표      │ ⑤ 로봇 응답·집기 결과  │ ⑥ 보정 상태                     │
     └───────────────┴────────────────────┴──────────────────────────────┘
+    번호는 왼쪽 위부터 차례로 (가상 모드는 ③ 이 없어 아래가 ③④⑤). 과제 필수 화면 4가지 = ①④⑤⑥.
 
 실물 → Gazebo 자동 반영: 휴대폰 화면의 부품 배치가 STABLE_FRAMES 패킷 동안 그대로면 (손이 들어와 흔들리는 동안은 안 함)
 /sim/spawn_objects 로 같은 위치에 가상 부품을 만든다. 다 치우면 /sim/clear_objects. 사이클 중에는 멈추고,
@@ -31,6 +32,7 @@ from datetime import datetime
 import html
 import math
 from pathlib import Path
+import re
 import sys
 import time
 
@@ -77,10 +79,10 @@ QPushButton {{ min-height: 40px; padding: 0 16px; border-radius: 8px; border: 1p
               background: {CARD}; color: {INK}; font-size: 14px; }}
 QPushButton#primary {{ border: 1px solid {BLUE}; background: {BLUE}; color: white; }}
 QPushButton:disabled {{ background: #C9CED6; border-color: #C9CED6; color: white; }}
-QTableWidget {{ border: 1px solid {LINE}; border-radius: 8px; gridline-color: {LINE}; font-family: {MONO}; font-size: 13px; }}
+QTableWidget {{ border: 1px solid {LINE}; border-radius: 8px; gridline-color: {LINE}; font-family: {MONO}; font-size: 15px; }}
 QHeaderView::section {{ background: #F4F5F7; color: #3E4650; border: none; padding: 8px; font-weight: 500; }}
 QPlainTextEdit#console {{ background: #16191D; color: #D7DCE2; border-radius: 8px; padding: 8px;
-                         font-family: {MONO}; font-size: 12px; }}
+                         font-family: {MONO}; font-size: 14px; }}
 """
 
 
@@ -199,7 +201,9 @@ class MainWindow(QMainWindow):
         self.packet_times = deque(maxlen=30)       # 패킷 수신 주기 (Hz 표시)
         self.sends = deque(maxlen=SUMMARY_WINDOW)   # (acked, latency_ms)
         self.picks = []                             # Gazebo 집기 결과 True/False
-        self.pending_acks = []                      # 아직 콘솔에 안 쓴 ACK (seq, latency_ms). 1초마다 한 줄로 묶는다
+        self.pending_acks = []                      # 아직 화면에 안 쓴 ACK 의 latency_ms. 1초마다 ⑤ 위 한 줄(ack_status)을 새로 쓴다
+        numbers = iter('①②③④⑤⑥')                   # 화면에 놓는 차례대로 번호
+        self.next_number = lambda: next(numbers)
         self.gazebo = False
         self.resetting = False                      # [처음부터 다시] 진행 중 (로봇 복귀·부품 지우기)
         self.reset_waiting = False                  # 지운 뒤 실물 배치가 안정되기를 기다리는 중 (자동 반영이 꺼져 있어도 한 번 반영)
@@ -212,24 +216,24 @@ class MainWindow(QMainWindow):
         outer.addWidget(self._header())
         top = QHBoxLayout()
         top.setSpacing(16)
-        top.addWidget(self._video_card(), 1)
-        top.addWidget(self._overview_card(), 1)
+        top.addWidget(self._video_card(), 5)
+        top.addWidget(self._overview_card(), 5)
         if self.source == 'real':   # 가상 모드에서는 ① 이 이미 Gazebo 위 카메라라 겹친다
-            top.addWidget(self._sim_top_card(), 1)
+            top.addWidget(self._sim_top_card(), 3)
         bottom = QHBoxLayout()
         bottom.setSpacing(16)
         bottom.addWidget(self._detection_card(), 4)
-        bottom.addWidget(self._log_card(), 4)
+        bottom.addWidget(self._log_card(), 5)
         bottom.addWidget(self._calib_card(), 3)
-        outer.addLayout(top, 3)
-        outer.addLayout(bottom, 2)
+        outer.addLayout(top, 5)
+        outer.addLayout(bottom, 3)
         self.setCentralWidget(root)
 
         self.load_calibration()
         self.status_timer = QTimer(self)   # 1초마다 연결 표시·패킷 끊김 갱신
         self.status_timer.timeout.connect(self.update_status)
         self.status_timer.start(1000)
-        # vision_node 가 물체가 없어도 초당 몇 번씩 보내고 매번 ACK 가 와서, 한 줄씩 쓰면 집기 결과가 밀려 올라간다
+        # ACK 는 초당 여러 번 와서 콘솔에 쌓으면 집기 결과가 밀려 올라간다. 콘솔 위 한 줄만 새로 쓴다
         self.ack_timer = QTimer(self)
         self.ack_timer.timeout.connect(self.flush_acks)
         self.ack_timer.start(1000)
@@ -240,6 +244,7 @@ class MainWindow(QMainWindow):
             from vision_pick_place.gui.ros_worker import RosWorker
             self.worker = RosWorker(self, sim_top=self.source == 'real')
             self.worker.detections.connect(self.on_detections)
+            self.worker.vision_info.connect(self.on_vision_info)
             self.worker.frame.connect(self.video.show_frame)
             self.worker.overview.connect(self.overview.show_frame)
             if self.source == 'real':
@@ -292,7 +297,10 @@ class MainWindow(QMainWindow):
 
     def _video_card(self) -> Card:
         name = '실물 카메라' if self.source == 'real' else '가상 카메라'
-        self.video_card = Card(f'① {name} · 검출 ROI · 장축 방향')
+        self.video_card = Card(f'{self.next_number()} {name} · 부품 찾기')
+        self.pill_detector = QLabel()      # 검출 방식 (/vision/info)
+        _pill(self.pill_detector, '검출 방식 확인 중', 'off')
+        self.video_card.head.addWidget(self.pill_detector)
         self.video = VideoPanel()
         self.video_card.body.addWidget(self.video, 1)
         legend = QLabel('<span style="color:#C8A400">━</span> 검출 영역 (시트 안쪽, 마커 제외) &nbsp;&nbsp; '
@@ -304,7 +312,7 @@ class MainWindow(QMainWindow):
 
     def _overview_card(self) -> Card:
         """⑤ Gazebo 전경 카메라 (11-10 목업의 Gazebo 판). Gazebo 창을 띄우지 않아도 스폰·집기 과정을 본다."""
-        self.overview_card = Card('⑤ Gazebo 시연')
+        self.overview_card = Card(f'{self.next_number()} Gazebo 로봇')
         self.overview = VideoPanel('/sim/overview/image')
         self.overview_card.body.addWidget(self.overview, 1)
         self.sync_status = QLabel('실물 배치를 기다리는 중' if self.source == 'real' else '가상 카메라 입력: [부품 놓기] → [집기 시작]')
@@ -314,21 +322,22 @@ class MainWindow(QMainWindow):
 
     def _sim_top_card(self) -> Card:
         """⑥ Gazebo 위 카메라 원본: 실물과 같은 자리(작업 매트)를 위에서 본 Gazebo. ① 과 나란히 보면 반영이 맞는지 바로 보인다."""
-        card = Card('⑥ Gazebo 위 카메라')
+        card = Card(f'{self.next_number()} Gazebo 위에서 본 모습')
         self.sim_top = VideoPanel('/sim/camera/image')
         card.body.addWidget(self.sim_top, 1)
-        note = QLabel('실물 시트와 같은 자리 · 같은 마커의 Gazebo 작업 매트')
+        note = QLabel('실물과 같은 배치인지 비교')
         note.setObjectName('note')
         card.body.addWidget(note)
         return card
 
     def _detection_card(self) -> Card:
-        self.det_card = Card('② 좌표 · 회전각 · 부품 종류')
+        self.det_card = Card(f'{self.next_number()} 부품 위치 · 각도')
         self.det_card.meta.setText('기준: 작업 시트 왼쪽 아래 = (0, 0)')
         self.det_status = QLabel('패킷 대기 중 (/vision/detections)')
         self.det_status.setObjectName('note')
         self.det_table = QTableWidget(0, 5)
         self.det_table.setHorizontalHeaderLabels(['#', '종류', '화면 위치', '시트 위 위치 (mm)', '각도'])
+        self.det_table.setColumnHidden(2, True)   # 화면 위치(px)는 보는 사람에게 필요 없어 숨긴다 (값은 채워 둔다)
         header = self.det_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.Stretch)
         header.setSectionResizeMode(0, QHeaderView.ResizeToContents)
@@ -347,7 +356,10 @@ class MainWindow(QMainWindow):
         return self.det_card
 
     def _log_card(self) -> Card:
-        card = Card('③ 가상 로봇 송수신 · Gazebo 집기 결과')
+        card = Card(f'{self.next_number()} 로봇 응답 · 집기 결과')
+        self.ack_status = QLabel('로봇 응답 대기 중')
+        self.ack_status.setObjectName('note')
+        card.body.addWidget(self.ack_status)
         self.console = QPlainTextEdit()
         self.console.setObjectName('console')
         self.console.setReadOnly(True)
@@ -363,7 +375,7 @@ class MainWindow(QMainWindow):
         return card
 
     def _calib_card(self) -> Card:
-        card = Card('④ 캘리브레이션 상태')
+        card = Card(f'{self.next_number()} 카메라 보정')
         card.meta.hide()
         self.calib_pill = QLabel()
         card.head.addWidget(self.calib_pill)
@@ -373,9 +385,9 @@ class MainWindow(QMainWindow):
         rows.setContentsMargins(0, 0, 0, 0)
         rows.setSpacing(0)
         self.calib_labels = {}
-        items = [('dir', '보정 폴더'), ('intrinsics', '카메라 렌즈 보정'),
+        items = [('intrinsics', '카메라 렌즈 보정'),
                  ('homography', '작업 시트 보정 (화면 → mm)'), ('error', '보정 정확도 (작을수록 좋음)'),
-                 ('camera', '카메라 높이 (시차 보정)'), ('saved', '보정 저장 시각')]
+                 ('camera', '카메라 높이')]
         for i, (key, name) in enumerate(items):
             row = QFrame()
             row.setStyleSheet(f'QFrame {{ border: none; border-top: 1px solid {LINE if i else "transparent"}; }}')
@@ -404,17 +416,17 @@ class MainWindow(QMainWindow):
         _pill(self.calib_pill, '보정 확인 중', 'off')
         return card
 
-    # ---------- ④ ----------
+    # ---------- 보정 ----------
 
     def load_calibration(self):
         """보정 파일을 읽어 상태를 표시한다. 파일 저장 시각으로 '카메라가 움직인 뒤 다시 보정했는지' 판단한다."""
         intr, hom = self.calib_dir / 'intrinsics.npz', self.calib_dir / 'homography.npz'
         labels = self.calib_labels
-        labels['dir'].setText(str(self.calib_dir))
+        self.calib_pill.setToolTip(f'보정 폴더: {self.calib_dir}')
         try:
             calib = Calibrator(str(intr), str(hom))
         except (ValueError, OSError) as exc:
-            for key in ('homography', 'error', 'camera', 'saved'):
+            for key in ('homography', 'error', 'camera'):
                 labels[key].setText('—')
             labels['intrinsics'].setText(f'오류: {exc}')
             return
@@ -422,20 +434,27 @@ class MainWindow(QMainWindow):
 
         def loaded(ok, name):
             color = OK_FG if ok else BAD_FG
-            return f'<span style="color:{color}">{name} {"로드됨" if ok else "없음 (미보정)"}</span>'
+            return f'<span style="color:{color}">{"완료" if ok else f"없음 ({name})"}</span>'
 
         labels['intrinsics'].setText(loaded(status.intrinsics_loaded, 'intrinsics.npz'))
         labels['homography'].setText(loaded(status.homography_loaded, 'homography.npz'))
-        labels['error'].setText(f'{_fmt(status.rms_px, 2)} px / {_fmt(status.reproj_err_mm, 2)} mm')
+        labels['error'].setText(f'{_fmt(status.reproj_err_mm, 2)} mm')
         if status.ready:
             x, y, z = calib.camera_center_mm()
-            labels['camera'].setText(f'{z:.0f} mm (시트 ({x:.0f}, {y:.0f}) 위)')
+            labels['camera'].setText(f'{z:.0f} mm')
+            labels['camera'].setToolTip(f'시트 ({x:.0f}, {y:.0f}) mm 위')
         else:
             labels['camera'].setText('—')
         stamps = [datetime.fromtimestamp(p.stat().st_mtime).strftime('%m-%d %H:%M') for p in (intr, hom) if p.is_file()]
-        labels['saved'].setText(' / '.join(stamps) or '—')
+        self.calib_pill.setToolTip(f'보정 폴더: {self.calib_dir}\n저장 시각: {" / ".join(stamps) or "—"}\n'
+                                   f'렌즈 보정 오차: {_fmt(status.rms_px, 2)} px')
 
-    # ---------- ② ----------
+    # ---------- 검출 ----------
+
+    def on_vision_info(self, info: dict):
+        kind = info.get('detector')
+        _pill(self.pill_detector, {'yolo': '검출: YOLO', 'rule': '검출: 규칙'}.get(kind, f'검출: {kind}'),
+              'ok' if kind == 'yolo' else 'off')
 
     def on_detections(self, packet: dict):
         now = time.monotonic()
@@ -498,7 +517,7 @@ class MainWindow(QMainWindow):
             self.sync_status.setText('실물에서 부품을 치움 → Gazebo 부품 지우는 중')
             self.call_service('/sim/clear_objects')
 
-    # ---------- ③ ----------
+    # ---------- 로봇 응답·집기 ----------
 
     def log_line(self, tag: str, color: str, text: str):
         """콘솔 한 줄: 시각  태그  내용 (목업의 TX/ACK/SIM 줄)."""
@@ -511,22 +530,20 @@ class MainWindow(QMainWindow):
         self.sends.append((ok, log.get('latency_ms') if ok else None))
         if ok:
             self.last_ack_time = time.monotonic()
-            self.pending_acks.append((log.get('seq'), log.get('latency_ms')))
+            self.pending_acks.append(log.get('latency_ms'))
         else:
-            self.flush_acks()   # 순서를 지키려고 모아 둔 ACK 를 먼저 쓴다
             self.log_line('ERR', CONSOLE['err'], f'로봇 응답 없음  {log.get("error") or ""}'.rstrip())
         self.update_tiles()
 
     def flush_acks(self):
-        """모아 둔 ACK 를 한 줄로: '로봇  수신 확인 5건 · 응답 14 ms' (검출부터 ACK 까지 걸린 시간의 평균)."""
+        """모아 둔 ACK 를 콘솔 위 한 줄에: '로봇 수신 확인 · 응답 14 ms (1초에 5건)'. 응답 = 검출부터 ACK 까지 평균."""
         if not self.pending_acks:
             return
-        ms = [v for _, v in self.pending_acks if v is not None]
-        self.log_line('로봇', CONSOLE['ack'], f'수신 확인 {len(self.pending_acks)}건' + (f' · 응답 {np.mean(ms):.0f} ms' if ms else ''))
+        ms = [v for v in self.pending_acks if v is not None]
+        self.ack_status.setText('로봇 수신 확인' + (f' · 응답 {np.mean(ms):.0f} ms' if ms else '') + f' (1초에 {len(self.pending_acks)}건)')
         self.pending_acks = []
 
     def on_sim_log(self, log: dict):
-        self.flush_acks()
         ok = log.get('result') == 'ok'
         if 'obj' in log:   # run_cycle 의 물체 하나 (move_to_target 기록은 action 키만 있다)
             self.picks.append(ok)
@@ -559,6 +576,8 @@ class MainWindow(QMainWindow):
         fresh = self.last_packet_time is not None and now - self.last_packet_time < STALE_S
         _pill(self.pill_ros, '카메라 검출' if fresh else '카메라 검출 대기', 'ok' if fresh else 'off')
         acked = self.last_ack_time is not None and now - self.last_ack_time < STALE_S
+        if not acked and self.last_ack_time is not None:
+            self.ack_status.setText(f'[주의] {now - self.last_ack_time:.0f}초째 로봇 응답 없음')
         _pill(self.pill_robot, '로봇 수신' if acked else '로봇 수신 대기', 'ok' if acked else 'off')
         _pill(self.pill_gazebo, 'Gazebo' if self.gazebo else 'Gazebo 없음', 'ok' if self.gazebo else 'off')
         if self.last_packet_time is not None and not fresh:
@@ -575,7 +594,6 @@ class MainWindow(QMainWindow):
         if self.worker is None:
             return
         self.busy.add(name)
-        self.flush_acks()
         self.log_line('SIM', CONSOLE['sim'], f'{SERVICE_NAMES.get(name, name)} 요청')
         self.worker.request_service(name)
 
@@ -621,8 +639,9 @@ class MainWindow(QMainWindow):
 
     def on_service_result(self, name: str, ok: bool, message: str):
         self.busy.discard(name)
-        self.flush_acks()
-        self.log_line('SIM', CONSOLE['ack'] if ok else CONSOLE['err'], message)
+        found = re.search(r'\d+/\d+', message) if name == '/sim/run_cycle' else None   # '… 5/5 개 상자 투입 …'
+        label = f'집기 {found.group()}개 ' if found else f'{SERVICE_NAMES.get(name, name)} '
+        self.log_line('SIM', CONSOLE['ack'] if ok else CONSOLE['err'], label + ('완료' if ok else f'실패: {message}'))
         if self.resetting and name in ('/sim/go_ready', '/sim/clear_objects', '/sim/spawn_random'):
             self.on_reset_step(name, ok, message)
         elif name == '/sim/run_cycle':

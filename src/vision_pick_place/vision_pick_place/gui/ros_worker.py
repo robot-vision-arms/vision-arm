@@ -4,7 +4,7 @@ rclpy.spin 은 블로킹이라 GUI 스레드에서 돌리면 화면이 멈춘다
 받은 데이터는 Qt Signal 로 메인 스레드에 넘긴다 (위젯은 메인 스레드에서만 건드려야 함).
 GUI 프로세스 안의 다른 rclpy 사용과 섞이지 않도록 전용 Context 를 쓴다.
 
-구독:   /vision/detections (String JSON), /vision/debug_image (Image), /robot/log (String JSON), /sim/pick_log (String JSON),
+구독:   /vision/info (String JSON, 검출 방식), /vision/detections (String JSON), /vision/debug_image (Image), /robot/log (String JSON), /sim/pick_log (String JSON),
         /sim/overview/image (Image, Gazebo 전경 카메라), /sim/camera/image (Image, Gazebo 위 카메라, sim_top=True 일 때만)
 서비스: SERVICES 의 Trigger 서비스 — 메인 스레드가 request_service(이름) 로 요청할 때만 부른다 (Gazebo 를 켰을 때)
 """
@@ -24,6 +24,7 @@ SERVICES = ('/sim/run_cycle',       # 집기 한 사이클 (pick_place_node)
 
 class RosWorker(QThread):
     detections = Signal(dict)     # /vision/detections JSON
+    vision_info = Signal(dict)    # /vision/info JSON (검출 방식)
     frame = Signal(object)        # /vision/debug_image → numpy BGR
     overview = Signal(object)     # /sim/overview/image → numpy BGR (Gazebo 전경 카메라, 시연용)
     sim_top = Signal(object)      # /sim/camera/image → numpy BGR (Gazebo 위 카메라 원본, 실물 모드에서 Gazebo 매트를 위에서 보기)
@@ -49,6 +50,7 @@ class RosWorker(QThread):
         from cv_bridge import CvBridge
         from rclpy.context import Context
         from rclpy.executors import SingleThreadedExecutor
+        from rclpy.qos import DurabilityPolicy, QoSProfile
         from sensor_msgs.msg import Image
         from std_msgs.msg import String
         from std_srvs.srv import Trigger
@@ -79,6 +81,8 @@ class RosWorker(QThread):
             return callback
 
         node.create_subscription(String, '/vision/detections', json_signal(self.detections), 10)
+        node.create_subscription(String, '/vision/info', json_signal(self.vision_info),
+                                 QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
         node.create_subscription(Image, '/vision/debug_image', image_signal(self.frame), 1)   # 영상은 최신 1장만
         node.create_subscription(Image, '/sim/overview/image', image_signal(self.overview), 1)
         if self.subscribe_sim_top:

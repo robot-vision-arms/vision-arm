@@ -9,7 +9,9 @@
 발행 토픽:
     /vision/detections   std_msgs/String   packet.make_pose_packet() 결과를 JSON 문자열로
     /vision/debug_image  sensor_msgs/Image ROI 박스·장축 화살표를 그린 영상 (GUI 표시용)
+    /vision/info         std_msgs/String   {"detector": "rule" 또는 "yolo"} 한 번 (나중에 켠 GUI 도 받음)
 """
+import json
 import math
 import time
 
@@ -17,6 +19,7 @@ import cv2
 import rclpy
 from cv_bridge import CvBridge
 from rclpy.node import Node
+from rclpy.qos import DurabilityPolicy, QoSProfile
 from sensor_msgs.msg import Image
 from std_msgs.msg import String
 
@@ -95,6 +98,9 @@ class VisionNode(Node):
             self.get_logger().info(f"검출: YOLO {self.get_parameter('yolo_model_path').value}, 신뢰도 {self.detector.conf}")
         self.pub_det = self.create_publisher(String, '/vision/detections', 10)
         self.pub_image = self.create_publisher(Image, '/vision/debug_image', 10)
+        self.pub_info = self.create_publisher(String, '/vision/info',
+                                              QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
+        self.pub_info.publish(String(data=json.dumps({'detector': 'rule' if self.detector is None else 'yolo'})))
         self.cv_bridge = CvBridge()
         self.calibrator = Calibrator(self.get_parameter('intrinsics_path').value,
                                      self.get_parameter('homography_path').value)

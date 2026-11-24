@@ -38,8 +38,8 @@ def cell(table, row, col):
 
 def test_calibration_panel_shows_loaded_files(window):
     labels = window.calib_labels
-    assert '로드됨' in labels['intrinsics'].text() and '로드됨' in labels['homography'].text()
-    assert labels['error'].text() == '0.56 px / 0.21 mm'
+    assert '완료' in labels['intrinsics'].text() and '완료' in labels['homography'].text()
+    assert labels['error'].text() == '0.21 mm' and '0.56 px' in window.calib_pill.toolTip()
     assert labels['camera'].text().startswith('600 mm')
 
 
@@ -76,11 +76,11 @@ def test_log_rows_and_summary(window):
     window.on_sim_log({'seq': 1, 'obj': 'obj_1', 'part_type': 'nut', 'result': 'failed', 'plan_ms': 2000.0,
                        'error': '[흡착 높이로 하강·진공] 흡착 실패'})
     lines = window.console.toPlainText().splitlines()
-    # ACK 는 묶어서 쓰고, ERR·SIM 이 오면 그 전까지 모은 ACK 를 먼저 쓴다
-    assert len(lines) == 5
-    assert '로봇' in lines[0] and '수신 확인 3건 · 응답 11 ms' in lines[0]
-    assert 'ERR' in lines[1] and 'ACK timeout' in lines[1]
-    assert '수신 확인 6건 · 응답 16 ms' in lines[2]
+    # ACK 는 콘솔에 쌓지 않고 위 한 줄만 새로 쓴다. 콘솔에는 오류와 집기 결과만 남는다
+    assert len(lines) == 3
+    assert 'ERR' in lines[0] and 'ACK timeout' in lines[0]
+    window.flush_acks()
+    assert window.ack_status.text() == '로봇 수신 확인 · 응답 15 ms (1초에 9건)'
     assert 'SIM' in lines[-1] and '실패' in lines[-1] and '흡착 실패' in lines[-1]
     assert window.tile_ack.value.text() == '90 % (9/10)'
     assert window.tile_p95.value.text().endswith('ms')
@@ -147,6 +147,23 @@ def test_words_for_first_time_viewers(window):
     assert headers[2:4] == ['화면 위치', '시트 위 위치 (mm)']
     assert window.cycle_button.text() == '집기 시작'
     assert window.reload_button.text() == '보정 정보 새로고침'
+    assert window.det_table.isColumnHidden(2)
+
+
+def test_card_numbers_follow_screen_order(window):
+    from PySide6.QtWidgets import QLabel
+    app, MainWindow = _qt()
+    sim = MainWindow('none', start_worker=False, source='sim')
+    titles = lambda w: sorted(t.text()[0] for t in w.findChildren(QLabel) if t.objectName() == 'title')
+    assert titles(window) == list('①②③④⑤⑥') and titles(sim) == list('①②③④⑤')
+    sim.close()
+
+
+def test_detector_badge(window):
+    window.on_vision_info({'detector': 'yolo'})
+    assert 'YOLO' in window.pill_detector.text()
+    window.on_vision_info({'detector': 'rule'})
+    assert '규칙' in window.pill_detector.text()
 
 
 def test_reset_returns_robot_clears_and_places_current_layout(window):
