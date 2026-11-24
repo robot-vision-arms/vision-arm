@@ -7,6 +7,7 @@ from dataclasses import replace
 import math
 import json
 import time
+import signal
 
 import rclpy
 from rclpy.callback_groups import ReentrantCallbackGroup
@@ -85,6 +86,10 @@ class Team2PickPlaceNode(PickPlaceNode):
         self.declare_parameter('scene_position_jitter_mm', 0.0)
         self.declare_parameter('team2_world_bin_check', False)
         self.scene_pub = None
+        self.scene_ack = None
+        self.scene_spawn_client = self.create_client(Trigger, '/team2/spawn_exact', callback_group=self.cb_group)
+        self.scene_ack_sub = self.create_subscription(String, '/team2/scene_request_ack',
+            self.on_scene_request_ack, 10, callback_group=ReentrantCallbackGroup())
         self.truth_pub = self.create_publisher(String, '/team2/scene_truth',
                     QoSProfile(depth=1, durability=DurabilityPolicy.TRANSIENT_LOCAL))
         self.scene_srv = self.create_service(Trigger, '/team2/spawn_scene', self.on_spawn_scene,
@@ -162,13 +167,18 @@ class Team2PickPlaceNode(PickPlaceNode):
         row['plan_ms']=(time.monotonic()-started)*1000
         return row
 
+    def on_scene_request_ack(self, msg):
+        try:self.scene_ack=json.loads(msg.data)
+        except ValueError:pass
+
     def on_spawn_scene(self, request, response):
         # 장면 초기화와 집기를 같은 잠금으로 묶어 이동 중 부품이 교체되지 않게 한다.
         if not self.motion_lock.acquire(blocking=False):
             response.success, response.message = False, '이동 중에는 장면을 초기화할 수 없습니다.'
             return response
         try:
-            self.scene_pub = self.create_publisher(String, '/robot/targets', 10)
+            self.scene_ack = None
+            self.scene_pub = self.create_publisher(String, '/team2/scene_request', 10)
             from ur5e_pick_place.team2_demo_profile import scene_packet
             fixed_seed = int(self.get_parameter('scene_seed').value)
             packet = scene_packet(int(self.get_parameter('max_objects').value),
@@ -176,17 +186,19 @@ class Team2PickPlaceNode(PickPlaceNode):
                                   self.value('scene_position_jitter_mm'))
             self._scene_counter += 1
             packet.update(seq=time.time_ns(), t_capture=time.time())
-            if not self.spawn_client.wait_for_service(timeout_sec=10):
-                raise RuntimeError('/sim/spawn_objects 서비스가 없습니다.')
+            if not self.scene_spawn_client.wait_for_service(timeout_sec=10):
+                raise RuntimeError('/team2/spawn_exact 서비스가 없습니다. team2_link를 확인하세요.')
             future = None
             started = time.monotonic()
             # 합성 패킷은 장면 배치용이다. 실제 검출 결과로 위장하지 않고 표식을 남긴다.
             # 스폰 응답에서 같은 seq를 확인한 뒤 발행을 끝내고 실제 카메라 입력을 기다린다.
             while time.monotonic()-started < 60:
                 self.scene_pub.publish(String(data=json.dumps(packet)))
-                if (future is None and time.monotonic()-started > 1.0
-                        and any(i.node_name == 'object_spawner' for i in self.get_subscriptions_info_by_topic('/robot/targets'))):
-                    future = self.spawn_client.call_async(Trigger.Request())
+                # 검출/로봇 목표 토픽과 장면 초기화를 분리한다. 수신 ACK 번호가 맞아야 생성한다.
+                ack=self.scene_ack
+                if future is None and ack is not None and ack.get('seq')==packet['seq']:
+                    if not ack.get('accepted'):raise RuntimeError(ack.get('error','장면 요청 거부'))
+                    future = self.scene_spawn_client.call_async(Trigger.Request())
                 if future is not None and future.done():
                     result = future.result()
                     if not result.success or f'seq={packet["seq"]} ' not in result.message:
@@ -370,16 +382,36 @@ class Team2PickPlaceNode(PickPlaceNode):
 
 
 def main(args=None):
-    rclpy.init(args=args)
+    from rclpy.signals import SignalHandlerOptions
+    # 기본 핸들러는 context를 먼저 닫는다. 클라이언트 정리까지 context를 유지한다.
+    rclpy.init(args=args, signal_handler_options=SignalHandlerOptions.NO)
+    def request_stop(*_):
+        raise KeyboardInterrupt
+    signal.signal(signal.SIGINT, request_stop)
+    signal.signal(signal.SIGTERM, request_stop)
     node = Team2PickPlaceNode()
     executor = MultiThreadedExecutor(num_threads=4)
     executor.add_node(node)
+    from rclpy.clock import Clock, ClockType
+    # Gazebo 시계가 멈춰도 Python 신호 핸들러를 처리하도록 wall-time으로 wait-set을 깨운다.
+    wake_timer = node.create_timer(.1, lambda: None, clock=Clock(clock_type=ClockType.STEADY_TIME))
     try:
         executor.spin()
     except KeyboardInterrupt:
         pass
     finally:
+        node.get_logger().info('Team2 shutdown: stop executor')
+        executor.remove_node(node)
+        # Jazzy의 기본 shutdown은 guard를 먼저 파괴하고 worker를 나중에 join한다.
+        # 아직 끝나는 중인 action 콜백이 guard를 깨우다 InvalidHandle을 내지 않게 순서를 바꾼다.
+        executor._executor.shutdown(wait=True)
         executor.shutdown()
+        # 노드가 먼저 사라지면 action future 정리 중 Destroyable 예외가 발생한다.
+        # 클라이언트 자원을 명시적으로 해제한 뒤 TF 구독·노드를 제거한다.
+        node.moveit2.destroy()
+        node.tf_listener.unregister()
+        node.destroy_timer(wake_timer)
+        node.get_logger().info('Team2 shutdown: clients released before node/context')
         node.destroy_node()
         rclpy.try_shutdown()
 

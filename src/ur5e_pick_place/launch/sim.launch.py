@@ -52,9 +52,12 @@ def launch_sim(context):
 
     # GroupAction(scoped=True) 로 감싸야 한다. IncludeLaunchDescription 에 넘긴 인자는 바깥 설정까지 덮어써서,
     # 감싸지 않으면 아래 launch_rviz:='false' 가 새어 나와 MoveIt 쪽 RViz 도 뜨지 않는다 (2026-11-16 확인).
+    ur_launch = (os.path.join(share, 'launch', 'team2_ur_sim.launch.py')
+                 if LaunchConfiguration('team2_native_gazebo').perform(context).lower()=='true'
+                 else os.path.join(get_package_share_directory('ur_simulation_gz'), 'launch', 'ur_sim_control.launch.py'))
     ur_sim = IncludeLaunchDescription(
         PythonLaunchDescriptionSource(
-            os.path.join(get_package_share_directory('ur_simulation_gz'), 'launch', 'ur_sim_control.launch.py')),
+            ur_launch),
         launch_arguments={
             'ur_type': UR_TYPE,
             'description_file': LaunchConfiguration('description_file'),
@@ -67,6 +70,8 @@ def launch_sim(context):
         PythonLaunchDescriptionSource(
             os.path.join(share, 'launch', 'moveit.launch.py')),
         launch_arguments={'launch_rviz': LaunchConfiguration('launch_rviz'),
+                          'move_group_package': LaunchConfiguration('move_group_package'),
+                          'move_group_executable': LaunchConfiguration('move_group_executable'),
                           'description_file': LaunchConfiguration('description_file')}.items())
 
     # 흡착 on/off: ROS std_msgs/Empty → Gazebo gz.msgs.Empty (']' = ROS 에서 Gazebo 한 방향)
@@ -112,6 +117,9 @@ def generate_launch_description():
         DeclareLaunchArgument('description_file', default_value=os.path.join(share, 'urdf', 'ur5e_vacuum.urdf.xacro')),
         DeclareLaunchArgument('gazebo_gui', default_value='true'),
         DeclareLaunchArgument('launch_rviz', default_value='true'),
+        DeclareLaunchArgument('team2_native_gazebo', default_value='false'),
+        DeclareLaunchArgument('move_group_package', default_value='moveit_ros_move_group'),
+        DeclareLaunchArgument('move_group_executable', default_value='move_group'),
         DeclareLaunchArgument('cycle_scene_mode', default_value='existing'),
         DeclareLaunchArgument('world_file', default_value=''),
         DeclareLaunchArgument('gz_partition', default_value=os.environ.get('GZ_PARTITION') or f'vision_arm_{uuid.uuid4().hex[:12]}'),

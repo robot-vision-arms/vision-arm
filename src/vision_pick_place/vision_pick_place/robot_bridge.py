@@ -14,6 +14,7 @@ from pathlib import Path
 
 import rclpy
 from rclpy.node import Node
+from rclpy.executors import ExternalShutdownException
 from std_msgs.msg import String
 
 from vision_pick_place.transport import PoseClient
@@ -149,7 +150,8 @@ def main(args=None):
     node = RobotBridge()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    # ROS context 종료는 예상한 종료 경로다. 실제 통신·처리 예외까지 삼키지는 않는다.
+    except (KeyboardInterrupt, ExternalShutdownException):
         pass
     finally:
         node.destroy_node()

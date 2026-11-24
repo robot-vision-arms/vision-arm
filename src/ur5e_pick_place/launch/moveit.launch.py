@@ -31,8 +31,11 @@ def generate_launch_description():
                   'use_sim_time': True, 'publish_robot_description_semantic': True}]
     return LaunchDescription([
         DeclareLaunchArgument('launch_rviz', default_value='true'),
+        DeclareLaunchArgument('move_group_package', default_value='moveit_ros_move_group'),
+        DeclareLaunchArgument('move_group_executable', default_value='move_group'),
         DeclareLaunchArgument('description_file', default_value=os.path.join(share, 'urdf', 'ur5e_vacuum.urdf.xacro')),
-        Node(package='moveit_ros_move_group', executable='move_group', output='log', parameters=parameters),
+        Node(package=LaunchConfiguration('move_group_package'),
+             executable=LaunchConfiguration('move_group_executable'), output='log', parameters=parameters),
         Node(package='rviz2', executable='rviz2', name='rviz2_moveit',
              condition=IfCondition(LaunchConfiguration('launch_rviz')),
              # 프로젝트 부품 마커와 Gazebo 카메라를 MotionPlanning과 함께 표시한다.

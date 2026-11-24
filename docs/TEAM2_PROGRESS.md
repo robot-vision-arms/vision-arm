@@ -533,3 +533,80 @@ python scripts/review_team2_runtime.py logs/team2_recheck_seed5 --out logs/team2
 ```
 
 전체 근거: `logs/team2_stability_20261123/summary.json`, seed3~5의 원본 결과·CSV·영상·라벨, `tests_final.xml`, `gui_confirmation/`. logs는 Git 제외 대상이다. 이번 추가 보완은 아직 커밋·푸시하지 않았다.
+
+<a id="team2-20261123-shutdown-fix"></a>
+## 2026-11-23 추가 — 재배치 응답 유실·종료 수명 보완
+
+기준 HEAD는 `3cf84f4`다. 다른 담당의 `object_spawner.py`, `pick_place_node.py`, 비전 원본·GUI·기본 모델·보정·WEEK4 기록을 수정하지 않았다. 보호 대상 17개 파일을 HEAD와 바이트 비교했다. 변경은 팀원 2 어댑터·종료 관리자·전용 native 패키지와 실행 연결이다. 공유 sim/MoveIt 런치에는 선택 인자만 추가했으며 기존 기본 실행은 설치된 upstream 실행본을 계속 사용한다. 아래 팀원 2 실행 명령이 보완 경로를 선택한다.
+
+### 1. 생성은 됐는데 응답을 놓친 재배치 오류
+
+이전 두 번째 사이클은 `obj_7 스폰 요청 실패`로 중단됐다. Gazebo에는 `Created entity ... obj_7`과 `error sending response: Host unreachable`이 함께 기록됐다. 이름 중복이 원인이라고 확정하지 않는다.
+
+새 `team2_spawner_adapter.py`는 원본 스폰 클래스를 상속하고 transport 요청 확인만 보완한다. 응답이 불확실하면 `/world/.../scene/info`에서 실제 이름·XY 위치(2 mm)·Z 범위·자세(5°)·primitive 형상 치수를 대조한다. 원하는 상태가 실제로 확인될 때만 성공으로 복구한다. 확인되지 않으면 실패를 유지한다. 삭제 응답 유실도 실제 모델이 사라졌을 때만 복구한다. 생성 명령을 즉시 재전송해 중복 모델을 만드는 방식은 사용하지 않는다. 확인 근거는 `TEAM2_GZ_REQUEST_RECOVERED`, 미확인은 `TEAM2_GZ_REQUEST_UNCONFIRMED`로 남긴다.
+
+`--test-lost-create-reply obj_7:2`는 시험에서만 두 번째 obj_7 생성의 성공 응답을 일부러 버린다. 실제 서버 요청은 한 번만 보낸 뒤 장면을 확인한다. 정상 실행에는 이 옵션을 넣지 않는다. 실행기에서 상속된 시험용 환경변수도 제거해 우연한 유실 주입을 막았다.
+
+### 2. MoveIt -11 — 코드와 객체 수명 순서
+
+설치된 MoveIt 2.12.4의 종료 stack은 Executor 소멸자에서 SIGSEGV였다. upstream 종료 보고·공식 2.12.4 소스를 참고해 `src/team2_move_group` 전용 패키지를 추가했다. 원본 BSD 저작권·라이선스는 소스와 설치된 소스 사본에 보존했다.
+
+- `team2_move_group.cpp`: capability가 만든 객체가 끝날 때까지 capability/controller 플러그인 loader를 유지한다. 외부 executor는 capability보다 먼저 정리한다.
+- 계획 알고리즘·MoveIt 설정·컨트롤러 선택·ROS action/service 이름은 그대로 사용한다.
+- `dlclose`를 막거나 SIGSEGV를 무시하거나 `_exit()`로 건너뛰는 수정이 아니다. 설치된 `/opt/ros/jazzy`도 덮어쓰지 않았다.
+
+상세 근거·출처는 `src/team2_move_group/README.md`에 있다.
+
+### 3. Gazebo·Python 종료 — 사용 중인 스레드 먼저 정리
+
+`team2_gz_server.cpp`는 설치된 Gazebo Harmonic Server API를 사용하는 작은 수명 관리자다. UR 원본 런치의 URDF·스폰·컨트롤러 actions를 재사용하고 Gazebo 프로세스만 교체한다. 공식 ROS-native 서버 연결도 중간에 시험했으나 종료 문제가 남아, 최종본은 전용 lifecycle wrapper를 사용한다.
+
+종료 시 ros2_control 통계 publisher 스레드를 ROS 시계가 살아 있을 때 join하고, ROS context를 닫아 controller executor를 깨운 다음 Gazebo 서버·플러그인을 정상 파괴한다. 통계 기능을 실행 중에 끄거나 오류 출력을 숨기지 않는다. 두 통계 registry는 지우지 않아 원본 controller manager가 정상 해제한다.
+
+팀원 2 Python 노드는 wall-time 타이머로 Gazebo 시계 정지 중에도 신호를 처리한다. 노드를 executor에서 제거하고 worker pool을 먼저 join한 뒤 executor guard, MoveIt 클라이언트·TF, 노드, context 순서로 해제한다. 설치된 Jazzy executor가 guard를 먼저 파괴하는 순서 때문에 생길 수 있는 `Destroyable` 경쟁을 피한다. 외부 ROS context 종료는 팀원 2 TCP 브리지에서 예상한 종료 예외로 처리하며 다른 처리 예외는 숨기지 않는다.
+
+`scripts/team2_shutdown.py`는 GUI·비전 → 이동 노드 → TCP/스폰 연결 → MoveIt → Gazebo → 브리지·남은 launch 순서로 정리한다. 통계 스레드가 끝날 때까지 clock bridge를 유지한다. 새 세션으로 만든 자기 프로세스 그룹만 대상으로 하며 다른 세션은 건드리지 않는 테스트도 추가했다. 강제 종료가 필요하면 결과에 남기며 성공으로 바꾸지 않는다.
+
+스폰 원본의 TF 전용 스레드에서도 context 종료와 경합하는 예외가 관찰됐다. 팀원 2 어댑터 전용 프로세스에서 원본 main이 import하는 TF 팩토리를 spin_thread=False로 선택하고, TF의 Reentrant callback group과 원본 서비스를 하나의 4스레드 executor로 처리한다. 서비스 실행 중에도 TF를 갱신하며, 종료 시 worker → guard → TF → node/context 순서로 정리한다. 원본 파일은 바꾸지 않고 선택한 팩토리·spin 함수는 실패 시에도 복원한다. local import 연결을 잘못 짚은 중간 초기화 실패도 회귀 테스트로 보완했으며 로그를 보존했다.
+
+실제 Ctrl+C에서는 자식 launch가 부모 TTY를 상속하면 이미 모든 자식이 SIGINT를 받았다고 판단해 신호 전달을 생략하는 사례도 확인했다. 자식 stdin을 DEVNULL로 분리해 Ctrl+C는 관리자만 받고, 자식에게 종료 신호를 한 번씩 보내도록 했다. GUI의 마우스·키보드 입력은 Qt 창을 통해 계속 받는다.
+
+### 4. 반복 중 새로 발견한 그림자 오검출
+
+재배치 응답 복구 후, 첫 사이클로 이동한 팔의 그림자가 너트 1개로 검출돼 9개 장면을 10개로 보는 문제가 추가로 발견됐다. 개수 검사가 집기를 막았으며 검사를 완화하지 않았다.
+
+팀원 2 외형 개선용 비전 어댑터에서 연결 성분별 밝고 채도 낮은 금속 표면 지지를 확인한다. 어두운 그림자 성분만 제외한다. TF·스폰 정답·예상 위치로 검출을 고르거나 무조건 앞의 9개만 남기지 않는다. 실패 당시 실제 저장 영상은 기존 10개 → 보완 후 실제 부품 9개, 그림자 1개만 제외됨을 확인했다. 생성 금속 모델을 대상으로 한 보완이며 임의의 검은 실물 부품까지 검증한 필터는 아니다. 핵심 판정·수명 경계에 한국어 주석을 추가했다.
+
+### 실행 방법
+
+새 native 패키지가 있으므로 전체 빌드 후 환경을 다시 읽는다.
+
+```bash
+cd ~/vision-arm
+source env.sh
+colcon build --symlink-install
+source env.sh
+python scripts/run_team2_demo.py --gui --realistic --randomize --seed 5 --objects 9 --speed .6 --acceleration .7 --position-jitter-mm 4 --compact-return
+```
+
+GUI에서 부품 배치 → 검출 9개 확인 → 사이클 실행. 집기 완료·대기 자세 복귀 후 실행 터미널에서 Ctrl+C를 한 번 누른다. 종료 판정은 `summary.json`의 `shutdown_ok`, `shutdown.forced_groups`, `remaining_processes`, `runtime_log_review`에서 확인한다. 집기 성공·통신 KPI·시간 KPI·정상 종료는 서로 다른 판정이다.
+
+응답 유실을 포함한 자동 반복 시험 명령은 아래와 같다. 이는 생성 성공 응답을 일부러 버리는 시험이며 정상 시연 옵션과 구분한다.
+
+```bash
+python scripts/run_team2_demo.py --gui --realistic --randomize --seed 5 --objects 9 --speed .6 --acceleration .7 --position-jitter-mm 4 --compact-return --cycles 2 --transport-trials 1 --test-lost-create-reply obj_7:2 --out logs/team2_shutdown_recheck
+```
+
+### 검증 범위·남은 제한
+
+프로젝트 GUI는 offscreen 렌더링과 저장 화면으로 검사했다. Gazebo 서버·가상 카메라·실제 ROS/MoveIt 실행을 사용했으며 실물 로봇·실물 카메라 검증은 아니다. RViz·별도 Gazebo GUI 창을 함께 켠 조건의 종료까지 이번 결과로 확장하지 않는다.
+
+중간 실패 로그는 삭제하지 않았다. 특히 개발 중 통신 100/100 전달에도 P95 1,226.63 ms·651.78 ms로 300 ms 목표를 넘은 측정이 있었다. 준비 이후 추가 관찰은 53.32 ms였고 다른 최종 측정도 별도로 남긴다. 최종 일부 통과가 모든 부하·시작 조건에서의 지연 보장은 아니다. Octomap 3D 센서 미설정과 일부 로봇 mesh 물리 충돌 형상 생성 제한은 이 종료 수정과 별개로 남아 있다. MoveIt 경로 충돌 검사는 유지한다.
+
+### 2026-11-24 커밋 시점의 검증 상태
+
+- Python 전체 회귀 테스트 **220개 통과**, native 포함 세 패키지 빌드와 신규 패키지 rosdep 확인 통과.
+- 앞선 보완본의 9개 두 사이클은 18/18 집기 성공했고, 별도 3개 집기 후 실제 Ctrl+C 정상 종료도 확인했다. 그러나 후속 반복에서 스폰 TF 종료 경합과 초기화 입력 덮어쓰기 경쟁이 추가로 드러나 어댑터를 더 보완했다.
+- 최신 변경은 `/team2/scene_request` → 같은 seq의 `/team2/scene_request_ack` → `/team2/spawn_exact` 전용 경로다. 실제 검출·TCP 목표 입력과 초기화를 분리하고, 기본 mutually-exclusive callback group에서 확인한 패킷을 고정해 원본 on_spawn을 호출한 뒤 이전 입력을 복원한다. 초기화 패킷과 빈 실제 검출이 뒤섞여 0개를 스폰하는 경쟁을 막기 위한 것이다. 원본 `/sim/spawn_objects` 서비스는 유지한다.
+- **최신 전용 초기화 채널을 포함한 최종 end-to-end 반복 집기·Ctrl+C 재검증은 아직 완료하지 않았다.** 앞선 버전의 성공을 최신본 전체의 완료로 바꾸지 않는다. interactive 실행기의 `ok`는 실행 중에는 준비 상태이며, 별도 검사기의 집기 결과와 종료 후 `shutdown_ok`를 함께 확인해야 한다.
+- 이번 커밋은 구현 및 현재 검증 범위를 저장하는 것이며, 종료·반복 안정성이 모든 조건에서 완전히 해결됐다는 선언이 아니다. `logs/`는 로컬 근거 자료로 Git에 포함되지 않는다.

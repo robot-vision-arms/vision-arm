@@ -9,7 +9,7 @@ from vision_pick_place.vision_node import VisionNode
 from vision_pick_place.vision_pipeline import process_frame
 from vision_pick_place.camera_stream import preprocess
 from vision_pick_place.packet import encode
-from vision_pick_place.team2_shaft_pose import shaft_pose
+from vision_pick_place.team2_shaft_pose import shaft_pose,filter_metal_support
 
 
 class ShaftVisionNode(VisionNode):
@@ -26,6 +26,16 @@ class ShaftVisionNode(VisionNode):
             mask=preprocess(frame,options['blur_ksize'],options['threshold'],
                 **{k:options[k] for k in ['segmentation_mode','hsv_max_saturation','hsv_max_dark_value','close_ksize','open_ksize']})
             if roi is not None:mask=cv2.bitwise_and(mask,roi)
+            # 낮은 밝기의 그림자도 원본 dark-metal 분할에 들어갈 수 있다.
+            # 생성 금속 모델의 밝고 채도 낮은 표면 지지가 없는 성분만 제외한다. 좌표 정답은 쓰지 않는다.
+            candidates=packet['objects']
+            packet['objects']=filter_metal_support(frame,mask,candidates,
+                                                   max_saturation=options['hsv_max_saturation'])
+            for rejected in candidates:
+                if rejected not in packet['objects']:
+                    point=(round(rejected['u_px']),round(rejected['v_px']))
+                    cv2.circle(debug,point,12,(0,0,255),2)
+                    cv2.putText(debug,'shadow rejected',point,cv2.FONT_HERSHEY_SIMPLEX,.4,(0,0,255),1)
             for obj in packet['objects']:
                 if obj['part_type']!='screw':continue
                 center,axis=shaft_pose(mask,np.array([obj['u_px'],obj['v_px']]))

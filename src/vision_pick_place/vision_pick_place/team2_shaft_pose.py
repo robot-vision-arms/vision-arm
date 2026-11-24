@@ -19,3 +19,25 @@ def shaft_pose(mask, approximate_center):
     ends=points@axis
     center=axis*((ends.min()+ends.max())/2)+normal*(center@normal)
     return center,axis
+
+
+def filter_metal_support(frame, mask, objects, *, max_saturation=70, min_value=90, min_fraction=.2):
+    """Generated metallic parts must contain bright, low-chroma pixels; shadows do not.
+
+    This is an image-only guard for Team 2 generated scenes, not a TF/known-position filter.
+    """
+    hsv=cv2.cvtColor(frame,cv2.COLOR_BGR2HSV)
+    count,labels,stats,centroids=cv2.connectedComponentsWithStats(mask)
+    if count<=1:return []
+    bright=(hsv[:,:,1]<=max_saturation)&(hsv[:,:,2]>=min_value)
+    supported=np.bincount(labels[bright],minlength=count)
+    result=[]
+    for obj in objects:
+        center=np.array([obj['u_px'],obj['v_px']])
+        x,y=np.rint(center).astype(int)
+        label=labels[y,x] if 0<=y<labels.shape[0] and 0<=x<labels.shape[1] else 0
+        # 너트 중심은 구멍일 수 있으므로 배경 픽셀일 때 가까운 부품 성분을 찾는다.
+        if label==0:label=1+np.argmin(np.sum((centroids[1:]-center)**2,axis=1))
+        if supported[label]/max(1,stats[label,cv2.CC_STAT_AREA])>=min_fraction:
+            result.append(obj)
+    return result

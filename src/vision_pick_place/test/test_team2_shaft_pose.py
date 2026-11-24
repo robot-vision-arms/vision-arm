@@ -20,3 +20,15 @@ def test_head_does_not_move_grasp_point_off_shaft(angle):
 
 def test_empty_mask_is_rejected():
     with pytest.raises(ValueError):shaft_pose(np.zeros((100,100),np.uint8),np.array([50.,50.]))
+
+
+def test_shadow_is_not_a_part_but_bright_ring_and_screw_are_kept():
+    from vision_pick_place.team2_shaft_pose import filter_metal_support
+    image=np.full((160,240,3),(20,130,20),np.uint8)
+    mask=np.zeros(image.shape[:2],np.uint8)
+    cv2.rectangle(mask,(10,20),(40,70),255,-1);image[mask>0]=(20,20,20)
+    cv2.rectangle(mask,(80,20),(95,90),255,-1);image[20:91,80:96]=(210,210,210)
+    cv2.circle(mask,(170,55),22,255,-1);cv2.circle(mask,(170,55),10,0,-1)
+    cv2.circle(image,(170,55),22,(210,210,210),-1);cv2.circle(image,(170,55),10,(20,130,20),-1)
+    objects=[{'id':i,'u_px':x,'v_px':y} for i,(x,y) in enumerate([(25,45),(87,55),(170,55)])]
+    assert [o['id'] for o in filter_metal_support(image,mask,objects)]==[1,2]

@@ -1,0 +1,12 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>team2_move_group</name><version>0.1.0</version>
+  <description>Team 2 isolated MoveIt 2.12.4 executable with ordered plugin teardown.</description>
+  <maintainer email="team2@example.com">Team 2</maintainer><license>BSD-3-Clause</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>moveit_ros_move_group</depend><depend>moveit_ros_planning</depend>
+  <depend>gz_sim_vendor</depend>
+  <depend>rclcpp</depend>
+  <depend>pal_statistics</depend>
+  <export><build_type>ament_cmake</build_type></export>
+</package>

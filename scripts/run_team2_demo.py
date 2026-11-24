@@ -8,6 +8,7 @@ All child processes use one ROS domain/one Gazebo partition. Other domains are u
 import argparse
 import json
 import math
+import re
 import os
 from pathlib import Path
 import signal
@@ -28,6 +29,7 @@ def main():
     parser.add_argument('--objects',type=int,default=10)
     parser.add_argument('--position-jitter-mm',type=float,default=0.)
     parser.add_argument('--acceleration',type=float,default=.5)
+    parser.add_argument('--test-lost-create-reply',default='',help='Explicit fault injection, e.g. obj_7:2')
     parser.add_argument('--compact-return',action='store_true')
     parser.add_argument('--speed',type=float,default=.5);parser.add_argument('--cycles',type=int,default=0)
     parser.add_argument('--transport-trials',type=int,default=0)
@@ -35,6 +37,8 @@ def main():
     parser.add_argument('--compare-speeds',type=float,nargs='+')
     parser.add_argument('--out',default='logs/team2_demo')
     args=parser.parse_args()
+    if args.test_lost_create_reply and not re.fullmatch(r'obj_[0-9]:[1-9][0-9]*',args.test_lost_create_reply):
+        parser.error('Fault injection must be obj_N:occurrence')
     if not math.isfinite(args.latency_limit_ms) or args.latency_limit_ms<=0:
         parser.error('Latency limit must be finite and positive')
     if not 0 <= args.domain <= 232 or not 1 <= args.port <= 65535 or args.cycles<0 or args.transport_trials<0 or not 1<=args.objects<=10:
@@ -45,6 +49,8 @@ def main():
     if any(not .1<=v<=.7 for v in speeds):parser.error('Speed range: 0.1..0.7')
     profile=generate_profile(out/'profile',root,realistic=args.realistic,randomize=args.randomize,seed=args.seed,speed=speeds[0],count=args.objects,compact=args.compact_return,position_jitter_mm=args.position_jitter_mm,acceleration=args.acceleration)
     env=dict(os.environ,ROS_DOMAIN_ID=str(args.domain));env.pop('GZ_PARTITION',None)
+    env.pop('TEAM2_TEST_LOST_CREATE_REPLY',None)
+    if args.test_lost_create_reply:env['TEAM2_TEST_LOST_CREATE_REPLY']=args.test_lost_create_reply
     os.environ['ROS_DOMAIN_ID']=str(args.domain)
     import rclpy
     from sensor_msgs.msg import Image
@@ -61,10 +67,15 @@ def main():
     children=[];streams=[];session=Path('logs/workcell_session.json')
     old_session=session.read_bytes() if session.exists() else None
     report=dict(ok=False,profile=profile,trials=[],domain=args.domain,robot_motion_commanded=args.cycles>0 or bool(args.compare_speeds))
+    report['test_lost_create_reply']=args.test_lost_create_reply or None
     def save(): (out/'summary.json').write_text(json.dumps(report,ensure_ascii=False,indent=2))
     def start(label,cmd,extra_env=None):
         stream=(out/(label+'.log')).open('w');streams.append(stream)
-        child=subprocess.Popen(cmd,env=extra_env or env,stdout=stream,stderr=subprocess.STDOUT,start_new_session=True)
+        # 자식 launch가 부모 터미널의 TTY를 상속하면 SIGINT가 이미 자식에게 갔다고 오해한다.
+        # 입력을 분리해 Ctrl+C는 이 관리자만 받고, 자식은 정해진 순서로 한 번씩 종료한다.
+        child=subprocess.Popen(cmd,env=extra_env or env,stdin=subprocess.DEVNULL,
+                               stdout=stream,stderr=subprocess.STDOUT,start_new_session=True)
+        child.team2_label=label
         children.append(child);return child
     def wait(predicate,seconds=45):
         end=time.monotonic()+seconds
@@ -82,6 +93,8 @@ def main():
             raise RuntimeError('ROS domain already has a robot/link; select another --domain')
         start('sim',['ros2','launch','ur5e_pick_place','sim.launch.py',
                      'sim_params:='+profile['sim_params'],'description_file:='+profile['description_file'],
+                     'move_group_package:=team2_move_group','move_group_executable:=team2_move_group',
+                     'team2_native_gazebo:=true',
                      'gazebo_gui:='+str(args.gazebo_gui).lower(),'launch_rviz:='+str(args.rviz).lower()])
         params=node.create_client(GetParameters,'/pick_place_node/get_parameters')
         wait(lambda:params.service_is_ready(),60)
@@ -191,26 +204,20 @@ def main():
     finally:
         if report.get('transport'):
             report['ok']=report['ok'] and all(r['ok'] and r['latency_kpi_passed'] for r in report['transport'])
-        # ros2 launch 자체에 SIGINT를 보내 한 번만 자식에게 전달하게 한다.
-        for child in reversed(children):
-            if child.poll() is None:
-                if child.args[:2]==['ros2','launch']:os.kill(child.pid,signal.SIGINT)
-                else:os.killpg(child.pid,signal.SIGINT)
-        for child in reversed(children):
-            try:child.wait(timeout=10)
-            except subprocess.TimeoutExpired:os.killpg(child.pid,signal.SIGKILL);child.wait()
-        # launch 부모가 끝나도 Gazebo가 포크한 서버가 같은 프로세스 그룹에 남을 수 있다.
-        # 이 실행기가 새 세션으로 만든 그룹만 정리한다. 다른 도메인·사용자 프로세스는 건드리지 않는다.
-        for child in children:
-            try:os.killpg(child.pid,signal.SIGTERM)
-            except ProcessLookupError:pass
-        time.sleep(.8)
-        for child in children:
-            try:os.killpg(child.pid,signal.SIGKILL)
-            except ProcessLookupError:pass
+        from team2_shutdown import shutdown_children
+        report['shutdown']=shutdown_children(children,session)
         for stream in streams:stream.close()
         from review_team2_runtime import review
         report['runtime_log_review']=review(out)
+        counts=report['runtime_log_review']['counts']
+        # 집기 성공만으로 정상 종료까지 통과했다고 하지 않는다.
+        report['shutdown_ok']=(not report['shutdown']['forced_groups'] and
+            not report['shutdown']['remaining_processes'] and
+            not any(v['tracebacks'] for v in report['runtime_log_review']['python_exceptions'].values()) and
+            not any(counts[k] for k in ['native_shutdown_crashes','abnormal_process_exits',
+                                        'destroyable_shutdown_messages','statistics_shutdown_errors',
+                                        'shutdown_escalations','gazebo_shutdown_escalations']))
+        report['ok']=report['ok'] and report['shutdown_ok']
         if old_session is None:session.unlink(missing_ok=True)
         else:session.write_bytes(old_session)
         save();node.destroy_node();rclpy.try_shutdown()

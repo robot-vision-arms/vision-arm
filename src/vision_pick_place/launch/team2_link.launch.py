@@ -56,7 +56,7 @@ def start_link(context):
             IncludeLaunchDescription(PythonLaunchDescriptionSource(os.path.join(share, 'launch', 'tcp.launch.py')),
                 launch_arguments={'port': LaunchConfiguration('port'),
                                   'log_dir': LaunchConfiguration('log_dir')}.items()),
-            ExecuteProcess(cmd=[sys.executable, '-m', 'ur5e_pick_place.object_spawner',
+            ExecuteProcess(cmd=[sys.executable, '-m', 'ur5e_pick_place.team2_spawner_adapter',
                 '--ros-args', '-p', f'config_file:={config}'], output='screen', additional_env=spawner_env),
             # 최신 팀원 3 노드가 /sim/vacuum도 제공한다. 중복 노드나 별도 attach 우회 경로를 만들지 않는다.
         ], scoped=True)]
