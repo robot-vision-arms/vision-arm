@@ -91,3 +91,48 @@ def test_video_panel_accepts_bgr_frame(window):
     frame[:, :, 1] = 200
     window.video.show_frame(frame)
     assert window.video.pixmap() is not None and not window.video.pixmap().isNull()
+
+
+class FakeWorker:
+    def __init__(self):
+        self.requests = []
+
+    def request_service(self, name):
+        self.requests.append(name)
+
+    def stop(self):
+        pass
+
+
+def _packet(seq, objs):
+    return {'seq': seq, 'calib_ok': True, 'objects': [
+        {'id': i, 'part_type': k, 'x_mm': x, 'y_mm': y, 'angle_deg': None, 'u_px': 0.0, 'v_px': 0.0}
+        for i, (k, x, y) in enumerate(objs)]}
+
+
+def test_real_layout_is_mirrored_to_gazebo_only_when_stable(window):
+    from vision_pick_place.gui.main_window import STABLE_FRAMES
+    worker = FakeWorker()
+    window.worker = worker
+    scene = [('screw', 100.0, 80.0), ('nut', 180.0, 140.0)]
+    # 손이 들어와 흔들리는 동안 (매 패킷 위치가 다름) 은 반영하지 않는다
+    for i in range(6):
+        window.on_detections(_packet(i, [('screw', 100.0 + 10 * i, 80.0)]))
+    assert worker.requests == []
+    # 같은 배치가 STABLE_FRAMES 번 이어지면 한 번만 스폰
+    for i in range(STABLE_FRAMES + 3):
+        window.on_detections(_packet(10 + i, [(k, x + 0.5 * (i % 2), y) for k, x, y in scene]))
+    assert worker.requests == ['/sim/spawn_objects']
+    window.on_service_result('/sim/spawn_objects', True, 'seq=13 스폰 2개')
+    # 사이클 중에는 반영 안 함, 사이클 뒤 실물이 그대로면 다시 스폰하지 않음
+    window.request_cycle()
+    for i in range(STABLE_FRAMES + 1):
+        window.on_detections(_packet(20 + i, scene))
+    window.on_service_result('/sim/run_cycle', True, '2/2 투입')
+    for i in range(STABLE_FRAMES + 1):
+        window.on_detections(_packet(30 + i, scene))
+    assert worker.requests == ['/sim/spawn_objects', '/sim/run_cycle']
+    # 다 치우면 Gazebo 도 지운다
+    for i in range(STABLE_FRAMES):
+        window.on_detections(_packet(40 + i, []))
+    assert worker.requests[-1] == '/sim/clear_objects'

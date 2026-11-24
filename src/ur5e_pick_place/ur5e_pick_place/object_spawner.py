@@ -342,6 +342,24 @@ def existing_slots(poses: dict, last_msg_t: float | None, now: float, max_age_s:
     return {name for name, (t, *_) in poses.items() if now - t <= max_age_s}
 
 
+def warmup_packet(count: int, part_types=('screw', 'nut'), x_range=(70.0, 227.0), y_range=(40.0, 170.0),
+                  seq: int = 0) -> dict:
+    """슬롯 길들이기용 배치: count 개를 작업 시트 안쪽 격자에 겹치지 않게 놓는다 (모든 슬롯 obj_0~ 을 한 번씩 쓰려고).
+    슬롯을 처음 쓸 때 DetachableJoint 가 부품을 패드에 붙였다 떼는데, 로봇이 대기 자세일 때 그러면 부품이 날아간다.
+    그래서 시작 직후(로봇이 시작 자세) 모든 슬롯을 한 번 스폰했다 지운다 (logs/start_demo.sh)."""
+    cols = max(1, math.ceil(math.sqrt(count * (x_range[1] - x_range[0]) / (y_range[1] - y_range[0]))))
+    rows = max(1, math.ceil(count / cols))
+    objects = []
+    for i in range(count):
+        r, c = divmod(i, cols)
+        x = x_range[0] + (x_range[1] - x_range[0]) * (c + 0.5) / cols
+        y = y_range[0] + (y_range[1] - y_range[0]) * (r + 0.5) / rows
+        kind = part_types[i % len(part_types)]
+        objects.append(dict(id=i, part_type=kind, x_mm=round(x, 1), y_mm=round(y, 1),
+                            angle_deg=0.0 if kind == 'screw' else None))
+    return dict(seq=seq, t_capture=0.0, calib_ok=True, objects=objects)
+
+
 def load_sim_params(config_file: Path) -> dict:
     """config/sim.yaml 에서 pick_place_node 의 ros__parameters 를 읽는다."""
     import yaml
@@ -576,6 +594,8 @@ def main(args=None):
             self.create_service(Trigger, '/sim/clear_objects', self.on_clear)
             # 시연용: 작업 매트에 무작위로 나사·너트를 놓는다 (GUI '부품 놓기'). 실물의 '사람이 부품을 놓는 것' 에 해당
             self.create_service(Trigger, '/sim/spawn_random', self.on_spawn_random)
+            # 시작 직후 모든 슬롯(max_objects 개)을 한 번 써 두기 (warmup_packet 설명 참고)
+            self.create_service(Trigger, '/sim/warmup_slots', self.on_warmup)
             self.tool_length = float(p['tool_length_m'])
             self.tf_buffer = Buffer()
             self.tf_listener = TransformListener(self.tf_buffer, self, spin_thread=True)
@@ -613,9 +633,8 @@ def main(args=None):
             self.get_logger().info(response.message)
             return response
 
-        def on_spawn_random(self, request, response):
-            import random
-            packet = random_packet(random.Random(), seq=int(time.time()))
+        def spawn_packet(self, packet, response, label):
+            """내부에서 만든 배치(무작위·길들이기)를 스폰한다."""
             with self.lock:
                 try:
                     requests, _ = plan_spawns(packet, self.plane, self.part_types, self.max_objects)
@@ -623,14 +642,22 @@ def main(args=None):
                     self.spawner.spawn_all(requests)
                     self.slot_types = {r.name: r.part_type for r in requests}
                 except (ValueError, RuntimeError) as e:
-                    response.success, response.message = False, f'무작위 배치 실패: {e}'
+                    response.success, response.message = False, f'{label} 실패: {e}'
                     return response
             response.success = True
-            response.message = '무작위 배치: ' + ', '.join(
+            response.message = f'{label}: ' + ', '.join(
                 f"{o['part_type']}({o['x_mm']:.0f}, {o['y_mm']:.0f} mm"
                 + ('' if o['angle_deg'] is None else f", {o['angle_deg']:.0f}°") + ')' for o in packet['objects'])
             self.get_logger().info(response.message)
             return response
+
+        def on_spawn_random(self, request, response):
+            import random
+            return self.spawn_packet(random_packet(random.Random(), seq=int(time.time())), response, '무작위 배치')
+
+        def on_warmup(self, request, response):
+            return self.spawn_packet(warmup_packet(self.max_objects, seq=int(time.time())), response,
+                                     f'슬롯 길들이기 {self.max_objects}개')
 
         def on_clear(self, request, response):
             with self.lock:

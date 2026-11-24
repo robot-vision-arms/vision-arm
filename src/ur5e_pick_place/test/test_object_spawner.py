@@ -278,3 +278,17 @@ def test_existing_slots_only_when_pose_info_is_fresh():
     assert existing_slots(poses, 9.0, 10.1) is None               # 마지막 메시지가 오래됨 (정지·끊김)
     assert existing_slots(poses, 10.0, 10.1) == {'obj_0'}         # obj_1 은 새 메시지에 없음 = 지워짐
     assert existing_slots({}, 10.0, 10.1) == set()                # 장면에 부품 없음 → 지울 것 없음
+
+
+def test_warmup_packet_fills_every_slot_without_overlap():
+    import math
+    from ur5e_pick_place.object_spawner import warmup_packet
+    p = load_sim_params(PKG / 'config' / 'sim.yaml')
+    packet = warmup_packet(p['max_objects'])
+    objs = packet['objects']
+    assert len(objs) == p['max_objects']
+    assert all(70 <= o['x_mm'] <= 227 and 40 <= o['y_mm'] <= 170 for o in objs)
+    assert min(math.dist((a['x_mm'], a['y_mm']), (b['x_mm'], b['y_mm']))
+               for i, a in enumerate(objs) for b in objs[i + 1:]) >= 30   # 나사 길이(40 mm) 가로 놓임 + 여유
+    requests, skipped = plan_spawns(packet, PlanePose(0.3, -0.15, 0.0, 0.0), p['part_types'], p['max_objects'])
+    assert [r.name for r in requests] == [f'obj_{k}' for k in range(p['max_objects'])] and not skipped

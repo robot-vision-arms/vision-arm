@@ -1,17 +1,22 @@
-"""PySide6 메인 윈도우 (3주차). 과제 GUI 필수 화면 4가지 (docs/PROJECT.md 2.2), 11-10 목업과 같은 구조.
+"""PySide6 메인 윈도우 (3주차). 과제 GUI 필수 화면 4가지 (docs/PROJECT.md 2.2) + Gazebo 시연 화면.
+11-10 목업의 두 판(GUI 대시보드 + Gazebo 창)을 한 창에: 왼쪽 = 휴대폰 카메라 검출, 오른쪽 = Gazebo 시연.
 
-    ┌ 헤더: 제목·입력 │ 연결 상태 (ROS2 · robot_server · Gazebo) │ [보정 다시 읽기] [부품 놓기] [사이클 실행] ┐
-    ├──────────────────────────────┬──────────────────────────────┤
-    │ ① 영상 · 검출 ROI · 장축 방향  │ ② 좌표 · 회전각 · 부품 종류      │
-    │   탭: 검출 카메라 / Gazebo 전경 │   표 + 기준 타일 3개             │
-    ├──────────────────────────────┼──────────────────────────────┤
-    │ ③ 가상 로봇 송수신 · 집기 결과  │ ④ 캘리브레이션 상태              │
-    │   콘솔 로그 + 숫자 타일 3개     │   항목 목록 + calib_ok 배지      │
-    └──────────────────────────────┴──────────────────────────────┘
+    ┌ 헤더: 제목·입력 │ 연결 상태 │ [실물 → Gazebo 자동 반영] [보정 다시 읽기] [사이클 실행] ┐
+    ├──────────────────────┬──────────────────────┬──────────────────────┤
+    │ ① 실물 카메라 · 검출   │ ⑤ Gazebo 전경          │ ⑥ Gazebo 위 카메라      │
+    │ (/vision/debug_image) │ (/sim/overview/image) │ (/sim/camera/image)   │
+    │                      │                      │ 실물 모드에서만         │
+    ├───────────────┬─────────────────┴──┬──────────────────────────────┤
+    │ ② 좌표 표      │ ③ 송수신 콘솔 + 타일   │ ④ 캘리브레이션 상태              │
+    └───────────────┴────────────────────┴──────────────────────────────┘
+
+실물 → Gazebo 자동 반영: 휴대폰 화면의 부품 배치가 STABLE_FRAMES 패킷 동안 그대로면 (손이 들어와 흔들리는 동안은 안 함)
+/sim/spawn_objects 로 같은 위치에 가상 부품을 만든다. 다 치우면 /sim/clear_objects. 사이클 중에는 멈추고,
+사이클 뒤에도 실물 배치가 그대로면 다시 만들지 않는다 (MIRROR_MOVE_MM 넘게 바뀌어야 다시 반영).
 
     source env.sh   # venv (PySide6) 를 켠다
-    python3 -m vision_pick_place.gui.main_window                              # 실물 보정 (data/calib)
-    python3 -m vision_pick_place.gui.main_window --calib-dir data/calib/sim   # Gazebo 가상 카메라 보정
+    python3 -m vision_pick_place.gui.main_window                                         # 실물 (휴대폰, data/calib)
+    python3 -m vision_pick_place.gui.main_window --source sim --calib-dir data/calib/sim  # Gazebo 가상 카메라 입력
     (ros2 run vision_pick_place gui 는 --symlink-install 빌드에서 시스템 python 으로 떠서 PySide6 를 못 찾는다)
 
 ROS 는 ros_worker.RosWorker (QThread) 가 받고, 이 창은 Signal 로 받은 dict/영상으로 위젯만 갱신한다.
@@ -21,6 +26,7 @@ import argparse
 from collections import deque
 from datetime import datetime
 import html
+import math
 from pathlib import Path
 import sys
 import time
@@ -28,8 +34,8 @@ import time
 import numpy as np
 from PySide6.QtCore import Qt, QTimer
 from PySide6.QtGui import QBrush, QColor, QImage, QPixmap
-from PySide6.QtWidgets import (QApplication, QFrame, QGridLayout, QHBoxLayout, QHeaderView, QLabel, QMainWindow,
-                               QPlainTextEdit, QPushButton, QSizePolicy, QTableWidget, QTableWidgetItem, QTabWidget,
+from PySide6.QtWidgets import (QApplication, QCheckBox, QFrame, QHBoxLayout, QHeaderView, QLabel, QMainWindow,
+                               QPlainTextEdit, QPushButton, QSizePolicy, QTableWidget, QTableWidgetItem,
                                QVBoxLayout, QWidget)
 
 from vision_pick_place.calibrator import Calibrator
@@ -39,6 +45,9 @@ from vision_pick_place.gui.pipeline_inspector import configure_korean_font
 LOG_LINES = 300       # ③ 콘솔에 남길 줄 수
 SUMMARY_WINDOW = 100  # ③ ACK 성공률·P95 를 계산할 최근 송신 수
 STALE_S = 2.0         # 이 시간 동안 아무것도 안 오면 연결 표시를 회색으로
+STABLE_FRAMES = 4     # 실물 → Gazebo 반영: 배치가 이만큼 연속 패킷 동안 같아야 반영 (약 1초, 손이 들어오는 동안 제외)
+STABLE_TOL_MM = 3.0   # 연속 패킷 사이에서 '같은 자리' 로 볼 거리
+MIRROR_MOVE_MM = 5.0  # 이미 반영한 배치에서 이만큼 넘게 바뀌어야 다시 반영
 
 # 목업 색 (11-10 GUI 대시보드 목업)
 BG, CARD, BORDER, LINE = '#EEF0F3', '#FFFFFF', '#DDE1E6', '#E4E7EB'
@@ -68,6 +77,26 @@ QHeaderView::section {{ background: #F4F5F7; color: #3E4650; border: none; paddi
 QPlainTextEdit#console {{ background: #16191D; color: #D7DCE2; border-radius: 8px; padding: 8px;
                          font-family: {MONO}; font-size: 12px; }}
 """
+
+
+def layout_of(objects: list) -> list:
+    """반영 대상 (나사·너트, mm 좌표 있음) 만 (종류, x, y) 로, 비교하기 쉽게 정렬."""
+    return sorted((o['part_type'], float(o['x_mm']), float(o['y_mm'])) for o in objects
+                  if o.get('part_type') in ('screw', 'nut') and o.get('x_mm') is not None and o.get('y_mm') is not None)
+
+
+def same_layout(a: list, b: list, tol_mm: float) -> bool:
+    """종류·개수가 같고 각 부품이 tol_mm 안에 있으면 같은 배치."""
+    if b is None or len(a) != len(b):
+        return False
+    used = set()
+    for kind, x, y in a:
+        match = next((i for i, (k2, x2, y2) in enumerate(b)
+                      if i not in used and k2 == kind and math.hypot(x - x2, y - y2) <= tol_mm), None)
+        if match is None:
+            return False
+        used.add(match)
+    return True
 
 
 def _fmt(value, digits=1):
@@ -151,11 +180,15 @@ class VideoPanel(QLabel):
 
 
 class MainWindow(QMainWindow):
-    def __init__(self, calib_dir: str = 'data/calib', start_worker: bool = True):
+    def __init__(self, calib_dir: str = 'data/calib', start_worker: bool = True, source: str = 'real'):
         super().__init__()
         self.setWindowTitle('Vision Pick & Place')
         self.setStyleSheet(STYLE)
         self.calib_dir = Path(calib_dir)
+        self.source = source                        # 'real' = 휴대폰 카메라, 'sim' = Gazebo 가상 카메라
+        self.candidate, self.stable_count = None, 0  # 실물 → Gazebo 반영: 지금 보고 있는 배치와 연속 횟수
+        self.mirrored = None                        # 마지막으로 Gazebo 에 반영한 배치
+        self.busy = set()                           # 응답을 기다리는 서비스 (사이클 중에는 반영 안 함)
         self.last_packet_time = None
         self.last_ack_time = None
         self.packet_times = deque(maxlen=30)       # 패킷 수신 주기 (Hz 표시)
@@ -170,17 +203,19 @@ class MainWindow(QMainWindow):
         outer.setContentsMargins(20, 20, 20, 20)
         outer.setSpacing(16)
         outer.addWidget(self._header())
-        grid = QGridLayout()
-        grid.setSpacing(16)
-        grid.addWidget(self._video_card(), 0, 0)
-        grid.addWidget(self._detection_card(), 0, 1)
-        grid.addWidget(self._log_card(), 1, 0)
-        grid.addWidget(self._calib_card(), 1, 1)
-        grid.setRowStretch(0, 3)
-        grid.setRowStretch(1, 2)
-        grid.setColumnStretch(0, 1)
-        grid.setColumnStretch(1, 1)
-        outer.addLayout(grid, 1)
+        top = QHBoxLayout()
+        top.setSpacing(16)
+        top.addWidget(self._video_card(), 1)
+        top.addWidget(self._overview_card(), 1)
+        if self.source == 'real':   # 가상 모드에서는 ① 이 이미 Gazebo 위 카메라라 겹친다
+            top.addWidget(self._sim_top_card(), 1)
+        bottom = QHBoxLayout()
+        bottom.setSpacing(16)
+        bottom.addWidget(self._detection_card(), 4)
+        bottom.addWidget(self._log_card(), 4)
+        bottom.addWidget(self._calib_card(), 3)
+        outer.addLayout(top, 3)
+        outer.addLayout(bottom, 2)
         self.setCentralWidget(root)
 
         self.load_calibration()
@@ -196,14 +231,15 @@ class MainWindow(QMainWindow):
         self.worker = None
         if start_worker:
             from vision_pick_place.gui.ros_worker import RosWorker
-            self.worker = RosWorker(self)
+            self.worker = RosWorker(self, sim_top=self.source == 'real')
             self.worker.detections.connect(self.on_detections)
             self.worker.frame.connect(self.video.show_frame)
             self.worker.overview.connect(self.overview.show_frame)
+            if self.source == 'real':
+                self.worker.sim_top.connect(self.sim_top.show_frame)
             self.worker.robot_log.connect(self.on_robot_log)
             self.worker.sim_log.connect(self.on_sim_log)
-            self.worker.cycle_result.connect(self.on_cycle_result)
-            self.worker.spawn_result.connect(self.on_spawn_result)
+            self.worker.service_result.connect(self.on_service_result)
             self.worker.gazebo_ready.connect(self.on_gazebo_ready)
             self.worker.start()
 
@@ -218,7 +254,7 @@ class MainWindow(QMainWindow):
         names = QVBoxLayout()
         title = QLabel('Vision Pick & Place')
         title.setObjectName('appTitle')
-        self.input_label = QLabel('입력: /vision/debug_image')
+        self.input_label = QLabel('입력: 휴대폰 카메라 (실물)' if self.source == 'real' else '입력: Gazebo 가상 카메라')
         self.input_label.setObjectName('meta')
         names.addWidget(title)
         names.addWidget(self.input_label)
@@ -227,11 +263,17 @@ class MainWindow(QMainWindow):
         for pill in (self.pill_ros, self.pill_robot, self.pill_gazebo):
             layout.addWidget(pill)
         layout.addSpacing(8)
+        # 실물 모드: 휴대폰 화면의 배치를 Gazebo 에 그대로 (모듈 설명)
+        self.auto_sync = QCheckBox('실물 → Gazebo 자동 반영')
+        self.auto_sync.setChecked(self.source == 'real')
+        self.auto_sync.setVisible(self.source == 'real')
+        layout.addWidget(self.auto_sync)
         reload_button = QPushButton('보정 다시 읽기')
         reload_button.clicked.connect(self.load_calibration)
         # 시뮬 시연용: 사이클이 끝나면 매트가 비므로 새 부품을 놓는다 (실물에서는 사람이 놓는다)
         self.spawn_button = QPushButton('부품 놓기 (무작위)')
         self.spawn_button.clicked.connect(self.request_spawn)
+        self.spawn_button.setVisible(self.source == 'sim')
         layout.addWidget(self.spawn_button)
         self.cycle_button = QPushButton('사이클 실행 (/sim/run_cycle)')
         self.cycle_button.setObjectName('primary')
@@ -241,20 +283,38 @@ class MainWindow(QMainWindow):
         return bar
 
     def _video_card(self) -> Card:
-        self.video_card = Card('① 영상 · 검출 ROI · 장축 방향')
+        name = '실물 카메라' if self.source == 'real' else '가상 카메라'
+        self.video_card = Card(f'① {name} · 검출 ROI · 장축 방향')
         self.video = VideoPanel()
-        # Gazebo 전경 카메라 (11-10 목업의 Gazebo 시점). Gazebo 창을 띄우지 않아도 집기 과정을 볼 수 있다
-        self.overview = VideoPanel('/sim/overview/image')
-        self.video_tabs = QTabWidget()
-        self.video_tabs.addTab(self.video, '검출 카메라')
-        self.video_tabs.addTab(self.overview, 'Gazebo 전경')
-        self.video_card.body.addWidget(self.video_tabs, 1)
+        self.video_card.body.addWidget(self.video, 1)
         legend = QLabel('<span style="color:#C8A400">━</span> 검출 영역 (시트 안쪽, 마커 제외) &nbsp;&nbsp; '
                         '<span style="color:#1FA34A">━</span> 검출 박스 &nbsp;&nbsp; '
                         f'<span style="color:{BLUE}">→</span> 장축 방향 (나사)')
         legend.setObjectName('note')
         self.video_card.body.addWidget(legend)
         return self.video_card
+
+    def _overview_card(self) -> Card:
+        """⑤ Gazebo 전경 카메라 (11-10 목업의 Gazebo 판). Gazebo 창을 띄우지 않아도 스폰·집기 과정을 본다."""
+        self.overview_card = Card('⑤ Gazebo 시연')
+        self.overview_card.meta.setText('/sim/overview/image')
+        self.overview = VideoPanel('/sim/overview/image')
+        self.overview_card.body.addWidget(self.overview, 1)
+        self.sync_status = QLabel('실물 배치를 기다리는 중' if self.source == 'real' else '가상 카메라 입력: [부품 놓기] → [사이클 실행]')
+        self.sync_status.setObjectName('note')
+        self.overview_card.body.addWidget(self.sync_status)
+        return self.overview_card
+
+    def _sim_top_card(self) -> Card:
+        """⑥ Gazebo 위 카메라 원본: 실물과 같은 자리(작업 매트)를 위에서 본 Gazebo. ① 과 나란히 보면 반영이 맞는지 바로 보인다."""
+        card = Card('⑥ Gazebo 위 카메라')
+        card.meta.setText('/sim/camera/image')
+        self.sim_top = VideoPanel('/sim/camera/image')
+        card.body.addWidget(self.sim_top, 1)
+        note = QLabel('실물 시트와 같은 자리 · 같은 마커의 Gazebo 작업 매트')
+        note.setObjectName('note')
+        card.body.addWidget(note)
+        return card
 
     def _detection_card(self) -> Card:
         self.det_card = Card('② 좌표 · 회전각 · 부품 종류')
@@ -399,7 +459,30 @@ class MainWindow(QMainWindow):
         self.tile_target.value.setText(f'{sendable}개 (집기 최대 3)')
         _pill(self.calib_pill, f'calib_ok = {"true" if calib_ok else "false"}', 'ok' if calib_ok else 'bad')
         if self.video.frame_size:
-            self.input_label.setText(f'입력: /vision/debug_image · {self.video.frame_size[0]}×{self.video.frame_size[1]}')
+            name = '휴대폰 카메라 (실물)' if self.source == 'real' else 'Gazebo 가상 카메라'
+            self.input_label.setText(f'입력: {name} · {self.video.frame_size[0]}×{self.video.frame_size[1]}')
+        if calib_ok:
+            self.mirror(objects)
+
+    def mirror(self, objects: list):
+        """실물 → Gazebo 자동 반영 (모듈 설명). 배치가 STABLE_FRAMES 연속 같고, 반영한 배치와 다르면 스폰·지우기 요청."""
+        current = layout_of(objects)
+        if same_layout(current, self.candidate, STABLE_TOL_MM):
+            self.stable_count += 1
+        else:
+            self.candidate, self.stable_count = current, 1
+        if not self.auto_sync.isChecked() or self.busy or self.worker is None:
+            return
+        if self.stable_count < STABLE_FRAMES or same_layout(current, self.mirrored, MIRROR_MOVE_MM):
+            return
+        self.mirrored = current
+        if current:
+            names = ', '.join(PART_BADGE[k][0] for k, _, _ in current)
+            self.sync_status.setText(f'실물 배치 반영 중: {names}')
+            self.call_service('/sim/spawn_objects')
+        else:
+            self.sync_status.setText('실물에서 부품을 치움 → Gazebo 부품 지우는 중')
+            self.call_service('/sim/clear_objects')
 
     # ---------- ③ ----------
 
@@ -474,24 +557,36 @@ class MainWindow(QMainWindow):
             return
         self.cycle_button.setEnabled(False)
         self.cycle_button.setText('사이클 실행 중...')
-        self.log_line('SIM', CONSOLE['sim'], '/sim/run_cycle 요청')
-        self.worker.request_cycle()
+        self.call_service('/sim/run_cycle')
 
-    def request_spawn(self):
+    def call_service(self, name: str):
         if self.worker is None:
             return
+        self.busy.add(name)
+        self.flush_acks()
+        self.log_line('SIM', CONSOLE['sim'], f'{name} 요청')
+        self.worker.request_service(name)
+
+    def request_spawn(self):
         self.spawn_button.setEnabled(False)
-        self.log_line('SIM', CONSOLE['sim'], '/sim/spawn_random 요청')
-        self.worker.request_spawn()
+        self.call_service('/sim/spawn_random')
 
-    def on_spawn_result(self, ok: bool, message: str):
-        self.spawn_button.setEnabled(True)
-        self.log_line('SIM', CONSOLE['sim'] if ok else CONSOLE['err'], message)
-
-    def on_cycle_result(self, ok: bool, message: str):
-        self.cycle_button.setEnabled(True)
-        self.cycle_button.setText('사이클 실행 (/sim/run_cycle)')
+    def on_service_result(self, name: str, ok: bool, message: str):
+        self.busy.discard(name)
+        self.flush_acks()
         self.log_line('SIM', CONSOLE['ack'] if ok else CONSOLE['err'], message)
+        if name == '/sim/run_cycle':
+            self.cycle_button.setEnabled(True)
+            self.cycle_button.setText('사이클 실행 (/sim/run_cycle)')
+            # 사이클 뒤 Gazebo 매트는 비지만 실물 배치는 그대로다. 실물이 바뀌기 전까지는 다시 반영하지 않는다
+            self.mirrored = self.candidate
+            self.sync_status.setText('사이클 끝. 실물 배치를 바꾸면 다시 반영합니다' if self.source == 'real' else self.sync_status.text())
+        elif name == '/sim/spawn_random':
+            self.spawn_button.setEnabled(True)
+        elif name in ('/sim/spawn_objects', '/sim/clear_objects'):
+            self.sync_status.setText(('반영 완료' if ok else '반영 실패') + f': {message[:80]}')
+            if not ok:
+                self.mirrored = None   # 다음 안정된 배치에서 다시 시도
 
     def closeEvent(self, event):
         if self.worker is not None:
@@ -502,11 +597,13 @@ class MainWindow(QMainWindow):
 def main():
     parser = argparse.ArgumentParser(description='Vision Pick & Place GUI')
     parser.add_argument('--calib-dir', default='data/calib', help='intrinsics.npz·homography.npz 폴더 (가상 카메라: data/calib/sim)')
+    parser.add_argument('--source', choices=('real', 'sim'), default='real',
+                        help='vision_node 입력: real = 휴대폰 (실물 → Gazebo 자동 반영), sim = Gazebo 가상 카메라')
     args, qt_args = parser.parse_known_args()
     app = QApplication([sys.argv[0]] + qt_args)
     configure_korean_font()
-    win = MainWindow(args.calib_dir)
-    win.resize(1440, 960)
+    win = MainWindow(args.calib_dir, source=args.source)
+    win.resize(1680 if args.source == 'real' else 1440, 960)
     win.show()
     sys.exit(app.exec())
 
