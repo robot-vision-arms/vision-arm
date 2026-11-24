@@ -63,6 +63,30 @@ def test_draft_finds_parts_but_not_markers():
     assert (screw.cx, screw.cy) == pytest.approx((600, 400), abs=2) and screw.angle_deg == pytest.approx(30, abs=2)
 
 
+def test_local_draft_drops_shadow_and_keeps_gold_part_under_uneven_light():
+    img = sheet_photo()
+    h, w = img.shape[:2]
+    cv2.ellipse(img, (620, 430), (90, 14), 30, 0, 360, (20, 60, 10), -1)                       # 나사 옆 그림자 (어두운 초록)
+    cv2.fillPoly(img, [np.rint(cv2.boxPoints(((600, 400), (160, 32), 30.0))).astype(np.int32)], (190, 190, 190))
+    cv2.rectangle(img, (400, 250), (460, 280), (60, 120, 160), -1)                              # 금색 (채도 높음)
+    light = np.linspace(0.6, 1.15, w)[None, :, None]
+    img = np.clip(img * light, 0, 255).astype(np.uint8)
+    boxes, note = L.draft_boxes_local(img, GREEN)
+    assert len(boxes) == 3 and '마커 4개' in note and '묶인' not in note
+    screw = min(boxes, key=lambda b: abs(b.cx - 600) + abs(b.cy - 400))
+    assert (screw.cx, screw.cy) == pytest.approx((600, 400), abs=2) and screw.h == pytest.approx(32, abs=4)
+    assert any(abs(b.cx - 430) < 3 and abs(b.cy - 265) < 3 for b in boxes)
+
+
+def test_local_draft_empty_sheet_is_empty_and_merged_parts_are_flagged():
+    img = sheet_photo()
+    img[200:520, 400:900] = (51, 153, 26)
+    assert L.draft_boxes_local(img, GREEN)[0] == []
+    cv2.rectangle(img, (500, 300), (660, 330), (190, 190, 190), -1)
+    cv2.rectangle(img, (500, 330), (530, 430), (190, 190, 190), -1)
+    assert '묶인 것 같은 상자 1개' in L.draft_boxes_local(img, GREEN)[1]
+
+
 def test_draft_without_markers_warns():
     img = np.full((400, 600, 3), (51, 153, 26), np.uint8)
     cv2.circle(img, (300, 200), 25, (190, 190, 190), -1)

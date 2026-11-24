@@ -150,6 +150,56 @@ def draft_boxes(frame: np.ndarray, params: dict, limits: dict | None = None) -> 
     return boxes, f'{note}, 초안 {len(boxes)}개'
 
 
+LOCAL_WINDOW = 25         # 바탕을 구하는 창 (1/4 축소 영상의 px, 원본 약 100 px)
+LOCAL_DROP = 0.13         # 초록 비율이 주변 바탕보다 이만큼(비율) 낮으면 부품
+LOCAL_MIN_AREA_PX = 120
+LOCAL_NUT_MAX_ASPECT = 1.3
+
+
+def local_green_mask(frame: np.ndarray, roi: np.ndarray) -> np.ndarray:
+    """초록 시트에서 '주변 바탕보다 덜 초록인 곳' (라벨 초안용).
+
+    초록 비율 G/(R+G+B) 는 밝기가 바뀌어도 거의 같아 그림자는 빠지고 금색 부품은 남는다. 바탕은 위치마다 중앙값으로 구해
+    조명이 고르지 않아도 된다. 2026-11-24 촬영 50장 전체(뒤에 val·test 로 나눈 14장 포함)를
+    보고 값을 정했다. 초안용이라 괜찮지만, 이 방식을 검출기로 쓰려면 그 14장의 점수는 깨끗한 시험이 아니다.
+    """
+    f = cv2.GaussianBlur(frame, (3, 3), 0).astype(np.float32) + 1
+    ratio = f[..., 1] / f.sum(axis=2)
+    scaled = np.clip(ratio * 400, 0, 255).astype(np.uint8)
+    small = cv2.resize(scaled, None, fx=0.25, fy=0.25, interpolation=cv2.INTER_AREA)
+    inner = cv2.erode(cv2.resize(roi, (small.shape[1], small.shape[0]), interpolation=cv2.INTER_NEAREST), np.ones((3, 3), np.uint8))
+    if not inner.any():
+        return np.zeros(roi.shape, np.uint8)
+    # 시트 밖·마커는 가장 가까운 시트 안 값으로 채운다 (흰 여백이 바탕으로 들어가면 구석이 부품으로 잡힘)
+    _, nearest = cv2.distanceTransformWithLabels((inner == 0).astype(np.uint8), cv2.DIST_L2, 5, labelType=cv2.DIST_LABEL_PIXEL)
+    values = np.zeros(int(nearest.max()) + 1, np.uint8)
+    values[nearest[inner > 0]] = small[inner > 0]
+    background = cv2.medianBlur(values[nearest], LOCAL_WINDOW)
+    background = cv2.resize(background, (frame.shape[1], frame.shape[0]), interpolation=cv2.INTER_LINEAR)
+    background = cv2.GaussianBlur(background, (9, 9), 0).astype(np.float32) / 400
+    return (((ratio < background * (1 - LOCAL_DROP)) & (roi > 0)) * 255).astype(np.uint8)
+
+
+def draft_boxes_local(frame: np.ndarray, params: dict) -> tuple[list[Box], str]:
+    """초록 시트용 초안 (local_green_mask). 마커를 못 찾으면 규칙 초안으로 대신한다."""
+    try:
+        H, _, ids = aruco_calib.sheet_homography(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))
+    except ValueError:
+        return draft_boxes(frame, params)
+    roi = sheet_roi_mask(SheetMap(H), (frame.shape[1], frame.shape[0]),
+                         params.get('sheet_edge_margin_mm', 8.0), params.get('sheet_marker_margin_mm', 9.0))
+    mask, to_mm = local_green_mask(frame, roi), mm_mapper(H)
+    boxes, merged = [], 0
+    for det in find_objects(mask, LOCAL_MIN_AREA_PX):
+        kind = classify_part(det, LOCAL_NUT_MAX_ASPECT)
+        if kind not in CLASSES:
+            continue
+        size = measure(mask, det, to_mm)
+        merged += size.length_mm > 70 or size.width_mm > 21 or (kind == 'screw' and size.width_mm > 10.5)
+        boxes.append(box_from_corners(kind, det.box_px))
+    return boxes, f'마커 {len(ids)}개, 초안 {len(boxes)}개' + (f', 여러 부품이 묶인 것 같은 상자 {merged}개' if merged else '')
+
+
 def label_path(image: Path) -> Path:
     return image.parent / 'labels' / (image.stem + '.json')
 

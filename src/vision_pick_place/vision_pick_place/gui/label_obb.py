@@ -263,10 +263,10 @@ class Canvas(QWidget):
 
 
 class LabelWindow(QMainWindow):
-    def __init__(self, root: Path, params: dict):
+    def __init__(self, root: Path, params: dict, draft=L.draft_boxes):
         super().__init__()
         self.setWindowTitle(f'라벨 도구 - {root}')
-        self.params = params
+        self.params, self.draft = params, draft
         self.items = [(s, p) for s in L.SPLITS for p in L.list_images(root / s)]
         self.index, self.reviewed, self.dirty = -1, False, False
         self.canvas = Canvas()
@@ -343,9 +343,9 @@ class LabelWindow(QMainWindow):
         self.index, self.dirty = index, False
         label = L.load_label(image)
         if label is None:
-            boxes, text = L.draft_boxes(frame, self.params)
+            boxes, text = self.draft(frame, self.params)
             self.reviewed, self.dirty = False, True
-            self.note.setText(f'규칙 초안입니다 ({text}). 빠진 부품은 N 으로 추가하고, 나사·너트가 아닌 것은 지우세요.')
+            self.note.setText(f'자동 초안입니다 ({text}). 빠진 부품은 N 으로 추가하고, 나사·너트가 아닌 것은 지우세요.')
         else:
             boxes, self.reviewed = label['boxes'], label['reviewed']
             self.note.setText('저장된 라벨을 열었습니다.')
@@ -394,7 +394,7 @@ class LabelWindow(QMainWindow):
     def redraft(self):
         if self.index < 0:
             return
-        boxes, text = L.draft_boxes(self.frame, self.params)
+        boxes, text = self.draft(self.frame, self.params)
         self.canvas.push_undo()
         self.canvas.boxes, self.canvas.selected = boxes, -1
         self.canvas.changed()
@@ -408,7 +408,9 @@ class LabelWindow(QMainWindow):
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument('root', type=Path, help='train/val/test(/test_new) 폴더가 있는 곳')
-    parser.add_argument('--params', nargs='+', default=ROOT_PARAMS, help='초안용 검출 설정 (흰 시트는 params.yaml 하나만)')
+    parser.add_argument('--params', nargs='+', default=ROOT_PARAMS, help='초안용 검출 설정 (흰 시트는 params.yaml 하나만, --draft rule)')
+    parser.add_argument('--draft', choices=('local', 'rule'), default='local',
+                        help='초안: local = 초록 시트용 (그림자를 덜 문다), rule = vision_node 와 같은 규칙 (흰 시트)')
     parser.add_argument('--status', action='store_true', help='진행 상황과 문제만 출력')
     parser.add_argument('--export', type=Path, help='확인 완료 라벨을 YOLO 학습 데이터로 저장할 폴더')
     args, qt_args = parser.parse_known_args()
@@ -433,7 +435,7 @@ def main():
     params = load_vision_params(args.params)
     app = QApplication([sys.argv[0]] + qt_args)
     configure_korean_font()
-    win = LabelWindow(args.root, params)
+    win = LabelWindow(args.root, params, L.draft_boxes_local if args.draft == 'local' else L.draft_boxes)
     win.resize(1500, 950)
     win.show()
     sys.exit(app.exec())
