@@ -407,7 +407,7 @@ class LabelWindow(QMainWindow):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument('root', type=Path, help='train/val/test 폴더가 있는 곳')
+    parser.add_argument('root', type=Path, help='train/val/test(/test_new) 폴더가 있는 곳')
     parser.add_argument('--params', nargs='+', default=ROOT_PARAMS, help='초안용 검출 설정 (흰 시트는 params.yaml 하나만)')
     parser.add_argument('--status', action='store_true', help='진행 상황과 문제만 출력')
     parser.add_argument('--export', type=Path, help='확인 완료 라벨을 YOLO 학습 데이터로 저장할 폴더')

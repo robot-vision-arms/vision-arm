@@ -2,8 +2,9 @@
 
 편집 창은 gui/label_obb.py. 여기는 화면 없이 도는 계산·저장만 둔다.
 
-폴더:  <root>/{train,val,test}/*.png              사진 (live_view.py 로 저장한 원본)
-       <root>/{train,val,test}/labels/<이름>.json  라벨 원본 {image, width, height, reviewed, boxes}
+폴더:  <root>/<split>/*.png              사진 (live_view.py 로 저장한 원본). split = train, val, test, test_new
+       <root>/<split>/labels/<이름>.json  라벨 원본 {image, width, height, reviewed, boxes}
+       test_new 는 학습·검증에 한 번도 안 나온 부품만 놓은 사진 (처음 보는 부품 시험, 없어도 된다)
 내보내기: <out>/images/<split>, <out>/labels/<split>, <out>/dataset.yaml  (Ultralytics OBB 형식)
 
 규칙:
@@ -29,7 +30,7 @@ from vision_pick_place.vision_detector import classify_part, find_objects
 from vision_pick_place.workspace_roi import sheet_roi_mask
 
 CLASSES = ('screw', 'nut')           # YOLO 클래스 번호 0, 1
-SPLITS = ('train', 'val', 'test')
+SPLITS = ('train', 'val', 'test', 'test_new')
 IMAGE_SUFFIXES = ('.png', '.jpg', '.jpeg')
 MIN_SIDE_PX = 3.0                    # 이보다 얇은 상자는 잘못 그린 것으로 본다
 
@@ -100,7 +101,7 @@ def resize_by_corner(box: Box, index: int, point) -> Box:
     return Box(box.part_type, float(c[0]), float(c[1]), w, h, box.angle_deg)
 
 
-class _SheetMap:
+class SheetMap:
     """sheet_roi_mask 가 필요로 하는 만큼만 흉내 낸 보정. 사진 속 마커로 구하므로 보정 파일이 없어도 되고 시트가 움직여도 된다.
 
     렌즈 왜곡은 무시한다 (초안을 찾을 영역만 정하므로 몇 px 차이는 괜찮다).
@@ -122,7 +123,7 @@ def draft_boxes(frame: np.ndarray, params: dict) -> tuple[list[Box], str]:
     mask = preprocess(frame, params.get('blur_ksize', 5), params.get('threshold', -1), **options)
     try:
         H, _, ids = aruco_calib.sheet_homography(cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY))
-        roi = sheet_roi_mask(_SheetMap(H), (frame.shape[1], frame.shape[0]),
+        roi = sheet_roi_mask(SheetMap(H), (frame.shape[1], frame.shape[0]),
                              params.get('sheet_edge_margin_mm', 3.0), params.get('sheet_marker_margin_mm', 5.0))
         mask = cv2.bitwise_and(mask, roi)
         note = f'마커 {len(ids)}개'

@@ -177,6 +177,24 @@ python3 -m vision_pick_place.gui.label_obb data/captures/green --export data/mod
 - 확인: 단위·창 테스트 13개, 흰 시트 사진 8장 사본에서 초안 8/8개(사진당 나사 1개), 내보낸 데이터로 YOLO 1 epoch 실행(형식 확인용, 성능 아님). 초록 실물 사진과 사람이 직접 쓰는 확인은 아직이다.
 - 초안 상자는 그림자까지 포함해 헐거울 수 있다. 붙은 부품은 한 상자로 나오므로 지우고 새로 그린다.
 
+### 2026-11-24 재학습·비교 스크립트 `scripts/finetune_obb.py` (채점은 `obb_eval.py`)
+
+```bash
+P=.venv-ml/bin/python; D=data/models/green_yolo_obb        # label_obb --export 한 폴더
+$P scripts/finetune_obb.py train    --data $D --dry-run    # 계획·예상 시간
+$P scripts/finetune_obb.py train    --data $D              # MVTec 시작·DOTA 시작 × 사진 10·20·40장
+$P scripts/finetune_obb.py evaluate --data $D --draw       # 검증 사진 비교 (설정을 고를 때)
+$P scripts/finetune_obb.py evaluate --data $D --split test --draw       # 마지막에 한 번
+$P scripts/finetune_obb.py evaluate --data $D --split test_new --draw   # 학습에 없던 부품만 놓은 사진 (있을 때)
+```
+
+- 사진 수가 달라도 **가중치 갱신 횟수(기본 400회)를 같게** 한다. epoch 를 같게 하면 사진이 적을수록 덜 배워 "사진 수 효과" 와 섞인다. Ultralytics 기본 `nbs=64` 는 배치 8번에 한 번만 갱신해 10장·40 epoch 이면 갱신이 10번 남짓이라 `nbs=8` 로 둔다.
+- 적은 사진은 많은 사진의 부분집합이다. 끝난 학습은 건너뛰고, 라벨·사진·설정이 바뀌면 다시 학습한다 (바뀐 뒤의 모델은 비교에서도 빠진다).
+- 비교: 규칙 / 재학습 전 MVTec / 학습한 모델. 모두 같은 시트 ROI, 위치(회전 IoU 0.5)와 종류가 다 맞아야 맞힘. 신뢰도 기준은 항상 val 에서 고른다. 규칙+SVM 은 아직 넣지 않았다.
+- 시간(i5-12400): 1024 입력에서 학습 12장+검증 4장이 epoch 당 약 11초 (Gazebo 시연이 같이 도는 상태). 사진 10·20·36장 × 시작 2종이면 약 3~4시간.
+- 확인: 단위 테스트 8개, 합성 초록 시트 그림 20장으로 학습 4개 → val·test 비교까지 실행. **흐름 확인이며 그 점수는 실물 성능이 아니다.**
+- 주의: 라벨 초안이 규칙에서 나와 규칙에 약간 유리할 수 있다. 시험 부품이 100개보다 적으면 한두 개 차이는 우열로 보지 않는다.
+
 ## 4. 팀원 2 (성민) 기록
 
 2026-11-23: 10개 슬롯·22 cm 상자 프로필, 기존 물체 20/20 투입 및 모델 ID 유지, 외형 개선·환경 무작위화 장면 9/9·123.17초 통과. 실물 시험·전체 환경 성공률 검증은 아니다. 구현 파일·실행 명령·오류 및 남은 제한은 [TEAM2_PROGRESS.md](TEAM2_PROGRESS.md#team2-20261123-demo)에 기록했다. 다른 담당 원본 대신 팀원 2 어댑터로 연결했다.
