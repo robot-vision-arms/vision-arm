@@ -184,3 +184,13 @@ HEAD `0b48711` + 위 스폰 수정. `colcon build` 후 headless 시뮬레이션(
 | `collect_ground_truth.py --print-plan` | 30개 자세 정상 출력 |
 | 폰 카메라 | 미연결이라 실물 입력은 확인 못 함 (내일 인쇄 시트 수집 때 확인) |
 | 종료 (Ctrl+C) | 성민 님 기록과 같은 현상 재현: `move_group` 종료 코드 −11 (`rclcpp::Executor` 소멸 중 segfault), Gazebo 5초 안에 안 꺼져 SIGTERM, `team2_pick_place_node` "Destroyable" 예외 메시지. 모두 종료 단계이고 가영 담당 노드(스폰·vision_node)에서는 오류 없음 |
+
+### 2026-11-24 성민 님 커밋(`0d8c130`) 받은 뒤 가영 담당 재점검 (코드 수정 없음)
+
+성민 님이 `team2_spawner_adapter.py` 로 가영 담당 `object_spawner.py` 를 상속해 쓰기 시작해서, 원본 스폰 기능이 그대로인지 다시 확인했다. `colcon build --symlink-install` (세 패키지, 새 `team2_move_group` 포함) 후 headless 시뮬레이션(`sim.launch.py gazebo_gui:=false launch_rviz:=false`, 기본 upstream 실행).
+
+| 항목 | 결과 |
+|---|---|
+| 단위 테스트 (venv `pytest`) | `ur5e_pick_place` **74개**, `vision_pick_place` **146개** 통과 = **220개** (성민 님 기록과 같음) |
+| `colcon test` 주의 | `vision_pick_place` 가 0개 수집·1 skip 으로 끝남. 성민 님 새 `test_team2_gui_profile.py` 가 시스템 Python 에 없는 `PySide6` 를 모듈 단위로 건너뛰면서 패키지 전체 수집이 멈춘다. venv 의 `python -m pytest` 로는 정상. 성민 님 파일이라 수정하지 않음 |
+| 3주차 스폰·흡착·TF (`check_spawn_week3.py`) | **통과**. TF = 패킷 위치·각도, 미보정 패킷 거부, 팔 통과 시 부품 이동 0.0 mm, 141.7 mm 거리 진공 거부, 너트 큰 컵 거부, 링 컵 너트(오차 0.8 mm)·5 mm 컵 나사 30°(0.9 mm)·135°(0.7 mm) 옮김, 같은 이름 재스폰, 삭제 시 마커 제거. Gazebo 로그 "not found, so not removed" **0줄** |
