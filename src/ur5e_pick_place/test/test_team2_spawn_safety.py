@@ -54,16 +54,15 @@ def test_invalid_length_is_rejected(tmp_path,length):
         generate_profile(tmp_path,ROOT,screw_length_mm=length)
 
 
-def test_still_overlapping_widths_are_rejected_before_any_deletion(tmp_path,monkeypatch):
+def test_overlapping_widths_are_forwarded_without_moving_centers(tmp_path,monkeypatch):
     from ur5e_pick_place.object_spawner import GzSpawner
     profile=generate_profile(tmp_path,ROOT,screw_length_mm=20.)
     node=object.__new__(VerifiedGzSpawner)
     node.models_dir=Path(profile['asset_prefix'])/'share/ur5e_pick_place/models'
     calls=[]
     monkeypatch.setattr(GzSpawner,'spawn_all',lambda *args:calls.append('mutated'))
-    with pytest.raises(ValueError,match='가상 부품 겹침'):
-        node.spawn_all([part('obj_0','screw',0.),part('obj_1','screw',0.,.006)])
-    assert calls==[]
+    node.spawn_all([part('obj_0','screw',0.),part('obj_1','screw',0.,.006)])
+    assert calls==['mutated']
 
 
 def test_crossing_screws_and_nuts_are_checked():

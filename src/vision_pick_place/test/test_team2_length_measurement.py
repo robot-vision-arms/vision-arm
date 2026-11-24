@@ -36,7 +36,7 @@ def test_measurement_uses_both_calibrated_endpoints():
 
 def test_stability_tracks_positions_when_detection_ids_change():
     tracker=LengthTracker();p=packet();original=copy.deepcopy(p)
-    for _ in range(2):assert 'length_mm' not in tracker.annotate(p,{0:15.,1:35.})['objects'][0]
+    for _ in range(2):assert tracker.annotate(p,{0:15.,1:35.})['objects'][0]['length_status']=='warming_up'
     p['objects'].reverse()
     for i,o in enumerate(p['objects']):o['id']=i
     measured=tracker.annotate(p,{0:35.,1:15.})
@@ -45,14 +45,14 @@ def test_stability_tracks_positions_when_detection_ids_change():
     assert all('length_mm' not in o for o in p['objects'])
 
 
-def test_unstable_or_invalid_values_never_reuse_old_size():
+def test_unstable_and_briefly_missing_measurements_do_not_block_generation():
     tracker=LengthTracker();p=packet()
     for length in [20.,20.,20.]:p=tracker.annotate(p,{0:length})
     assert p['objects'][0]['length_mm']==20.
     p=tracker.annotate(p,{0:30.})
-    assert p['objects'][0]['length_status']=='unstable' and 'length_mm' not in p['objects'][0]
+    assert p['objects'][0]['length_status']=='unstable' and p['objects'][0]['length_mm']==30.
     p=tracker.annotate(p,{0:float('nan')})
-    assert 'length_mm' not in p['objects'][0]
+    assert p['objects'][0]['length_status']=='fallback' and p['objects'][0]['length_mm']==30.
 
 
 def test_yolo_runs_once_and_original_coordinates_are_preserved():

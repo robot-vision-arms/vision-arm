@@ -29,9 +29,15 @@ class SizedVisionNode(VisionNode):
                 roi_mask=self.sheet_roi(frame),part_heights_mm=self.part_heights(),
                 part_limits=self.part_limits,detector=self.detector,**options)
             for obj in packet['objects']:
-                if obj.get('length_status')=='stable':
+                if obj.get('length_mm') is not None:
                     point=(round(obj['u_px']),round(obj['v_px'])+18)
-                    cv2.putText(debug,f"L~{obj['length_mm']:.0f} mm",point,cv2.FONT_HERSHEY_SIMPLEX,.45,(255,0,255),1)
+                    status=obj.get('length_status','')
+                    cv2.putText(debug,f"L~{obj['length_mm']:.0f} mm [{status}]",point,cv2.FONT_HERSHEY_SIMPLEX,.45,(255,0,255),1)
+                if obj['part_type']=='screw':
+                    head=obj.get('head_angle_deg')
+                    label=f"head {head:.0f} deg" if head is not None else 'head ?'
+                    cv2.putText(debug,label,(round(obj['u_px']),round(obj['v_px'])+35),
+                                cv2.FONT_HERSHEY_SIMPLEX,.4,(0,180,255),1)
             self.pub_det.publish(String(data=encode(packet).decode().rstrip('\n')))
             image=self.cv_bridge.cv2_to_imgmsg(debug,encoding='bgr8')
             image.header.stamp=self.get_clock().now().to_msg();image.header.frame_id='camera'

@@ -6,6 +6,7 @@ import numpy as np
 from vision_pick_place.camera_stream import preprocess
 from vision_pick_place.vision_detector import find_objects
 from vision_pick_place.vision_pipeline import process_frame
+from vision_pick_place.team2_head_direction import head_direction
 
 
 def detection_length_mm(det, calibrator, height_mm=0.):
@@ -20,7 +21,7 @@ def detection_length_mm(det, calibrator, height_mm=0.):
     ends=np.array([center-axis/norm*det.length_px/2,center+axis/norm*det.length_px/2])
     mm=calibrator.px_to_mm(ends,height_mm)
     length=float(np.linalg.norm(mm[1]-mm[0]))
-    return length if math.isfinite(length) and 10 <= length <= 60 else None
+    return length if math.isfinite(length) and 3 <= length <= 80 else None
 
 
 class LengthTracker:
@@ -31,7 +32,7 @@ class LengthTracker:
 
     def annotate(self,packet,measurements):
         packet=copy.deepcopy(packet);self.tick+=1
-        self.tracks=[t for t in self.tracks if self.tick-t['seen']<=2]
+        self.tracks=[t for t in self.tracks if self.tick-t['seen']<=10]
         objects=[o for o in packet['objects'] if o['part_type']=='screw']
         candidates=[]
         for i,obj in enumerate(objects):
@@ -51,9 +52,15 @@ class LengthTracker:
             length=measurements.get(obj['id'])
             obj['length_status']='unavailable'
             if (isinstance(length,bool) or not isinstance(length,(int,float))
-                    or not math.isfinite(length) or not 10 <= length <= 60
+                    or not math.isfinite(length) or not 3 <= length <= 80
                     or obj.get('x_mm') is None or obj.get('y_mm') is None):
-                if i in assignment:assignment[i]['history']=[]
+                if i in assignment:
+                    track=assignment[i]
+                    # 잠깐 가려진 프레임 때문에 생성 전체를 멈추지 않는다.
+                    # 최근에 같은 위치에서 측정한 길이임을 상태에 명시한다.
+                    if 'last_length' in track:
+                        obj['length_mm']=track['last_length']
+                        obj['length_source']='recent_estimate';obj['length_status']='fallback'
                 continue
             track=assignment.get(i)
             if track is None:
@@ -61,11 +68,15 @@ class LengthTracker:
             track.update(x=obj['x_mm'],y=obj['y_mm'],seen=self.tick)
             track['history']=(track['history']+[length])[-self.frames:]
             obj['length_raw_mm']=length
+            obj['length_mm']=float(math.floor(length+.5))
+            obj['length_source']='provisional_obb'
+            track['last_length']=obj['length_mm']
             obj['length_status']='warming_up'
             if len(track['history'])==self.frames:
                 if max(track['history'])-min(track['history']) <= self.tolerance:
                     obj['length_mm']=float(math.floor(float(np.median(track['history']))+.5))
                     obj['length_source']='calibrated_obb';obj['length_status']='stable'
+                    track['last_length']=obj['length_mm']
                 else:obj['length_status']='unstable'
         return packet
 
@@ -83,21 +94,25 @@ def process_frame_with_lengths(frame,calibrator,seq,t_capture,tracker,**options)
     collector=_CollectedDetector(detector) if detector is not None else None
     if collector is not None:options['detector']=collector
     packet,debug=process_frame(frame,calibrator,seq,t_capture,**options)
+    mask=preprocess(frame,options.get('blur_ksize',5),options.get('threshold',-1),
+        **{k:options[k] for k in ['segmentation_mode','hsv_max_saturation','hsv_max_dark_value','close_ksize','open_ksize'] if k in options})
+    if options.get('roi_mask') is not None:
+        import cv2
+        mask=cv2.bitwise_and(mask,options['roi_mask'])
     if collector is not None:
         # YOLO 추론은 한 번만 수행한다. 원본 분류·좌표 결과는 그대로 사용한다.
         detections=collector.detections
     else:
-        mask=preprocess(frame,options.get('blur_ksize',5),options.get('threshold',-1),
-            **{k:options[k] for k in ['segmentation_mode','hsv_max_saturation','hsv_max_dark_value','close_ksize','open_ksize'] if k in options})
-        if options.get('roi_mask') is not None:
-            import cv2
-            mask=cv2.bitwise_and(mask,options['roi_mask'])
         detections=find_objects(mask,options.get('min_area_px',500))
     measurements={}
     for obj in packet['objects']:
         if obj['part_type']!='screw':continue
         matched=[d for d in detections if math.hypot(d.center_px[0]-obj['u_px'],d.center_px[1]-obj['v_px'])<.01]
+        obj['head_status']='ambiguous'
         if len(matched)==1:
+            head=head_direction(matched[0],mask,calibrator,(options.get('part_heights_mm') or {}).get('screw',0.))
+            if head is not None:
+                obj['head_angle_deg']=head;obj['head_status']='estimated'
             measurements[obj['id']]=detection_length_mm(matched[0],calibrator,
                 (options.get('part_heights_mm') or {}).get('screw',0.))
     return tracker.annotate(packet,measurements),debug

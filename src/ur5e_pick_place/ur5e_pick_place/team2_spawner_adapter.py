@@ -8,7 +8,9 @@ import signal
 from pathlib import Path
 
 from ur5e_pick_place import object_spawner as original
-from ur5e_pick_place.team2_spawn_safety import assert_spawn_clear
+from ur5e_pick_place.team2_overlap_models import slot_collision_model
+import tempfile
+from dataclasses import replace
 from ur5e_pick_place.team2_part_sizes import apply_packet_sizes
 
 
@@ -41,8 +43,7 @@ def created_model_matches(model, request):
 
 class VerifiedGzSpawner(original.GzSpawner):
     def spawn_all(self, requests):
-        # 기존 물체를 지우기 전에 검사한다. 겹친 물체를 만든 뒤 물리엔진이 밀어내게 두지 않는다.
-        assert_spawn_clear(requests,self.models_dir)
+        # 검출 XY를 그대로 재현한다. 겹침은 생성 거부 대신 슬롯별 충돌 필터로 처리한다.
         return super().spawn_all(requests)
 
     def scene(self):
@@ -57,6 +58,12 @@ class VerifiedGzSpawner(original.GzSpawner):
 
     def _request(self, service, request, reply_type):
         from google.protobuf import text_format
+        if service.endswith('/create') and request.sdf_filename:
+            if not hasattr(self,'_slot_model_cache'):
+                self._slot_model_cache=tempfile.TemporaryDirectory(prefix='team2_overlap_')
+            # 원본 SDF·클래스·마커는 바꾸지 않고 Gazebo에 전달하는 복사본만 필터링한다.
+            request.sdf_filename=str(slot_collision_model(request.sdf_filename,request.name,
+                                                         self._slot_model_cache.name))
         try:
             result=subprocess.run(['gz','service','-s',service,'--reqtype',request.DESCRIPTOR.full_name,
                 '--reptype',reply_type.DESCRIPTOR.full_name,'--timeout',str(int(self.timeout_s*1000)),
@@ -126,8 +133,18 @@ def main():
         requests,skipped=planner_factory(*args,**kwargs)
         packet=args[0] if args else kwargs['packet']
         requests=apply_packet_sizes(requests,packet,models)
-        # ROS 노드가 slot_types를 바꾸기 전에도 검사해, 실패 시 이전 장면·마커를 보존한다.
-        assert_spawn_clear(requests,models)
+        by_id={o.get('id'):o for o in packet.get('objects',[])}
+        oriented=[]
+        for request in requests:
+            obj=by_id.get(request.source_id,{})
+            head=obj.get('head_angle_deg')
+            axis=obj.get('angle_deg')
+            if (obj.get('part_type')=='screw' and isinstance(head,(int,float))
+                    and math.isfinite(head) and isinstance(axis,(int,float)) and math.isfinite(axis)):
+                # 기존 장축 각도는 그대로 두고 모델 +X(머리) 방향에만 180도 분기를 적용한다.
+                request=replace(request,yaw_rad=request.yaw_rad+math.radians(head-axis))
+            oriented.append(request)
+        requests=oriented
         if active_node[0] is not None:
             for request in requests:
                 if request.part_type not in active_node[0].shapes:

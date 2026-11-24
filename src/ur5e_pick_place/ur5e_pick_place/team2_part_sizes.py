@@ -9,7 +9,7 @@ import tempfile
 import xml.etree.ElementTree as ET
 
 
-MIN_LENGTH_MM, MAX_LENGTH_MM = 10, 60
+MIN_LENGTH_MM, MAX_LENGTH_MM = 3, 80
 _NAME = re.compile(r'screw__length_([0-9]{3})mm\Z')
 
 
@@ -74,12 +74,8 @@ def apply_packet_sizes(requests, packet, models_dir):
     for request in requests:
         obj=by_id.get(request.source_id,{})
         length=obj.get('length_mm')
-        if request.part_type=='screw' and 'length_status' in obj:
-            # 측정 실패를 기본 40 mm로 조용히 대체하면 다시 겹침이 생길 수 있다.
-            # 새 측정 모드에서는 안정화된 길이가 준비될 때까지 기존 장면을 보존한다.
-            if obj['length_status']!='stable' or length is None:
-                raise ValueError(f"id={request.source_id}: 나사 길이 측정이 준비되지 않았습니다 "
-                                 f"({obj['length_status']}). 3프레임 안정화·보정·가림 여부를 확인하세요.")
+        # 길이 안정화는 품질 정보이지 장면 전체의 생성 조건이 아니다.
+        # 측정값이 아직 없으면 기존 프로필 길이를 사용한다. 분류·XY는 보존한다.
         if request.part_type=='screw' and length is not None:
             key,_=ensure_length_model(models_dir,length)
             request=replace(request,part_type=key)

@@ -35,7 +35,7 @@ def test_individual_sizes_keep_centers_and_correct_shared_mesh_scaling(tmp_path)
 def test_missing_sizes_use_old_models_and_invalid_sizes_fail(tmp_path):
     request=SpawnRequest('obj_0','screw',0.,0.,.001,0.,0)
     assert apply_packet_sizes([request],{'objects':[]},tmp_path)==[request]
-    for value in [True,float('nan'),-1.,61.]:
+    for value in [True,float('nan'),-1.,81.]:
         with pytest.raises(ValueError):length_key(value)
 
 
@@ -76,7 +76,7 @@ def test_original_model_directory_cannot_receive_variants(tmp_path):
 
 
 @pytest.mark.parametrize('status',['warming_up','unstable','unavailable','stable'])
-def test_measurement_failure_never_silently_uses_default_length(tmp_path,status):
+def test_measurement_status_does_not_block_scene_creation(tmp_path,status):
     request=SpawnRequest('obj_0','screw',0.,0.,.001,0.,0)
-    with pytest.raises(ValueError,match='측정이 준비되지'):
-        apply_packet_sizes([request],{'objects':[dict(id=0,length_status=status)]},tmp_path)
+    result=apply_packet_sizes([request],{'objects':[dict(id=0,length_status=status)]},tmp_path)
+    assert result==[request]
