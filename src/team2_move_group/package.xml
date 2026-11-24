@@ -8,5 +8,7 @@
   <depend>gz_sim_vendor</depend>
   <depend>rclcpp</depend>
   <depend>pal_statistics</depend>
+  <build_depend>qtbase5-dev</build_depend>
+  <depend>rviz_common</depend>
   <export><build_type>ament_cmake</build_type></export>
 </package>

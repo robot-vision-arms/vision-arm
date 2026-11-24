@@ -87,11 +87,12 @@ def main():
     node = WorkcellVisuals()
     try:
         rclpy.spin(node)
-    except KeyboardInterrupt:
+    except (KeyboardInterrupt, rclpy.executors.ExternalShutdownException):
         pass
     finally:
         node.destroy_node()
-        rclpy.shutdown()
+        # ROS 신호 처리기가 먼저 context를 종료했어도 중복 종료 오류를 내지 않는다.
+        rclpy.try_shutdown()
 
 
 if __name__ == '__main__':

@@ -63,7 +63,14 @@ def main():
     from vision_pick_place import aruco_calib
     import cv2
     import numpy as np
-    rclpy.init(args=[]);node=rclpy.create_node('team2_demo_manager')
+    from rclpy.signals import SignalHandlerOptions
+    # 관리자는 Python의 Ctrl+C로 정리를 시작한다. ROS context는 자식 정리가 끝날 때까지 유지한다.
+    rclpy.init(args=[],signal_handler_options=SignalHandlerOptions.NO)
+    node=rclpy.create_node('team2_demo_manager')
+    # 터미널 닫기/서비스 중지의 SIGTERM도 같은 종료 순서를 거치게 한다.
+    def request_shutdown(signum, frame):
+        raise KeyboardInterrupt
+    signal.signal(signal.SIGTERM, request_shutdown)
     children=[];streams=[];session=Path('logs/workcell_session.json')
     old_session=session.read_bytes() if session.exists() else None
     report=dict(ok=False,profile=profile,trials=[],domain=args.domain,robot_motion_commanded=args.cycles>0 or bool(args.compare_speeds))
@@ -95,7 +102,10 @@ def main():
                      'sim_params:='+profile['sim_params'],'description_file:='+profile['description_file'],
                      'move_group_package:=team2_move_group','move_group_executable:=team2_move_group',
                      'team2_native_gazebo:=true',
-                     'gazebo_gui:='+str(args.gazebo_gui).lower(),'launch_rviz:='+str(args.rviz).lower()])
+                     'gazebo_gui:='+str(args.gazebo_gui).lower(),'launch_rviz:=false'])
+        if args.rviz:
+            start('rviz',['ros2','launch','ur5e_pick_place','team2_rviz.launch.py',
+                          'description_file:='+profile['description_file']])
         params=node.create_client(GetParameters,'/pick_place_node/get_parameters')
         wait(lambda:params.service_is_ready(),60)
         # RPC가 존재하는 것과 컨트롤러·렌더러가 준비된 것은 다르다. 영상도 함께 기다린다.
@@ -154,7 +164,7 @@ def main():
             wait(lambda:detection and detection[-1].get('calib_ok') and len(detection[-1].get('objects',[]))==args.objects,30)
             report['detected_before_capture']=detection[-1]
             capture=start('capture',[sys.executable,'scripts/capture_team2_scene.py','--profile',str(Path(profile['sim_params']).parent/'profile.json'),'--out',str(out/'dataset')])
-            wait(lambda:capture.poll() is not None,40)
+            wait(lambda:capture.poll() is not None,90)
             if capture.returncode:raise RuntimeError('Dataset capture failed')
             if args.gui:
                 wait(lambda:any(name=='gui' for name,_ in node.get_node_names_and_namespaces()),20)
@@ -202,6 +212,10 @@ def main():
         if failure_frames:cv2.imwrite(str(out/'failure_camera.png'),CvBridge().imgmsg_to_cv2(failure_frames[-1],'bgr8'))
         node.destroy_subscription(failure_sub)
     finally:
+        # 두 번째 Ctrl+C가 subprocess 대기까지 끊어 Gazebo/RViz를 남기지 않도록 한다.
+        signal.signal(signal.SIGINT,signal.SIG_IGN)
+        signal.signal(signal.SIGTERM,signal.SIG_IGN)
+        print('종료 중입니다. Gazebo·RViz와 연결 노드 정리가 끝날 때까지 기다려 주세요.',flush=True)
         if report.get('transport'):
             report['ok']=report['ok'] and all(r['ok'] and r['latency_kpi_passed'] for r in report['transport'])
         from team2_shutdown import shutdown_children

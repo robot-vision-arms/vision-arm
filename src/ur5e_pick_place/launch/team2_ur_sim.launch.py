@@ -2,7 +2,7 @@
 import importlib.util
 import os
 from ament_index_python.packages import get_package_share_directory
-from launch.actions import IncludeLaunchDescription,ExecuteProcess
+from launch.actions import IncludeLaunchDescription
 from launch.conditions import IfCondition
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
@@ -24,7 +24,9 @@ def generate_launch_description():
                     raise RuntimeError('Unexpected installed UR launch include: '+location)
                 result.append(Node(package='team2_move_group',executable='team2_gz_server',
                     arguments=[LaunchConfiguration('world_file')],output='screen'))
-                result.append(ExecuteProcess(cmd=['gz','sim','-g'],
+                # 팀원 2에서만 C++ GUI 래퍼를 사용해 로더와 신호 처리 경로를 분리한다.
+                result.append(Node(package='team2_move_group',executable='team2_gz_gui',
+                    arguments=[LaunchConfiguration('world_file')],
                     condition=IfCondition(LaunchConfiguration('gazebo_gui')),output='log'))
                 replaced+=1
             else:result.append(action)

@@ -610,3 +610,15 @@ python scripts/run_team2_demo.py --gui --realistic --randomize --seed 5 --object
 - 최신 변경은 `/team2/scene_request` → 같은 seq의 `/team2/scene_request_ack` → `/team2/spawn_exact` 전용 경로다. 실제 검출·TCP 목표 입력과 초기화를 분리하고, 기본 mutually-exclusive callback group에서 확인한 패킷을 고정해 원본 on_spawn을 호출한 뒤 이전 입력을 복원한다. 초기화 패킷과 빈 실제 검출이 뒤섞여 0개를 스폰하는 경쟁을 막기 위한 것이다. 원본 `/sim/spawn_objects` 서비스는 유지한다.
 - **최신 전용 초기화 채널을 포함한 최종 end-to-end 반복 집기·Ctrl+C 재검증은 아직 완료하지 않았다.** 앞선 버전의 성공을 최신본 전체의 완료로 바꾸지 않는다. interactive 실행기의 `ok`는 실행 중에는 준비 상태이며, 별도 검사기의 집기 결과와 종료 후 `shutdown_ok`를 함께 확인해야 한다.
 - 이번 커밋은 구현 및 현재 검증 범위를 저장하는 것이며, 종료·반복 안정성이 모든 조건에서 완전히 해결됐다는 선언이 아니다. `logs/`는 로컬 근거 자료로 Git에 포함되지 않는다.
+
+### 2026-11-24 후속 로컬 검증: 센서 경고·전용 GUI 종료
+
+- 팀원 2 native MoveIt 실행기에 `team2_known_geometry_only` 모드를 추가했다. MoveIt 2.12.4의 world geometry 초기화에서 Octomap만 생략하며 상태·부착 물체·등록 충돌 물체 감시는 유지한다. 깊이 센서로 미등록 장애물을 찾는 기능은 제공하지 않는다. 배포판 라이브러리와 다른 팀원 코드는 수정하지 않았다.
+- `team2_gz_gui`는 Gazebo C++ GUI API를 직접 사용한다. 중간 seed 7 시험에서 `gz sim -g` 로더가 discovery/getenv 지점에서 시작 중 -11로 끝나 전용 실행기로 교체했다. 이 원인을 모든 Gazebo 오류의 원인으로 일반화하지 않는다.
+- `team2_rviz`와 전용 launch는 화면·MoveIt 플러그인을 먼저 정리한 뒤 ROS를 종료한다. 원본 RViz 실행 파일과 공용 MoveIt launch는 그대로 둔다. 별도 `rviz.log`도 최종 오류 판정에 포함한다.
+- 관리자 SIGTERM도 정리 경로를 타며, 종료 정리 중 추가 SIGINT/SIGTERM으로 정리가 끊기지 않게 했다. 강제 정리가 필요한 경우 실패 기록은 유지한다. 새 구독자 발견 지연으로 캡처가 실패한 사례는 대기 시간을 보완하고 누락 데이터 종류를 오류에 표시한다.
+- 최종 `seed_8_fixed_lifecycle`: GUI·Gazebo·RViz, seed 8, 위치 ±4 mm, 9개 모두 성공·모델 ID 유지·최종 대기 자세 복귀. 센서 미설정 경고/충돌 재계획/비정상 종료/강제 종료/남은 프로세스 모두 0. **196.07초로 150초 목표는 미달**이다.
+- 이후 `restart_signal_check`: 재실행 후 GUI·RViz 준비 확인 → SIGTERM → 추가 Ctrl+C 두 번. 정상 종료, 강제 종료와 남은 프로세스 0.
+- 전체 Python 회귀 테스트 **222개 통과**, native 두 패키지 빌드 통과. 다른 세션을 종료하지 않는 검사와 별도 RViz 오류 수집 검사를 포함한다.
+- 근거: `logs/team2_remaining_issues_recheck/final_review.json`과 각 실행 폴더. 중간 실패는 보존했다. seed 6/7은 부품 종류·각도·조명 변경이며 위치 격자는 같고, 실제 위치 변경 검증은 seed 8의 ±4 mm 시험이다. 모든 배치·부하에서 무충돌/정상 종료/150초 이내를 보장한 결과는 아니다. 종료 후 별도로 시도한 상태 유효성 조회는 서버 부재로 수행되지 않아 충돌 거부의 별도 음성 시험 결과로 사용하지 않는다.
+- 이 항목은 후속 구현과 로컬 검증 결과의 기록이다. `logs/`의 실행 근거 자료는 Git에 포함하지 않는다.

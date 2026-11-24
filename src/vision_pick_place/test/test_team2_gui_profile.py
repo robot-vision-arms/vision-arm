@@ -1,11 +1,13 @@
 import importlib.util
 from pathlib import Path
 import pytest
-pytest.importorskip("PySide6")
-from PySide6.QtWidgets import QApplication
 
 
 def test_ten_object_profile_does_not_show_old_three_object_limit():
+    # colcon의 수집 단계에서는 모듈을 안전하게 읽고, 실행 시 GUI 테스트만 건너뛴다.
+    pytest.importorskip("PySide6")
+    from PySide6.QtWidgets import QApplication
+
     path=Path(__file__).resolve().parents[3]/'scripts/team2_demo_gui.py'
     spec=importlib.util.spec_from_file_location('team2_demo_gui_test',path)
     module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)

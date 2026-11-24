@@ -130,7 +130,7 @@ def main():
             if args.dataset_dir:
                 if not args.profile:raise ValueError('--dataset-dir requires --profile')
                 capture=subprocess.Popen([sys.executable,'scripts/capture_team2_scene.py','--profile',args.profile,'--out',str(Path(args.dataset_dir)/f'cycle_{index+1:02d}')])
-                wait(lambda:capture.poll() is not None,30)
+                wait(lambda:capture.poll() is not None,90)
                 if capture.returncode:raise RuntimeError('Dataset capture failed')
             before=len(rows);started=time.monotonic();response=call(cycle,args.cycle_timeout)
             spin(2)

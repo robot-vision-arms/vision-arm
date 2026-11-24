@@ -9,7 +9,9 @@ def review(directory):
     root=Path(directory)
     sim=(root/'sim.log').read_text(errors='replace') if (root/'sim.log').exists() else ''
     link=(root/'link.log').read_text(errors='replace') if (root/'link.log').exists() else ''
-    process_logs=sim+'\n'+link
+    rviz=(root/'rviz.log').read_text(errors='replace') if (root/'rviz.log').exists() else ''
+    # 전용 프로세스로 분리한 RViz도 판정에 포함해 종료 오류가 누락되지 않게 한다.
+    process_logs=sim+'\n'+link+'\n'+rviz
     # 계획 거부는 충돌 검사가 막은 사건이다. 최종 사이클 실패와 같은 뜻으로 합치지 않는다.
     counts={
         'self_collision_contacts':sum('constitutes a collision' in line and
@@ -27,7 +29,7 @@ def review(directory):
             any(role in line for role in ['[gazebo-','[gzserver-','[team2_gz_server-']) for line in sim.splitlines()),
     }
     traces={}
-    for name in ['sim','link','vision','gui']:
+    for name in ['sim','link','vision','gui','rviz']:
         p=root/(name+'.log')
         text=p.read_text(errors='replace') if p.exists() else ''
         traces[name]={'tracebacks':text.count('Traceback (most recent call last)'),

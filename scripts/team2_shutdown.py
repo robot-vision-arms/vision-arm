@@ -42,10 +42,22 @@ def shutdown_children(children, session_path):
         report['steps'].append({'label':getattr(child,'team2_label','child'),'returncode':child.poll()})
     sim=next((c for c in children if getattr(c,'team2_label','')=='sim'),None)
     # 새 명령을 보내는 쪽부터 끝내고, 서비스 제공자는 나중에 정리한다.
-    for label in ['gui','vision']:
+    for label in ['gui','vision','rviz']:
         for child in children:
             if getattr(child,'team2_label','')==label:stop_child(child)
     if sim is not None:
+        # 화면 구독자는 서버보다 먼저 닫고, Gazebo GUI를 서버 종료 판정에서 분리한다.
+        for pid,args in group_processes(sim.pid):
+            is_rviz=any(Path(arg).name=='rviz2' for arg in args)
+            # gz가 프로세스 제목을 하나의 argv 문자열로 바꾸는 경우도 처리한다.
+            command=' '.join(args)
+            is_gz_gui=(any(Path(arg).name=='team2_gz_gui' for arg in args) or
+                       ('-g' in command.split() and 'gz sim' in command))
+            if not (is_rviz or is_gz_gui):continue
+            try:os.kill(pid,signal.SIGINT)
+            except ProcessLookupError:continue
+            exited=wait_until(lambda:pid not in [p for p,_ in group_processes(sim.pid)],15)
+            report['steps'].append({'role':'rviz2' if is_rviz else 'gazebo_gui','pid':pid,'exited':exited})
         # 통계 스레드가 끝날 때까지 /clock 브리지를 유지하고 서버 다음에 브리지를 끈다.
         for role in ['team2_pick_place_node','team2_move_group','move_group','team2_gz_server','gzserver','parameter_bridge']:
             for pid,args in group_processes(sim.pid):
@@ -79,7 +91,7 @@ def shutdown_children(children, session_path):
         for child in children:
             if getattr(child,'team2_label','')=='link':stop_child(child)
     for child in reversed(children):
-        if child is not sim and getattr(child,'team2_label','') not in ['gui','vision','link']:stop_child(child)
+        if child is not sim and getattr(child,'team2_label','') not in ['gui','vision','rviz','link']:stop_child(child)
     # 이 실행기가 만든 그룹에 살아 있는 프로세스가 있을 때만 강제 단계로 간다.
     # 강제 정리는 성공으로 숨기지 않고 결과에 남긴다.
     for child in children:
@@ -90,6 +102,8 @@ def shutdown_children(children, session_path):
             if not wait_until(lambda:not group_processes(child.pid),5):
                 try:os.killpg(child.pid,signal.SIGKILL)
                 except ProcessLookupError:pass
+                # SIGKILL 전달 직후가 아니라 실제 소멸까지 확인해 결과에 남긴다.
+                wait_until(lambda:not group_processes(child.pid),5)
         try:child.wait(timeout=2)
         except subprocess.TimeoutExpired:pass
     report['remaining_processes']=[p for c in children for p in group_processes(c.pid)]

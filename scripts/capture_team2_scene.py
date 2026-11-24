@@ -24,9 +24,11 @@ def main():
     subs=[node.create_subscription(String,'/team2/scene_truth',lambda m:truth.append(json.loads(m.data)),QoSProfile(depth=1,durability=DurabilityPolicy.TRANSIENT_LOCAL)),
           node.create_subscription(Image,'/sim/camera/image',lambda m:frames.append(m) if len(frames)<4 else None,qos_profile_sensor_data)]
     try:
-        end=time.monotonic()+15
+        # 새 구독자의 DDS 발견과 화면 렌더링 부하를 기다리되, 데이터 없이 성공 처리하지 않는다.
+        end=time.monotonic()+40
         while (not truth or len(frames)<4) and time.monotonic()<end:rclpy.spin_once(node,timeout_sec=.1)
-        if not truth or len(frames)<4:raise RuntimeError('Scene truth or camera image unavailable')
+        if not truth or len(frames)<4:
+            raise RuntimeError(f'Scene truth or camera image unavailable: truth={bool(truth)}, frames={len(frames)}/4')
         image=CvBridge().imgmsg_to_cv2(frames[-1],'bgr8');overlay=image.copy()
         with np.load(Path(profile['calibration_dir'])/'intrinsics.npz') as data:K=data['camera_matrix']
         world=ET.parse(profile['world_file']).getroot();camera=list(map(float,world.findtext(".//model[@name='top_camera']/pose").split()))

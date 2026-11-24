@@ -51,6 +51,8 @@ def test_manual_target_stays_exact_while_cycle_can_use_inside_bin_goal(monkeypat
                         calls.append((x,y,z)) or 1)
     node=object.__new__(Team2PickPlaceNode)
     node._cycle_routing=False
+    # ROS를 초기화하지 않는 테스트에서도 새 구간별 로그를 받을 수 있게 한다.
+    node.get_logger=lambda:SimpleNamespace(info=lambda text:None)
     assert node.move_tip(0.,.85,.15)==1
     assert calls==[(0.,.85,.15)]
     node._cycle_routing=True
@@ -60,3 +62,25 @@ def test_manual_target_stays_exact_while_cycle_can_use_inside_bin_goal(monkeypat
     calls.clear();node.move_tip(0.,.85,.15)
     assert calls[0]==(.2,.55,.25)
     assert calls[-1][1]==pytest.approx(.815)
+
+
+def test_ik_compares_valid_solutions_instead_of_taking_first():
+    from types import SimpleNamespace
+    from builtin_interfaces.msg import Time
+    from ur5e_pick_place.team2_pick_place_node import Team2PickPlaceNode
+    from ur5e_pick_place.pick_place_node import UR_JOINTS
+    node=object.__new__(Team2PickPlaceNode)
+    node.current_joints=lambda:[0.]*6
+    node.ready_joints=[1.]*6
+    node.ik_client=None
+    node.get_clock=lambda:SimpleNamespace(now=lambda:SimpleNamespace(to_msg=Time))
+    requests=[]
+    def call(client, request):
+        requests.append(request)
+        angles=[.8]*6 if len(requests)==1 else [.2]*6
+        return SimpleNamespace(error_code=SimpleNamespace(val=1),solution=SimpleNamespace(
+            joint_state=SimpleNamespace(name=UR_JOINTS,position=angles)))
+    node.call=call
+    assert node.nearby_ik([.4,0.,.3],[0.,1.,0.,0.])==pytest.approx([.2]*6)
+    assert len(requests)==2
+    assert all(r.ik_request.avoid_collisions for r in requests)

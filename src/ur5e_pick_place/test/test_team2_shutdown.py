@@ -4,6 +4,16 @@ from pathlib import Path
 import subprocess
 
 
+def test_runtime_review_includes_separate_rviz_process(tmp_path):
+    path=Path(__file__).resolve().parents[3]/'scripts/review_team2_runtime.py'
+    spec=importlib.util.spec_from_file_location('team2_runtime_review_test',path)
+    module=importlib.util.module_from_spec(spec);spec.loader.exec_module(module)
+    (tmp_path/'rviz.log').write_text('[ERROR] [team2_rviz-1]: process has died [exit code -11]\n')
+    result=module.review(tmp_path)
+    assert result['counts']['abnormal_process_exits']==1
+    assert result['counts']['native_shutdown_crashes']==1
+
+
 def test_shutdown_leaves_other_session_running(tmp_path):
     path=Path(__file__).resolve().parents[3]/'scripts/team2_shutdown.py'
     spec=importlib.util.spec_from_file_location('team2_shutdown_test',path)

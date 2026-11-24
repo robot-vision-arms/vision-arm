@@ -226,6 +226,7 @@ class Team2PickPlaceNode(PickPlaceNode):
         if self.ready_joints is not None:
             # 초기 관절값에 따라 IK가 실패할 수 있어 대기 자세도 별도 초기값으로 시도한다.
             seeds.append(self.ready_joints)
+        candidates = []
         for seed in seeds:
             request = GetPositionIK.Request()
             ik = request.ik_request
@@ -250,8 +251,28 @@ class Team2PickPlaceNode(PickPlaceNode):
                 near = value + 2*math.pi*round((start-value)/(2*math.pi))
                 limit = math.pi if name == 'elbow_joint' else 2*math.pi
                 joints.append(near if abs(near) <= limit else value)
-            return joints
-        return None
+            candidates.append(joints)
+        if not candidates:
+            return None
+        # 첫 번째로 풀린 해가 가장 가까운 해라는 보장은 없다. 같은 목표의 후보 중
+        # 가장 크게 움직이는 관절의 회전량을 먼저 줄여 긴 우회·손목 회전을 억제한다.
+        return min(candidates, key=lambda joints: (
+            max(abs(a-b) for a,b in zip(joints,current)),
+            sum((a-b)**2 for a,b in zip(joints,current))))
+
+    def _timed_motion(self, label, operation, *args):
+        # 시스템 시계 보정에 영향받지 않는 실제 경과 시간으로 계획·실행을 함께 측정한다.
+        # 예외가 발생해도 시간을 남기고, 원래 반환값과 예외는 호출자에게 그대로 전달한다.
+        started = time.monotonic()
+        status = '중단 또는 오류'
+        self.get_logger().info(f'[구간 시작] {label}')
+        try:
+            result = operation(*args)
+            status = '호출 완료'
+            return result
+        finally:
+            self.get_logger().info(
+                f'[구간 시간] {label}: {time.monotonic() - started:.3f}초 ({status})')
 
     def move_tip(self, x, y, tip_z, yaw_deg=0.0, straight=False):
         # 자동 사이클에만 경유점·놓기 보정을 적용해 수동 지정 좌표의 의미를 유지한다.
@@ -261,8 +282,8 @@ class Team2PickPlaceNode(PickPlaceNode):
                 and any(abs(y-by) < 1e-6 for by in self.get_parameter('bin_y').value)):
             inward_y = math.copysign(min(abs(y)*0.65, 0.55), y)
             self.get_logger().info(f'상자 안쪽 경유점: (0.20, {inward_y:.3f}) m')
-            super().move_tip(0.20, inward_y,
-                             self.value('work_plane_z') + self.value('travel_height_m'), yaw_deg)
+            self._timed_motion('상자 안쪽 경유점', super().move_tip, 0.20, inward_y,
+                               self.value('work_plane_z') + self.value('travel_height_m'), yaw_deg)
             # 상자 자체는 ±0.85 m에 유지한다. 중심보다 35 mm 안쪽에 놓으면
             # 최대 도달 거리 근처의 IK 제약을 줄이며, 안착 판정은 원래 상자 중심으로 한다.
             inset = self.value('bin_inward_drop_m')
@@ -270,7 +291,9 @@ class Team2PickPlaceNode(PickPlaceNode):
                 raise ValueError('bin_inward_drop_m은 0..0.04 m여야 합니다.')
             y -= math.copysign(inset, y)
             self.get_logger().info(f'상자 내부 놓기 목표: ({x:.3f}, {y:.3f}) m')
-        return super().move_tip(x, y, tip_z, yaw_deg, straight)
+        return self._timed_motion(
+            f'목표 이동 x={x:.3f}, y={y:.3f}, z={tip_z:.3f}, straight={straight}',
+            super().move_tip, x, y, tip_z, yaw_deg, straight)
 
     def go_ready(self):
         # 상자 끝에서 대기 관절값으로 바로 회전하면 빈 패드와 팔이 겹치는
@@ -284,13 +307,14 @@ class Team2PickPlaceNode(PickPlaceNode):
             if abs(y) > 0.65:
                 height = self.value('work_plane_z') + self.value('travel_height_m')
                 self.get_logger().info('상자→안쪽 높은 경유점→정면→대기 자세 복귀')
-                super().move_tip(0.20, math.copysign(0.55, y), height)
-                super().move_tip(0.40, 0.0, height)
-                # 중간 부품은 안전한 정면 경유점에서 다음 대상으로 이어간다.
-                # 마지막 부품은 기존 대기 관절값까지 복귀해 최종 판정을 받는다.
+                self._timed_motion('상자에서 안쪽으로 복귀', super().move_tip,
+                                   0.20, math.copysign(0.55, y), height)
+                self._timed_motion('정면으로 복귀', super().move_tip, 0.40, 0.0, height)
+                # 정면 경유점 생략은 실제 시험에서 더 오래 걸려 유지하지 않는다.
+                # 중간 부품만 대기 관절 이동을 생략하고, 마지막은 최종 자세까지 복귀한다.
                 if self._compact_return_active:
                     return
-        return super().go_ready()
+        return self._timed_motion('최종 대기 자세 복귀', super().go_ready)
 
     def on_markers(self, msg):
         # 카메라 분류 결과와 별개로 기존 모델의 형상·크기를 읽어 종류 대조에 사용한다.
