@@ -242,3 +242,24 @@ HEAD `0b48711` + 위 스폰 수정. `colcon build` 후 headless 시뮬레이션(
 | 단위 테스트 (venv `pytest`) | `ur5e_pick_place` **74개**, `vision_pick_place` **146개** 통과 = **220개** (성민 님 기록과 같음) |
 | `colcon test` 주의 | `vision_pick_place` 가 0개 수집·1 skip 으로 끝남. 성민 님 새 `test_team2_gui_profile.py` 가 시스템 Python 에 없는 `PySide6` 를 모듈 단위로 건너뛰면서 패키지 전체 수집이 멈춘다. venv 의 `python -m pytest` 로는 정상. 성민 님 파일이라 수정하지 않음 |
 | 3주차 스폰·흡착·TF (`check_spawn_week3.py`) | **통과**. TF = 패킷 위치·각도, 미보정 패킷 거부, 팔 통과 시 부품 이동 0.0 mm, 141.7 mm 거리 진공 거부, 너트 큰 컵 거부, 링 컵 너트(오차 0.8 mm)·5 mm 컵 나사 30°(0.9 mm)·135°(0.7 mm) 옮김, 같은 이름 재스폰, 삭제 시 마커 제거. Gazebo 로그 "not found, so not removed" **0줄** |
+
+### 2026-11-24 시연 리허설 (성민 님 `run_team2_demo.py`, 자동 2사이클)
+
+코드 기준 `dafc853` (성민 님 `0d8c130` 포함). 리허설 도중 받은 동경 님 `526560f`(GUI 실물 모드·슬롯 길들이기)는 이미 실행 중인 프로세스에 반영되지 않았으므로 이번 결과에 포함되지 않는다. Gazebo 가상 카메라 시연이라 초록 시트는 쓰지 않았다.
+
+```bash
+python scripts/run_team2_demo.py --gui --realistic --randomize --seed 5 --objects 9 --speed .6 --acceleration .7 \
+  --position-jitter-mm 4 --compact-return --cycles 2 --transport-trials 1 --out logs/rehearsal_20261124
+```
+
+| 항목 | 결과 |
+|---|---|
+| 집기 | 사이클 1 **9/9** (147.99초), 사이클 2 **9/9** (135.31초) = **18/18** 상자 투입. 모델 ID 유지, 매 사이클 대기 자세 복귀. 실제 카메라 검출 좌표 사용 (합성 패킷 아님) |
+| 150초 목표 | 두 사이클 모두 이내 (여유: 1회차 2초, 2회차 15초) |
+| 통신 | 100/100 ACK·목표 일치, P95 **22.29 ms** (300 ms 목표 통과), TCP 왕복 P95 0.96 ms |
+| 가상 카메라 보정 | 마커 4/4, 재투영 RMS 0.15 mm |
+| 종료 (`shutdown_ok`) | **true**. GUI → 비전 → 이동 노드 → MoveIt → Gazebo 순서로 모두 정상 종료, 강제 종료 0, 남은 프로세스 0. native 종료 오류(-11)·Destroyable 메시지 **0건** — 11-23 가영 점검 때 보였던 종료 오류가 성민 님 새 종료 관리자로 이 실행에서는 재현되지 않음 |
+| 로그 검사 (`runtime_log_review`) | 자기 충돌 접촉 3건, 거부된 계획 2건 기록 (모두 회복, 집기 실패 0). Octomap 미설정 1건(알려진 메시지). Python 예외 0 |
+| 범위 | 자동 실행기의 종료이며 사람이 직접 누른 Ctrl+C·GUI 버튼 시험은 아니다. seed 5 한 장면. 실물 로봇 아님 |
+
+결과 파일: `logs/rehearsal_20261124/summary.json` (logs 는 Git 제외).
