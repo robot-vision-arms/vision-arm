@@ -3,7 +3,7 @@
 모델 파일은 scripts/export_yolo_onnx.py 로 만든다 (.onnx + 같은 이름 .json). 신경망 부분만 ONNX 이고 상자 계산은 여기서 한다:
 OpenCV 4.6 이 Ultralytics 가 내보낸 ONNX 의 마지막 상자 계산 부분을 읽지 못한다 (forward 에서 assertion 오류).
 
-너트 상자의 각도는 믿을 수 없다 (45° 부근으로 몰림, WEEK4 동경 11-24). 패킷은 원래 너트 각도를 null 로 보낸다.
+너트 상자의 각도는 믿을 수 없다 (45° 부근으로 몰림, WEEK3 동경 11-24). 패킷은 원래 너트 각도를 null 로 보낸다.
 """
 from __future__ import annotations
 

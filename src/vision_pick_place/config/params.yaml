@@ -21,12 +21,12 @@ vision_node:
     sheet_edge_margin_mm: 3.0    # 시트 가장자리에서 안쪽으로 뺄 여백. 초기값, 실제 촬영으로 조정
     sheet_marker_margin_mm: 5.0  # 마커 정사각형 바깥으로 더 뺄 여백. 초기값, 실제 촬영으로 조정
     # 시차 보정 (calibrator.px_to_mm): 실물은 아직 끔. 11-20 화면 안내선 정답 30장에서는 켜면 1.86 → 2.43 mm 로 나빠졌는데,
-    # 그 정답이 '화면에 보이는 위치' 에 맞춰 놓은 것이라 정답에도 같은 시차가 들어 있어 판단할 수 없다 (WEEK3 동경 11-20).
+    # 그 정답이 '화면에 보이는 위치' 에 맞춰 놓은 것이라 정답에도 같은 시차가 들어 있어 판단할 수 없다 (WEEK2 동경 11-20).
     # 다음 주 인쇄 시트 정답으로 켠 값·끈 값을 비교한 뒤 정한다. 켤 때 값: ["screw", "nut"] / [4.0, 3.25]
     parallax_part_types: [""]
     parallax_heights_mm: [0.0]
     # 나사·너트가 아닌 물체를 unknown 으로 (로봇이 집지 않음, part_check.py). 기준값은 우리 부품 사진으로 scripts/tune_part_limits.py 가 정한다.
-    # 범위는 [최소, 최대] mm, [0, 0] 이면 안 봄. 구멍비는 0 이면 안 봄: 흰 시트(gray)에서는 너트 구멍이 그림자로 막혀 쓸 수 없다 (WEEK4 동경 11-24)
+    # 범위는 [최소, 최대] mm, [0, 0] 이면 안 봄. 구멍비는 0 이면 안 봄: 흰 시트(gray)에서는 너트 구멍이 그림자로 막혀 쓸 수 없다 (WEEK3 동경 11-24)
     reject_unknown: false
     screw_length_mm: [0.0, 0.0]
     screw_width_mm: [0.0, 0.0]
@@ -36,7 +36,7 @@ vision_node:
     # 부품 찾는 방법. rule: 위의 전처리·윤곽·길이 비 (기본) / yolo: 재학습 모델 (켤 때는 params_yolo.yaml 을 겹쳐 쓴다)
     detector: "rule"
     yolo_model_path: "data/models/yolo_green.onnx"   # scripts/export_yolo_onnx.py 출력 (git 제외, 같은 이름 .json 도 필요)
-    yolo_conf: 0.3               # 이 신뢰도 이상만. val 사진에서 정한 값 (WEEK4 동경 11-24)
+    yolo_conf: 0.3               # 이 신뢰도 이상만. val 사진에서 정한 값 (WEEK3 동경 11-24)
 
 robot_bridge:
   ros__parameters:

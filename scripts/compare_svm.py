@@ -1,4 +1,4 @@
-"""규칙+SVM 을 우리 초록 시트 사진에서 규칙·YOLO 와 같은 채점으로 비교 (4주차, 팀원 1). 결과는 docs/WEEK4.md.
+"""규칙+SVM 을 우리 초록 시트 사진에서 규칙·YOLO 와 같은 채점으로 비교 (4주차, 팀원 1). 결과는 docs/WEEK3.md.
 
     .venv-ml/bin/python scripts/compare_svm.py --data data/models/green_yolo_obb                # val
     .venv-ml/bin/python scripts/compare_svm.py --data data/models/green_yolo_obb --split test   # 설정을 정한 뒤 한 번

@@ -11,7 +11,7 @@
 - 이전에 누락된 `ur_robot_driver`는 Jazzy 3.9.0 설치 확인 완료. sudo 인증 성공, rosdep check와 pip check 통과. 실행 의존성을 package.xml에 추가함.
 - UR 기본 예제 재실행에서 MoveIt 초기화(`You can start planning now!`) 및 joint_state_broadcaster / scaled_joint_trajectory_controller 활성화 확인. URDF·SRDF 로봇 이름 불일치와 선택적 인식/Octomap 기능 오류가 남아 있으며, 이후 기본 예제 Plan·Execute 및 Gazebo 팔 이동은 사용자 확인 완료(2026-11-13, 8절). 프로젝트 작업 셀은 미검증.
 - `/dev/video*` 없음. 현재 도구 환경은 Windows PowerShell 실행이 `Exec format error`로 실패하므로 usbipd 설치 폴더는 현재 존재함. 버전·서비스·USB 장치 확인은 Windows에서 실행해야 함.
-- 다음 절차: `WEEK1.md`의 현재 PC 남은 작업 참고. WSL 재시작은 현재 세션을 종료하므로 사용자가 Windows에서 수행.
+- 다음 절차: `SETUP.md` 부록 참고. WSL 재시작은 현재 세션을 종료하므로 사용자가 Windows에서 수행.
 
 ### 2주차 실행 점검 (2026-11-13)
 
@@ -19,7 +19,7 @@
 - `colcon build` 2개 패키지 성공, `colcon test` 35개 통과(실패·오류·skip 0개).
 - 프로젝트 작업 셀을 headless로 띄워 지정 좌표 이동, 늦게 스폰한 부품의 자동 연결·분리·재연결·상승 추종·낙하를 확인했다.
 - URDF/SRDF 이름과 패드 고정 장착부 충돌 설정을 보완했다. GUI·실제 폰 보정·KPI·부품 재생성 후 재흡착은 미검증.
-- 나머지 한계와 실행·평가 수치는 [WEEK2.md](WEEK2.md)에 기록했다. 위 11-10 기록은 당시 상태로 남긴다.
+- 나머지 한계와 실행·평가 수치는 [WEEK1.md](WEEK1.md)에 기록했다. 위 11-10 기록은 당시 상태로 남긴다.
 
 ## 1. 받은 분담안 요약
 
@@ -120,7 +120,7 @@ DetachableJoint 가 안 되면 시험해 볼 대안 (둘 다 아직 안 써 봄)
 ### 담당 파일과 기록 위치
 
 - 실제 구현·설정: `src/ur5e_pick_place/launch/sim.launch.py`, `worlds/workcell.sdf`, `urdf/ur5e_vacuum.urdf.xacro`, `config/sim.yaml`.
-- 목표·역할 분담: `docs/PROJECT.md` 2.3절. 환경·실행 절차: `docs/SETUP.md`, `docs/WEEK1.md`.
+- 목표·역할 분담: `docs/PROJECT.md` 2.3절. 환경·실행 절차: `docs/SETUP.md`.
 - 오류·조치·검증 결과: 이 문서. `build/`, `install/`, `log/`는 생성 결과이므로 원본 수정 위치가 아님.
 
 ### 확인한 결과
@@ -202,7 +202,7 @@ ros2 launch ur5e_pick_place sim.launch.py
 - 9절의 "왜곡 보정은 과제 필수" 는 지켰다: 보정을 **실제로 수행하고 모델을 비교한 결과** 0 을 골랐다. 5계수 결과는 `data/calib/archive/intrinsics_full_model.npz` 로 남겨 비교·발표에 쓴다.
 - 구석까지 덮도록 보드 사진을 더 찍으면 5계수 모델이 나아질 수 있다. 다른 폰·카메라로 바꾸면 이 비교를 다시 한다.
 
-**최종 결과** (가로 1280×720, 거치대 고정, [WEEK1.md](WEEK1.md) 팀원 1 기록):
+**최종 결과** (가로 1280×720, 거치대 고정, [WEEK2.md](WEEK2.md) 동경 11-17):
 
 | 파일 | 값 |
 |---|---|
@@ -221,7 +221,7 @@ PROJECT.md 9장에 "3주 이후 선택" 으로 있던 방식 비교(규칙 → k
 **왜 하나.**
 
 - 지금 검출은 학습 모델 없이 OpenCV 규칙만 쓴다 (`vision_detector.py`: Blur → 이진화 → 윤곽선 → `minAreaRect` → 장축/단축 비 ≤ 1.5 면 너트).
-- MVTec test 60장 기준 gray·임계값 100 은 정밀도 42.8%·재현율 63.4% (F1 51.1%), MVTec 전용 `metal_hsv` 는 77.6%·83.4% (F1 80.4%). 붙어 있는 부품이 하나로 합쳐지고 나무 무늬·그림자가 오검출된다 (WEEK2.md 6절).
+- MVTec test 60장 기준 gray·임계값 100 은 정밀도 42.8%·재현율 63.4% (F1 51.1%), MVTec 전용 `metal_hsv` 는 77.6%·83.4% (F1 80.4%). 붙어 있는 부품이 하나로 합쳐지고 나무 무늬·그림자가 오검출된다 (WEEK1.md 가영).
 - 현업에서 딥러닝을 무조건 쓰지는 않는다. 조명·배경·카메라가 고정된 공장 라인은 규칙 기반 비전(Cognex, HALCON 등)이 아직 많다: 빠르고, 결과가 항상 같고, 판정 이유를 설명할 수 있고, 학습 데이터가 필요 없다. 조명·배경이 바뀌거나 부품이 겹치거나 종류가 많으면 딥러닝(YOLO 류 검출, 분할)을 쓴다. 실제로는 **딥러닝으로 찾고 위치·각도·치수는 고전 기하로 정밀하게** 계산하는 혼합 구성이 흔하다.
 - 그래서 하나를 정해 놓고 쓰지 않고, **같은 데이터·같은 기준으로 비교한 표**를 근거로 고른다.
 
@@ -299,7 +299,7 @@ PROJECT.md 9장에 "3주 이후 선택" 으로 있던 방식 비교(규칙 → k
 
 ### 자체 사진 재학습 결과 (2026-11-24)
 
-초록 시트 사진 50장(가영 촬영)으로 YOLOv8n-OBB 를 재학습했다. 자세한 표와 한계는 [WEEK4.md](WEEK4.md) 동경 11-24.
+초록 시트 사진 50장(가영 촬영)으로 YOLOv8n-OBB 를 재학습했다. 자세한 표와 한계는 [WEEK3.md](WEEK3.md) 동경 11-24.
 
 | 결정 | 내용 | 이유 |
 |---|---|---|
@@ -322,7 +322,7 @@ PROJECT.md 9장에 "3주 이후 선택" 으로 있던 방식 비교(규칙 → k
 | 크게 틀린 두 장 (gt003, gt013) | 빼지 않고 다시 찍지 않음 | 결과를 보고 고르지 않으려고 |
 | 시차 보정 | 실물은 끔 | 켜면 커진다 (규칙 1.88 → 2.31 mm, YOLO 1.99 → 2.14 mm). 나빠지는 원인은 확인 안 됨 |
 
-값과 조건은 [PORTFOLIO 8.4](PORTFOLIO.md), [WEEK4 가영 11-25](WEEK4.md).
+값과 조건은 [PORTFOLIO 8.4](PORTFOLIO.md), [WEEK3 가영 11-25](WEEK3.md).
 
 ## 12. Gazebo 가상 카메라·초록 작업 매트 (2026-11-20, 팀원 1 동경, 팀 회의 결정)
 

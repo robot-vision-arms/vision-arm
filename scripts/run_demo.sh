@@ -68,7 +68,7 @@ wait_log "충돌 물체" logs/demo_sim.log 90
 echo "스폰·통신 켜는 중..."
 nohup ros2 launch vision_pick_place team2_link.launch.py sim_params:=$PROFILE/sim.yaml asset_prefix:=$PROFILE/assets > logs/demo_link.log 2>&1 &
 wait_log "스폰합니다" logs/demo_link.log 60
-# 부품 슬롯 길들이기: 슬롯을 처음 쓸 때 부품이 패드에 붙었다 떨어진다. 로봇이 시작 자세일 때 한 번 쓰고 지운다 (WEEK4 동경 11-20)
+# 부품 슬롯 길들이기: 슬롯을 처음 쓸 때 부품이 패드에 붙었다 떨어진다. 로봇이 시작 자세일 때 한 번 쓰고 지운다 (WEEK2 동경 11-20)
 timeout 60 ros2 service call /sim/warmup_slots std_srvs/srv/Trigger >/dev/null 2>&1
 sleep 3
 timeout 60 ros2 service call /sim/clear_objects std_srvs/srv/Trigger >/dev/null 2>&1

@@ -181,7 +181,10 @@ robot_vision/                   ← git 저장소 = colcon 워크스페이스
 ├── docs/
 │   ├── PROJECT.md              이 문서
 │   ├── SETUP.md                환경 구축
-│   └── DECISIONS.md            설계 결정 기록 (받은 역할 분담안 비교, 검증 상태)
+│   ├── DECISIONS.md            설계 결정 기록 (받은 역할 분담안 비교, 검증 상태)
+│   ├── PORTFOLIO.md            포트폴리오 요약 (공식 KPI 포함)
+│   ├── WEEK1~3.md              실제 3주 동안 누가 무엇을 했나
+│   └── TEAM2_PROGRESS.md       성민 상세 검증 기록
 ├── scripts/                    ROS 없이 돌리는 오프라인 도구
 │   ├── make_calib_sheets.py    인쇄물 PDF: ChArUco 보드, 작업 시트
 │   ├── calibrate_camera.py     ChArUco 보드 사진 → intrinsics.npz
@@ -295,7 +298,7 @@ data/mvtec_screws/
 | 검출 모델 비교 | 방식 A~D 의 검출 F1·분류 정확도·각도 오차·CPU 추론 시간 (MVTec test → 자체 사진, DECISIONS.md 11절) | 비교표 작성 | 선택 | MVTec 완료 (11-19): 종합 F1 규칙 0.747 / +SVM 0.804 / YOLO 0.989, 자체 사진 미측정 |
 | Pick 성공률 | Gazebo 사이클에서 물체가 맞는 상자에 들어간 비율 (20개 이상) | ≥ 90 % | 선택 | 미측정 |
 
-기준값은 교육용 권장 목표입니다. **실측 전에는 달성으로 표기하지 않습니다.** 계산: `scripts/evaluate_kpi.py` (WEEK4 동경 기록).
+기준값은 교육용 권장 목표입니다. **실측 전에는 달성으로 표기하지 않습니다.** 계산: `scripts/evaluate_kpi.py` (WEEK2 동경 11-20).
 Pick 성공률은 시뮬레이터 안의 결과라 비전 정확도와 별개로 적습니다 (스폰 위치 = 인식 위치라서 비전 오차는 반영되지 않음).
 
 ### 측정 장비 (측정할 때 채움)

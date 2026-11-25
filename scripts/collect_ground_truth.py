@@ -140,7 +140,7 @@ def render_pose_sheet(path: Path, plan: list, px_per_mm: float = 12.0, green: bo
     """작업 시트(마커·10 mm 격자) 위에 자세 목록을 옅은 선으로 그린 A4 가로 PDF/PNG. 100% 배율로 인쇄한다.
 
     선은 회색(170)이라 이진화(Otsu, 오늘 임계값 약 120)에서 배경으로 처리된다. 부품을 선 위에 놓으면 실측값 = 그린 값.
-    green=True: 초록 바탕 (그림자를 부품으로 잡지 않게, WEEK3 동경 11-20). 선·글자는 진한 초록이라 metal_hsv 에서 배경이다.
+    green=True: 초록 바탕 (그림자를 부품으로 잡지 않게, WEEK2 동경 11-20). 선·글자는 진한 초록이라 metal_hsv 에서 배경이다.
     검출 설정은 params.yaml 위에 config/params_green.yaml 을 겹쳐 쓴다 (metal_hsv, 마커 여백 9 mm, 가장자리 여백 8 mm).
     """
     img = render_green_base(px_per_mm) if green else cv2.cvtColor(aruco_calib.render_sheet(px_per_mm), cv2.COLOR_GRAY2BGR)

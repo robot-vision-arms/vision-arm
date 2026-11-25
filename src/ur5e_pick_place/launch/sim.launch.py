@@ -3,7 +3,7 @@
     ros2 launch ur5e_pick_place sim.launch.py                     # Gazebo 창 + RViz
     ros2 launch ur5e_pick_place sim.launch.py gazebo_gui:=false   # WSL2 렌더링이 느리면 RViz 만
 
-2주차 이동 확인은 /sim/move_to_target 서비스를 사용한다 (docs/WEEK2.md).
+2주차 이동 확인은 /sim/move_to_target 서비스를 사용한다 (docs/SETUP.md).
 Gazebo 구동은 설치된 ur_sim_control 런치를 쓰고, MoveIt은 패드가 포함된 로컬 moveit.launch.py를 사용한다.
 전체 파이프라인의 /robot/targets 연동과 집기 사이클은 후속 주차 구현 대상이다.
 """

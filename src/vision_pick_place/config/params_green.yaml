@@ -2,7 +2,7 @@
 # params.yaml 뒤에 겹쳐 준다:
 #   ros2 run vision_pick_place vision_node --ros-args --params-file src/vision_pick_place/config/params.yaml \
 #       --params-file src/vision_pick_place/config/params_green.yaml
-# 흰 시트에서는 은색 나사 옆 그림자를 같이 검출해 위치가 한쪽으로 치우쳤다 (WEEK3 동경 11-20, x −1.26 mm).
+# 흰 시트에서는 은색 나사 옆 그림자를 같이 검출해 위치가 한쪽으로 치우쳤다 (WEEK2 동경 11-20, x −1.26 mm).
 # 초록 바탕은 그림자가 져도 채도가 남아, 채도 낮은 금속만 고르는 metal_hsv 로 그림자가 빠진다 (Gazebo 바닥색 비교).
 vision_node:
   ros__parameters:

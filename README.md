@@ -15,20 +15,18 @@ Gazebo 속 UR5e 가 그 결과로 부품을 집어 종류별로 분류합니다.
 보유 MVTec 이미지는 검출 로직 개발·검증용이고, 사진 폴더·동영상 파일 입력(`image_dir`)은 폰 영상을 못 받을 때의 대체 입력입니다.
 실제 폰 보정은 2026-11-17 에 끝났습니다 (가로 1280×720, 작업 시트 오차 0.26 mm).
 
-검출·분류는 지금 학습 모델 없이 OpenCV 규칙(이진화 → 윤곽선 → `minAreaRect` → 길이 비)으로 합니다.
-3·4주차에 **규칙 / 형상 특징 + k-NN·SVM·RF / CNN 분류 / YOLOv8-OBB** 를 같은 데이터·같은 기준(정확도, 각도 오차, CPU 추론 시간)으로 비교해
-쓸 방식을 고릅니다. GPU 가 없어 CPU 로 학습·추론합니다 ([DECISIONS.md 11절](docs/DECISIONS.md), 팀원 1 담당).
+검출·분류는 기본이 OpenCV 규칙(이진화 → 윤곽선 → `minAreaRect` → 길이 비)이고, 우리 사진으로 재학습한 **YOLOv8n-OBB** 를 골라 켤 수 있습니다.
+규칙 / 형상 특징 + k-NN·SVM·RF / CNN / YOLO 를 같은 기준으로 비교했습니다. GPU 없이 CPU 로 학습·추론합니다 ([DECISIONS.md 11절](docs/DECISIONS.md)).
 
 ## 문서
 
 - [docs/PORTFOLIO.md](docs/PORTFOLIO.md): 포트폴리오 요약 (문제 정의 → 요구사항 → 시나리오 → 기술 선정 근거 → 설계 → Gazebo → 구현 → 시험·성능 → 개선 과정 → 한계·확장)
 - [docs/PROJECT.md](docs/PROJECT.md): 프로젝트 정의, 좌표·각도 정의, 시스템 구성, 역할 분담(주차별 순환), KPI, 3주 로드맵, 최종 목표
-- [docs/WEEK1.md](docs/WEEK1.md): 1주차 현황 요약·팀원별 기록 (설치 순서 체크리스트는 SETUP.md 부록)
-- [docs/WEEK2.md](docs/WEEK2.md): 2주차 현황 요약·실행 방법·팀원별 기록 (검출·MoveIt 이동·ROS2 발행, MVTec 평가)
-- [docs/WEEK3.md](docs/WEEK3.md): 3주차 현황 요약·실행 방법·팀원별 기록 (GUI·TCP 통신·스폰·흡착, 검출·분류 모델 비교)
-- [docs/SETUP.md](docs/SETUP.md): 개발 환경 구축 (ROS2 Jazzy, venv, rosdep 으로 Gazebo·MoveIt, 시뮬레이터 구동 확인, 스마트폰 카메라, (선택) 모델 비교용 `.venv-ml`), 부록: 1주차 설치 체크리스트
+- [docs/WEEK1.md](docs/WEEK1.md) · [WEEK2](docs/WEEK2.md) · [WEEK3](docs/WEEK3.md): 실제 3주(11-09~13, 11-16~20, 11-23~25) 동안 누가 무엇을 했는지, 결과, 문제와 해결
+- [docs/TEAM2_PROGRESS.md](docs/TEAM2_PROGRESS.md): 성민의 시뮬레이션·통신 상세 검증 기록 (원본)
+- [docs/SETUP.md](docs/SETUP.md): 개발 환경 구축 (ROS2 Jazzy, venv, rosdep 으로 Gazebo·MoveIt, 시뮬레이터 구동 확인, 스마트폰 카메라, (선택) 모델 비교용 `.venv-ml`), **Step 9 실행·보정·측정 명령 모음**, 부록: 1주차 설치 체크리스트
 - [notebooks/model_comparison.ipynb](notebooks/model_comparison.ipynb): 검출·분류 모델 비교 (규칙 / k-NN·SVM·RF / CNN / YOLOv8-OBB) 학습 과정·비교 그래프·해석. 실행 환경은 SETUP.md Step 8
-- [docs/DECISIONS.md](docs/DECISIONS.md): 받은 역할 분담안과 비교해 바꾼 점, 이유, 검증 상태, 아직 확인 못 한 것, 캘리브레이션 결과(10절), 검출·분류 모델 비교 계획(11절)
+- [docs/DECISIONS.md](docs/DECISIONS.md): 받은 역할 분담안과 비교해 바꾼 점, 이유, 검증 상태, 아직 확인 못 한 것, 캘리브레이션 결과(10절), 검출·분류 모델 비교·공식 KPI 결정(11절), 가상 카메라(12절)
 
 ## 구조
 
@@ -67,15 +65,15 @@ ros2 service call /sim/run_cycle std_srvs/srv/Trigger       # 터미널 4
 전처리 단계별 변화를 직접 보려면 `source env.sh` 후 `python scripts/preview_steps.py`를 실행합니다.
 중간 영상·코드 비교, 파라미터 조절, 연산 끄기, 확대·축소와 단계 이미지 저장을 지원합니다.
 
-팀원별 진행은 각 주차 문서 맨 위 "현황 요약" 표에 있습니다 ([WEEK1](docs/WEEK1.md) · [WEEK2](docs/WEEK2.md) · [WEEK3](docs/WEEK3.md)).
+팀원별 진행은 [WEEK1](docs/WEEK1.md) · [WEEK2](docs/WEEK2.md) · [WEEK3](docs/WEEK3.md) 에 있습니다.
 
-2026-11-20 기준: 1주차 완료(보정·영상 입력·작업 셀), 2주차는 실제 나사·너트 확인만 남음, 3주차 TCP·스폰·흡착 완료, `/sim/run_cycle` 자동 집기 사이클, Gazebo 가상 카메라(보정·시차 보정 포함), GUI 4화면 구현(11-20), 모델 비교는 MVTec 결과까지 완료(종합 F1 규칙 0.75 → YOLOv8n-OBB 0.99, [노트북](notebooks/model_comparison.ipynb)).
-`colcon test` 166개 통과 (GUI 테스트 5개는 venv 에서).
+2026-11-25 기준 (공식 KPI, [PORTFOLIO 8.4](docs/PORTFOLIO.md)):
 
-아래는 2026-11-13 기록입니다. 영상 입력·전처리, 검출·비율 분류, 보정 파일 생성·로딩과 px→mm 변환,
-ROS2 검출·디버그 영상 발행, 작업면→로봇 좌표·툴 자세 계산을 구현했습니다.
-Gazebo + MoveIt 지정 좌표 이동과 늦게 스폰한 부품의 attach→이동 추종→detach·낙하 시험을 통과했습니다.
-`colcon test` 결과는 47개 통과, 실패·오류·skip 0개였습니다.
-MVTec 전용 색 기반 전처리로 test split의 정밀도 77.6%·재현율 83.4%를 확인했습니다.
-실제 폰 보정은 11-17 완료, 자체 촬영 데이터와 mm KPI는 아직 검증 전입니다.
-전체 집기·분류 사이클, GUI·KPI 구현은 후속 작업입니다 (TCP 는 3주차 완료, [WEEK3.md](docs/WEEK3.md)). 실행 방법과 한계는 [WEEK2.md](docs/WEEK2.md)에 기록했습니다.
+| 필수 KPI | 규칙 | 재학습 YOLO |
+|---|---|---|
+| 위치 오차 ≤ 2 mm | 1.88 달성 | 1.99 달성 |
+| 각도 오차 ≤ 3° | 4.41° 미달 | 3.15° 미달 |
+| 폰 송신 100회 | 100/100 | 100/100 |
+| 검출 → 송신 P95 ≤ 300 ms | 16.1 ms | 85.5 ms |
+
+실물 로봇과 실제 진공 장치로는 시험하지 않았습니다. 자동 테스트 301개 통과 (GUI 테스트는 venv 에서).

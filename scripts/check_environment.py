@@ -70,7 +70,7 @@ def system_checks():
     swap = int(values.get('SwapTotal', 0)) / 1024**2
     # WSL의 8GB 설정도 커널 예약분 때문에 8GiB 미만으로 표시된다.
     record(ram >= 7.5, 'WSL RAM / swap', f'{ram:.1f} GiB / {swap:.1f} GiB',
-           'WSL 메모리 8GB 이상 (WEEK1.md 1단계)')
+           'WSL 메모리 8GB 이상 (SETUP.md 부록 1단계)')
     free = shutil.disk_usage(ROOT).free / 1024**3
     record(free >= 15, '디스크 여유', f'{free:.1f} GiB', '설치 여유 공간 15GB 이상 확보')
     record(sys.version_info[:2] == (3, 12), 'Python 3.12', f'{platform.python_version()} / {sys.executable}',

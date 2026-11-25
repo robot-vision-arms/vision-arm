@@ -1,282 +1,63 @@
-# 1주차 — 환경 설치 · 작업 셀 · 캘리브레이션 · 영상 입력
+# 1주차 (2026-11-09 ~ 11-13) — 환경 설치 · 프로젝트 뼈대 · 첫 이동
 
-문서 구성: **1. 현황 요약 → 2. 실행 방법 → 3~5. 팀원별 기록 → 6. 공통 기록**.
-각 팀원 절은 본인이 쓴 기록을 날짜 순으로 모은 것이다. 지금 상태는 1절만 보면 된다.
-설치를 순서대로 따라 하는 체크리스트는 [SETUP.md 부록](SETUP.md#부록-1주차-설치-체크리스트-실행-순서)으로 옮겼다 (2026-11-19 정리).
-1주차 전체 목표는 [PROJECT.md 8장](PROJECT.md#8-로드맵-14주차-계획-실제-3주-진행) 에 있다.
+실제 작업한 날짜 기준으로 정리한 기록이다 (계획의 "1주차~4주차" 는 [PROJECT.md 8장](PROJECT.md)). 2주차 [WEEK2](WEEK2.md), 3주차 [WEEK3](WEEK3.md).
+실행 명령은 [SETUP.md](SETUP.md), 결정 이유는 [DECISIONS.md](DECISIONS.md) 에 있다. 줄이기 전 날짜별 원본 기록은 git `c10d537` 의 `docs/WEEK1~4.md` 에 남아 있다.
 
-## 1. 현황 요약 (2026-11-19)
+## 1. 한눈에: 누가 무엇을 했나
 
-| 팀원 | 1주차 담당 (PROJECT.md 2.3) | 상태 | 남은 일 |
-|---|---|---|---|
-| 팀원 1 (동경) | 캘리브레이션: `calibrate_camera.py`, `compute_homography.py`, `calibrator.py` | ✅ 완료 (11-17). `intrinsics.npz` RMS 0.56 px, `homography.npz` 한 점씩 빼고 잰 오차 0.26 mm, 가로 1280×720 | 실제 나사·너트 촬영 검출 시험 (2주차 항목). `.npz` 는 git 에 없어 팀원에게 따로 전달 |
-| 팀원 2 (성민) | Gazebo 구동: UR5e + MoveIt, `workcell.sdf`, `ur5e_vacuum.urdf.xacro` | 🟡 작업 셀·좌표·지정 이동·상자 투입 확인 | 프로젝트 화면 RViz 버튼으로 수동 Plan & Execute 직접 확인, 마지막 복귀 계획 실패(99999) 원인 |
-| 팀원 3 (가영) | 영상 입력: `camera_stream.py`, 폰 IP 카메라 수신, 3명 환경 점검 | ✅ 완료 (11-17). 아이폰 RTSP 31.8 fps, 가로 1280×720, 3명 환경 점검 수집 | 없음 |
-
-### 1주차 항목별 확인
-
-| 1주차 항목 | 확인 결과 | 근거·남은 일 |
+| 팀원 | 한 일 | 결과 |
 |---|---|---|
-| WSL 메모리 | 확인 완료 | `free -h`: RAM 9.7GiB / swap 8.0GiB |
-| Conda·Python·venv | 확인 완료 | Conda `auto_activate: false`, 프로젝트 venv의 Python 3.12.3 |
-| ROS2·Python 라이브러리 | 확인 완료 | Jazzy 및 rclpy·cv_bridge·pymoveit2 import 정상. OpenCV 4.6.0, NumPy 1.26.4, PySide6 6.12.0 |
-| 시뮬레이터 의존성 | 확인 완료 | `rosdep check --from-paths src --ignore-src --rosdistro jazzy`: 모두 충족. MoveIt 2.12.4, UR 설정·드라이버 3.9.0 |
-| 빌드·테스트 | 확인 완료 | 1주차 재점검 당시 전체 35개 및 영상 입력·보정 관련 15개 재실행 통과. 후속 2주차 개선 후 최신 전체 결과는 47개 통과, 오류·실패·skip 0개 ([WEEK2.md](WEEK2.md)) |
-| 이미지 입력·전처리 | 구현·테스트 완료 | `FrameSource`, 그레이스케일·Blur·이진화. 2026-11-16 실제 폰 RTSP 영상으로도 수신·전처리 확인 (가영 PC) |
-| MVTec 데이터 | 확인 완료 | 이미지 384장과 전체·train·val·test 어노테이션 존재 |
-| Gazebo UR5e·MoveIt | 화면 없이 이동 검증 완료 | 2주차 진행 중 지정 좌표 이동·흡착 시험 성공. `logs/week2_sim_check.json`, [WEEK2.md](WEEK2.md) 참고 |
-| 확인 ①의 GUI·RViz Plan & Execute | 확인 완료 (2026-11-16, 동경 PC) | Gazebo·RViz 화면에서 Plan & Execute로 팔 이동 확인. `sim.launch.py`에서 RViz가 뜨지 않던 버그(RViz 끄기 인자가 MoveIt 쪽으로 새어 나감)는 `b0d63a7`에서 수정 |
-| 스마트폰 앱·영상 수신 | 확인 완료 (2026-11-16, 가영 PC) | 아이폰 RTSP + USB 핫스팟, `camera_url: rtsp://172.20.10.1:8554/live`. 위 팀원 3 기록 참고 |
-| 스마트폰 고정 거치 | 확인 완료 (2026-11-17, 동경) | 거치대로 고정, 가로 1280×720. 같은 자리에서 찍은 시트 사진끼리 마커 위치 차이 0.2 px 미만 |
-| 실제 ChArUco·작업 시트 보정 | 확인 완료 (2026-11-17, 동경) | `intrinsics.npz` RMS 0.56 px (왜곡 0 모델), `homography.npz` 한 점씩 빼고 잰 오차 0.26 mm. 위 팀원 1 기록 참고 |
-| 원점·축의 작업면 표시 | 인쇄물로 대체 | 작업 시트에 원점·축이 인쇄됨 (DECISIONS.md 9절). 시트를 작업대에 고정했는지는 확인 필요 |
-| 팀원 3명 환경 확인 | 확인 완료 (2026-11-16) | 동경: OK 62 / FAIL 1, 테스트 55개 통과, 1~8단계 OK. 성민: OK 62 / FAIL 1, 테스트 65개 통과. 가영: 최신 `main` 68개 통과, 폰 수신 포함 통과. 폰은 가영 PC에서만 연결하기로 해서 동경·성민의 FAIL 1(`camera_url` 접속 시간 초과)은 해당 없음. 아래 팀원별 체크표 참고 |
+| **동경** (팀원 1) | 저장소와 두 패키지(`vision_pick_place`, `ur5e_pick_place`) 뼈대, 역할 분담·좌표·패킷 형식 문서, 1주차 설치 체크리스트, 실시간 입력을 스마트폰 IP 카메라로 변경, 점검 스크립트 OK/FAIL 정리 | 셋이 병렬로 개발할 기준 확정 |
+| **성민** (팀원 2) | Gazebo 작업 셀 점검(로봇·매트·상자 2개·흡착 패드의 위치를 설정과 대조), 지정 좌표 이동 재현, 검출 결과 미리보기 도구 `preview_detections.py` | 작업 셀 좌표 일치, 지정 이동 성공, 테스트 35개 재현 |
+| **가영** (팀원 3) | 환경 점검 스크립트와 설치 기록, 영상 입력·전처리, 검출·분류·보정·이동의 초기 구현과 시험, MVTec 검출 평가 | 테스트 47개 통과, 늦게 만든 부품 붙이기·떼기 통과 |
 
-> **갱신 (2026-11-19):** 테스트 수는 이후 계속 늘어 최신 `main`(`158e1e4`) 기준 **137개 통과**다.
+## 2. 사람별 기록
 
-보정 스크립트와 로딩·변환 코드는 2주차 진행 중 구현해 합성 데이터로 검증했다.
-2026-11-17 실제 폰 사진으로 보정하고 재투영 오차를 기록해 1주차 보정 항목을 완료했다 (위 팀원 1 기록).
+### 동경
 
-### 팀원별 설치 단계 체크
+| 날짜 | 한 일 |
+|---|---|
+| 11-09~10 | 저장소 생성, 비전 파이프라인 + Gazebo UR5e 뼈대, MVTec Screws 데이터 배치·형식 정리, 설치 체크리스트 |
+| 11-10 | 실시간 입력을 웹캠 대신 **스마트폰 IP 카메라**로 결정 ([DECISIONS 7절](DECISIONS.md)), 환경 점검을 OK/FAIL 로 정리 |
+| 11-13 | 역할 분담표에 이름, 시작 전 합의·병렬 개발 규칙, WSL 메모리 설정(10 GB / swap 8 GB) 통일 |
 
-단계 번호는 [SETUP.md 부록](SETUP.md#부록-1주차-설치-체크리스트-실행-순서) 체크리스트의 번호다.
-
-| 단계 | 팀원 1 (동경) | 팀원 2 (성민) | 팀원 3 (가영) |
-|---|---|---|---|
-| 1. WSL 메모리 | ✅ 11-16 9.7GiB / swap 8GiB | ✅ 11-17 `free -h`: RAM 9.7GiB / swap 8.0GiB | ✅ 9.7GiB / swap 8GiB |
-| 2. 폰 카메라 앱 | 해당 없음 | 해당 없음 | ✅ 11-16 아이폰 RTSP |
-| 3. conda 끄기 | ✅ 11-16 | ✅ 11-17 자동 활성화 False, `env.sh` 적용 후 Conda 비활성·프로젝트 `.venv` Python 3.12.3 확인 | ✅ |
-| 4. ROS2 Jazzy | ✅ 11-16 talker/listener | ✅ 11-16 보고 (ROS·Gazebo·MoveIt 정상) | ✅ |
-| 5. Python·venv | ✅ 11-16 | ✅ 11-16 보고 | ✅ Python 3.12.3 |
-| 6. rosdep | ✅ 11-16 `rosdep check` 충족 | ✅ 11-16 보고 | ✅ |
-| 7. 빌드·테스트 | ✅ 11-16 빌드 성공, 55개 통과 (보고 기준) | ✅ 11-16 재점검: 빌드 성공, 65개 통과 (보고 기준) | ✅ 11-16 최신 `main`(작업 시트 ROI·RViz 수정 포함) 68개 통과 (ChArUco 머지 전 55, 직후 62) |
-| 8. 확인 ① | ✅ 11-16 Gazebo·RViz 화면 Plan & Execute로 팔 이동 확인 (headless `check_sim_week2.py`도 통과) | ⚠️ 11-17 프로젝트 Gazebo·RViz GUI 실행 및 서비스 기반 나사·너트 상자 투입 확인. 프로젝트 RViz 버튼 수동 Plan & Execute 확인·복귀 안정성은 남음 (아래 상세) | ✅ 11-17 프로젝트 `sim.launch.py` Gazebo·RViz 창에서 MotionPlanning 패널 Plan & Execute 로 팔 이동 (아래 상세) |
-| 9. 폰 영상 수신 | 해당 없음 (`check_environment.py` FAIL 1은 카메라 접속) | 해당 없음 (`check_environment.py` FAIL 1은 카메라 접속) | ✅ 11-16 USB 핫스팟 |
-| 10. 기록 | ✅ 11-17 캘리브레이션 결과 (위 팀원 1 기록, DECISIONS.md 10절) | | ✅ 11-17 PC 사양·버전 (아래 상세) |
-
-폰 카메라는 가영 PC에서만 연결하기로 했다 (동경 11-16 전달). 그래서 동경·성민 PC의 2·9단계는 해당 없음이다. 두 PC의 `check_environment.py` FAIL 1은 `camera_url`(`172.20.10.1`, 가영 PC의 아이폰 USB 핫스팟 주소)에 접속할 수 없어서 생기며 환경 문제가 아니다. 다른 PC에서 폰 영상이 필요해지면 그 PC에 아이폰을 USB 핫스팟으로 연결하거나 자기 폰 앱 주소로 `camera_url`을 바꾼다(바꾼 주소는 커밋하지 않음).
-테스트 수는 같은 날에도 코드 버전에 따라 다르다: 55개(ChArUco 머지 전), 62개(머지 직후), 68개(작업 시트 ROI `bf7c306`·RViz 수정 `b0d63a7` 포함, 가영 PC 재실행). 성민 보고 65개는 어느 버전인지 미확인.
-
-## 2. 실행 방법
-
-문서의 명령은 모두 `~/vision-arm` 기준이다. 저장소를 다른 곳에 clone 했다면 링크를 한 번 걸어 두면 그대로 통한다
-(예: 11-13 확인 PC는 `/home/user1/mini_projects3/vision-arm`, 팀원 1 PC는 `~/study/robot_vision`).
-
-```bash
-ln -s <실제 저장소 경로> ~/vision-arm   # 한 번만
-source ~/vision-arm/env.sh
-```
-
-`sudo` 는 비밀번호를 묻기 때문에, 설치 명령은 **각자 WSL 터미널에서 직접** 실행한다.
-
-### 실시간 뷰어로 폰 영상 보기
-
-폰 앱 스트리밍을 켠 상태에서 VS Code 터미널(WSL)에서 실행합니다.
-
-```bash
-source ~/vision-arm/env.sh
-python scripts/live_view.py
-```
-
-- 키: `s` 현재 화면 저장(`data/captures/`), `r` 90° 회전 전환, `q`/ESC 종료
-- 기본 주소는 `rtsp://172.20.10.1:8554/live` (아이폰 USB 개인용 핫스팟). 다른 주소는 `python scripts/live_view.py <영상주소> [저장폴더]`
-- `Connection refused` 가 나오면 폰 앱 스트리밍이 꺼진 것입니다. 앱을 화면에 띄운 채 다시 시작합니다.
-
-### 캘리브레이션 다시 만들기
-
-재현 명령:
-
-```bash
-python scripts/calibrate_camera.py --images data/calib/charuco --rotate ccw --dist-model none
-python scripts/compute_homography.py --aruco --image data/calib/sheet/landscape_11.png
-```
-
-**폰 거치대와 작업 시트를 움직이면 2단계(시트 1장 촬영 → `compute_homography.py`)를 다시 해야 한다.** 시트 위치가 곧 작업 좌표 원점이다.
-작업 시트는 반드시 `live_view.py` 에서 회전 없이 `s` 로 저장하거나, 스트림과 같은 1280×720 가로 사진이어야 한다.
-
-## 3. 팀원 1 (동경) 기록
-
-### 2026-11-17 캘리브레이션 결과
-
-1주차 캘리브레이션 담당 작업 결과입니다. 결정 이유와 비교 수치는 [DECISIONS.md 10절](DECISIONS.md#10-캘리브레이션-실측-결과와-왜곡-모델-선택-2026-11-17-팀원-1-동경)에 있습니다.
+### 성민
 
 | 항목 | 결과 |
 |---|---|
-| 1단계 내부 파라미터 | ChArUco 보드를 **모니터에 전체화면으로 띄워** 18장 촬영 (`data/calib/charuco/`). 보드 크기와 무관한 값이라 인쇄물 대신 모니터를 썼다 |
-| 왜곡 모델 | **왜곡 0 고정(`--dist-model none`)**. 5계수 모델은 사진 구석에서 튀어 작업 시트 오차 11.96 mm, 왜곡 0 은 0.26 mm |
-| 해상도 | 스트림과 같은 **가로 1280×720**. 보드 사진은 `live_view.py` 회전(`r`)을 켠 채 저장돼 세로라 `--rotate ccw` 로 맞춤 |
-| `intrinsics.npz` | 18장, RMS 0.56 px, fx 883.4 / fy 881.9, cx 639.6 / cy 356.8, 왜곡 계수 0 |
-| 2단계 호모그래피 | 작업 시트(마커 4개, 꼭짓점 16개)를 폰 거치대로 고정해 촬영 (`data/calib/sheet/landscape_11.png`) |
-| `homography.npz` | 기준점 RMS **0.21 mm**, 한 점씩 빼고 잰 오차 **0.26 mm** |
-| 예비 위치 | `archive/homography_landscape_01.npz` (폰을 90° 돌린 다른 자리, 0.256 mm). 쓰려면 `homography.npz` 로 복사 |
-| 화면 범위 | 1 mm ≈ 1.66 px. 화면 전체가 책상 약 78 × 46 cm |
-| 빈 시트 오검출 | 0개 (작업 시트 ROI 적용) |
-| 미완료 | 실제 나사·너트 촬영 검출 시험 (부품 준비 후). `.npz` 는 git 에 없으므로 팀원에게 따로 전달 |
+| 작업 셀 | 실행 중 Gazebo 장면에서 UR5e·매트·상자 2개·패드 확인, 좌표가 `sim.yaml` 과 일치 |
+| 지정 좌표 이동 | 첫 계획(5초)은 실패, 같은 조건 재시도 성공. 실패도 기록 |
+| 흡착 재현 | 붙인 물체가 0.096 m 따라 올라감 |
+| 검출 재현 | validation 에서 임계값 60·80·100·120·Otsu 비교, 100 의 F1 0.508 재현. 붙은 물체가 한 상자로 합쳐지는 것을 눈으로 확인 |
+| 고친 오류 | xacro 주석 때문에 생긴 YAML 파싱 오류, 중복된 경고 억제 설정 제거 |
 
-### 2026-11-16 재점검 결과 (`~/study/robot_vision` = `~/vision-arm` 링크)
+자세한 증거와 명령: [TEAM2_PROGRESS.md](TEAM2_PROGRESS.md)
 
-| 항목 | 결과 |
-|---|---|
-| WSL 메모리 | ✅ `free -h` Mem 9.7 GiB / Swap 8.0 GiB (`.wslconfig` 10GB / 8GB 적용됨) |
-| Conda | ✅ `auto_activate_base: False`, 새 셸 `python3` = `.venv` |
-| rosdep | ✅ `rosdep check` 의존성 모두 충족 |
-| 빌드·테스트 | ✅ `colcon build` 2 packages, `colcon test` 55개 실패 0 / skipped 0 |
-| ROS2 통신 | ✅ talker/listener 송수신 확인 |
-| `check_environment.py` | OK 62 / FAIL 1: `camera_url`(`rtsp://172.20.10.1:8554/live`)은 설정돼 있으나 접속 시간 초과. 폰 앱 서버 실행·같은 Wi-Fi·IP 변경 여부 확인 필요 |
-| 시뮬레이터 (headless) | ✅ `sim.launch.py gazebo_gui:=false launch_rviz:=false` 후 `check_sim_week2.py` 통과: 지정 이동, 늦은 스폰 흡착, 분리 낙하, 0.099 m 들어올림. 서비스가 뜬 직후(약 16초)에 호출하면 첫 계획이 OMPL `Unable to solve` 로 실패, 40초 기다린 뒤에는 첫 시도 성공 |
-| 확인 ① 화면 | ✅ Gazebo·RViz 창에서 Plan & Execute 로 팔 이동 확인. 처음엔 RViz 가 아예 안 떴음: `sim.launch.py` 가 UR 시뮬 include 에 넘긴 `launch_rviz:=false` 가 바깥까지 새어 MoveIt 쪽 RViz 도 꺼짐 → include 를 `GroupAction(scoped=True)` 로 감싸 수정 |
-| 폰 영상 수신 | ➖ 폰은 가영 PC 에서만 연결하기로 함 (위 팀원 3 기록). 이 PC 의 `check_environment.py` FAIL 1 은 이 항목 |
+### 가영
 
-### 2026-11-13 재시작 후 이어서 할 일
-
-> **갱신 (2026-11-19):** 아래 1~4 는 11-16 재점검(위 표)과 11-17 캘리브레이션에서 모두 끝났다. 폰 연결은 가영 PC 에서만 하기로 해서 3번은 해당 없음.
-
-`.wslconfig` 적용을 위해 `wsl --shutdown` 으로 끊은 지점입니다. 다시 접속하면 아래 순서대로 진행합니다.
-
-1. `free -h` → Mem total 9 GB 이상, Swap 8 GB 확인 (재시작 전 7.6 GiB / 2 GiB)
-2. 확인 ① (8-3단계): `source ~/vision-arm/env.sh && ros2 launch ur5e_pick_place sim.launch.py` → Gazebo 에 UR5e, RViz Plan & Execute 로 팔이 움직이는지 직접 봄
-3. 폰 IP 카메라 주소를 `params.yaml` 의 `camera_url` 에 넣고 9단계 확인 (점검 스크립트의 남은 FAIL 1개)
-4. 결과를 아래 "팀원별 진행 체크" 표와 10단계 기록 위치에 적고, 1주차 캘리브레이션(PROJECT.md 2.3 팀원 1)으로 넘어감
-
-## 4. 팀원 2 (성민) 기록
-
-### 2026-11-13 공유 기록
-
-팀원 2의 작업 셀 점검 결과입니다. 기존 공유 코드의 재검증과 로컬 오류 조치를 구분합니다.
+초기 구현은 커밋 작성자(팀원 3 계정, `2e72e48`·`4c85e0a`) 기준이며, 성민이 재현해 확인했다.
 
 | 항목 | 결과 |
 |---|---|
-| 기본 UR5e 예제 | RViz Plan 성공 및 Execute 후 Gazebo 팔 이동을 성민이 직접 확인 |
-| 프로젝트 구성·좌표 | 실행 중 Gazebo 장면 조회로 UR5e·매트·상자 2개·흡착 패드 확인. 매트·상자 좌표가 sim.yaml과 일치 |
-| 프로젝트 이동 | 지정 이동 서비스 계획·실행 재시도 성공. 첫 OMPL 계획 실패도 기록 |
-| 오류 조치 | Xacro 주석으로 인한 YAML 파싱 오류 수정·재빌드. 미생성 물체 경고 억제 설정 추가 후 최신 공유 코드와 중복된 설정은 제거 |
-| 미완료 | 프로젝트 GUI 표시·RViz 수동 실행 직접 확인, 이동 반복 안정성 및 충돌 검증 |
+| 영상 입력·전처리 | `FrameSource`, 그레이스케일·Blur·이진화 |
+| 검출·분류 | 중심·장축, 면적 필터, 길이 비로 나사·너트 구분 |
+| 좌표 | 왜곡 보정 후 px → mm, mm 좌표에서 각도 계산. 보정이 없으면 `calib_ok: false`, mm·각도는 `null` |
+| ROS2 발행 | `/vision/detections`, `/vision/debug_image` 를 실제 ROS 로 주고받아 확인 |
+| 이동·흡착 | `/sim/move_to_target` 성공(패드 끝 0.25 → 0.35 m). 늦게 만든 부품 붙이기 → 약 0.099 m 상승 → 떼기 통과 (**확인 ②**) |
+| MVTec 평가 (test 60장, 정답 661개) | 밝기 방식 F1 51.1 % → 색 방식(`metal_hsv`) **F1 80.4 %** (색 방식은 11-13 후속 작업, 11-16 커밋) |
+| 학습용 화면 | `preview_steps.py`: 전처리 단계를 하나씩 눈으로 확인 |
 
-프로젝트 장면 조회·서비스 실행은 headless 검증이며 GUI 직접 확인을 대신하지 않습니다.
-상세 증거·재현 명령은 [팀원 2 작업 기록](TEAM2_PROGRESS.md)을 참고합니다.
+## 3. 겪은 문제와 해결
 
-### 2026-11-17 성민 PC 1·3·8단계 확인 상세
-
-- **1단계:** `/home/user1/vision-arm`에서 `free -h` 실행. Ubuntu가 인식한 총 RAM은 9.7GiB, swap은 8.0GiB다. 현재 적용 용량을 확인한 것이며 Windows 설정 파일을 이번에 변경하지 않았다.
-- **3단계:** `/home/user1/anaconda3/bin/conda config --show auto_activate_base` 결과 `auto_activate: False`. 별도 셸에서 `source ~/vision-arm/env.sh` 적용 후 `CONDA_PREFIX`·`CONDA_DEFAULT_ENV`는 미설정, `VIRTUAL_ENV=/home/user1/vision-arm/.venv`, `python=/home/user1/vision-arm/.venv/bin/python`, Python 3.12.3 확인. Anaconda 삭제가 아니라 프로젝트 작업 시 Conda를 끄고 `.venv`를 사용하는 상태다.
-- **8단계 확인한 것:** 프로젝트 `sim.launch.py`의 Gazebo·RViz GUI 프로세스를 실행하고, 서비스로 팔을 움직여 나사·너트를 각각 중심 Y=+0.85m·-0.85m 상자에 투입했다. GUI 재시연 기록에서 두 `drops[].success`와 `parameters_restored`는 true다. 창 없는 별도 투입 시험은 `ok=true`로 끝났다.
-- **8단계 남은 것:** 최근 GUI 시연은 RViz 버튼을 사용한 수동 Plan & Execute 시험이 아니다. 사용자가 프로젝트 화면을 직접 확인했다는 응답도 아직 받지 않았다. GUI 재시연은 마지막 빈 공구 복귀 계획이 3회 실패(code 99999)하여 전체 `ok=false`다. 따라서 확인 ① 전체를 완료로 표시하지 않았다. 기본 UR 예제의 수동 조작 확인은 기존 11-13 기록으로 유지한다.
-- **근거:** `logs/team2_bin_drop_retry/reach.json`(headless 투입 통과), `logs/team2_gui_demo/retry.json`(GUI에서 두 부품 투입 성공·최종 복귀 실패). 로그는 git 제외이며 상세 과정과 재현 명령은 [팀원 2 작업 기록](TEAM2_PROGRESS.md)에 있다.
-
-## 5. 팀원 3 (가영) 기록
-
-### 2026-11-16 공유 기록
-
-1주차 영상 입력 담당 작업 결과입니다. 이 PC(유선 랜만 있고 Wi-Fi 어댑터 없음) 기준입니다.
-
-| 항목 | 결과 |
+| 문제 | 해결 |
 |---|---|
-| 폰 카메라 앱 | 아이폰 RTSP 카메라 앱. 앱 설정에서 가로 모드로 송출 (1280×720) |
-| 네트워크 | PC 유선망(192.168.20.x)과 폰 Wi-Fi(192.168.200.x) 대역이 달라 직접 접속 불가 → **아이폰 USB 개인용 핫스팟**으로 연결. Windows에 Apple Devices 드라이버 필요, PC는 172.20.10.x를 받음 |
-| `camera_url` | `rtsp://172.20.10.1:8554/live` (`params.yaml`에 반영) |
-| 환경 점검 | `check_environment.py`: OK 63 / FAIL 0, `스마트폰 카메라 접속` OK |
-| OpenCV 직접 수신 | `cv2.VideoCapture(url, CAP_FFMPEG)` 30/30 프레임 수신 |
-| 프로젝트 코드 수신 | `params.yaml` 설정 그대로 `FrameSource` 열기 2.0초, 60/60 프레임 (720, 1280, 3), `preprocess` 마스크 (720, 1280) 정상, `release()` 후 `read()`는 `None` |
-| 실시간 뷰어 | `scripts/live_view.py` 추가 (아래 9단계 참고) |
-| 빌드·테스트 | 최신 `main`(`0af3e57`)에서 `colcon build` 2개 패키지 성공, `colcon test` **55 tests, 0 errors, 0 failures, 0 skipped** (보정 테스트 추가로 47 → 55) |
-| 미완료 | 11-17 갱신: 폰 고정 거치(가로 1280×720)·보정 촬영은 동경 확인 완료(아래 표), 동경·성민 환경 점검 1~7단계 수집 완료. 카메라 FPS 측정 완료 (RTSP 31.8 fps, 아래 10단계 상세). 가영 1주차 항목 완료 |
+| WSL 메모리가 7.6 GB 로 돌아감 (`.wslconfig` 가 사라짐) | 다시 작성해 10 GB / swap 8 GB |
+| conda 의 python 이 먼저 잡힘 | 자동 활성화 끄기, `env.sh` 로 순서 고정 |
+| 패드를 붙인 URDF 와 SRDF 의 로봇 이름이 다름 | 둘 다 `ur5e` 로 통일 |
+| 패드가 손목과 충돌로 판정됨 | 고정 장착 부위끼리의 충돌만 제외 (다른 충돌 검사는 유지) |
+| 기본 계획 시간 0.5초로 이동 실패 | 5초로 늘림 |
+| 나무 무늬·그림자를 부품으로 잡음 | 밝기 대신 채도·명도를 함께 보는 `metal_hsv` |
 
-운용 시 주의: 아이폰 앱이 백그라운드로 가거나 화면이 잠기면 스트리밍이 멈춰 `Connection refused`가 난다.
-자동 잠금을 끄고 앱을 화면에 띄운 채 충전기를 연결해 둔다. 매번 USB 연결과 핫스팟 켜기가 필요하다.
+## 4. 이 주에 확인 못 한 것
 
-### 2026-11-17 가영 PC 10단계 기록
-
-| 항목 | 값 |
-|---|---|
-| CPU | Intel Core i5-12400 (6코어 12스레드) |
-| RAM | Windows 15.7 GB, WSL `.wslconfig` memory=10GB·swap=8GB → Ubuntu 9.7GiB / swap 8.0GiB |
-| GPU | Intel UHD Graphics 730 (내장). OpenCV 는 CPU 처리, Gazebo 렌더링은 WSLg 기본 |
-| OS | Windows 11 Pro / WSL2 Ubuntu 24.04.5 LTS (커널 6.18.33.2-microsoft-standard-WSL2) |
-| ROS·시뮬 | ROS 2 Jazzy, Gazebo Sim 8.15.0 (Harmonic), MoveIt 2.12.4 |
-| Python 패키지 | Python 3.12.3 (.venv), OpenCV 4.6.0, NumPy 1.26.4, PySide6 6.12.0 |
-| 카메라 | 아이폰 IP 카메라 앱, USB 개인용 핫스팟. 11-17 기준 HTTP MJPEG `http://172.20.10.1:8080/stream.mjpg` 1280×720 가로 (앱이 세로 720×1280 로 보낼 때는 `params.yaml` 의 `camera_rotate_deg: 270`). FPS (11-17, 고정 거치 상태, 10 초 측정): **RTSP `rtsp://172.20.10.1:8554/live` 31.8 fps**, HTTP MJPEG 7.5 fps. `params.yaml` 은 RTSP 를 쓴다. 거치 화면 `data/captures/mount_20261117.png` (git 제외) |
-
-**8단계 확인 ① (가영 PC, 11-17):** `ros2 launch ur5e_pick_place sim.launch.py` (Gazebo·RViz 창, 진공 컵 두 개 헤드 URDF) → RViz MotionPlanning 패널에서 사용자가 직접 Plan & Execute.
-move_group 로그: `Plan and Execute request accepted` → `scaled_joint_trajectory_controller successfully finished` → `Completed trajectory execution with status SUCCEEDED` → `Plan and Execute request complete!`.
-그 전에 Plan 후 따로 누른 Execute 1 회는 `ABORTED` (계획 뒤 시작 자세가 달라졌을 때 흔함), 바로 다시 한 Plan & Execute 는 성공. 같은 날 `check_sim_week2.py`·`check_spawn_week3.py` 도 이 PC 에서 통과 (WEEK3).
-
-PROJECT.md 7장 측정 장비 표는 팀원 1 PC 기준으로 채워져 있어 바꾸지 않았다 (CPU·OS·버전은 같음). KPI 를 어느 PC 에서 잴지 정해지면 그 PC 값으로 채운다.
-
-## 6. 공통 기록 (설치 이력)
-
-2026-11-10 ~ 11-13 에 처음 설치하며 남긴 기록이다. 지금 상태는 1절을 본다.
-
-### 이전 PC 재점검 기록 (2026-11-10 및 11-13 초기 점검)
-
-3~7단계의 기본 환경 설치와 테스트 완료. 이전에 누락된 `ur_robot_driver`도 Jazzy 3.9.0 설치 확인 및 sudo 인증에 성공했습니다.
-기존 0단계 표는 설치 전 상태입니다. 이 PC 의 저장소 실제 위치는 `~/study/robot_vision` 이고, 문서 명령이 그대로 통하도록 `~/vision-arm` 링크를 걸어 두었습니다 (2026-11-13).
-
-| 항목 | 현재 상태 |
-|---|---|
-| WSL 메모리 | 2026-11-13 점검 때 `.wslconfig` 가 없어져 7.6 GiB / swap 2 GiB 로 돌아가 있었음. 10GB / swap 8GB 로 다시 작성. `wsl --shutdown` 후 `free -h` 확인 필요 |
-| Conda / ROS / venv | Conda 자동 활성화 꺼짐, Jazzy / Python 3.12.3 .venv 사용 |
-| 테스트 | 2026-11-13 재확인: `colcon build` 2 packages, `colcon test` 7개 중 실패 0 / skipped 4. `rosdep check` 의존성 모두 충족. `check_environment.py` OK 60 / FAIL 1 (camera_url 미설정) |
-| 시뮬레이터 | 드라이버 설치 완료. 기본 예제 MoveIt 초기화·컨트롤러 활성화 확인. URDF/SRDF 이름 불일치 해결 및 실제 동작 검증 필요 |
-| 카메라 | 웹캠 없음. 스마트폰 IP 카메라로 진행: 2·9단계 필요 |
-| 데이터 | `data/mvtec_screws`에 이미지 384장 및 어노테이션 복사 완료 |
-
-#### 당시 PC 남은 작업
-
-WSL 터미널에서 (비밀번호는 터미널에 직접 입력):
-
-```bash
-source ~/vision-arm/env.sh
-sudo apt update
-sudo apt install -y ros-jazzy-ur-robot-driver
-rosdep install --from-paths src --ignore-src -y --rosdistro jazzy
-colcon build --symlink-install
-source install/setup.bash
-ros2 launch ur_simulation_gz ur_sim_moveit.launch.py ur_type:=ur5e
-```
-
-sudo 비밀번호가 없으면 Windows PowerShell에서 먼저 `wsl -d Ubuntu-24.04 -u root -- passwd user1` 실행.
-
-카메라는 스마트폰을 씁니다. 2단계(앱 설치)와 9단계(WSL 에서 영상 수신)를 진행합니다 (DECISIONS.md 7절).
-
-WSL 메모리 설정 적용은 모든 WSL 작업을 저장한 뒤 Windows PowerShell에서 `wsl --shutdown` 실행 후 재접속.
-`free -h`로 적용 확인. Gazebo와 RViz의 실제 화면 및 Plan & Execute는 8단계대로 확인해야 하며 아직 통과로 기록하지 않았습니다.
-
-### 최초 설치 전 상태 (2026-11-10 확인)
-
-아래 표는 설치 전 기록입니다. 최신 설치 상태는 문서 마지막에 기록합니다. 팀원마다 각자 확인합니다.
-
-| 항목 | 확인 명령 | 이 PC 값 | 필요한 조치 |
-|---|---|---|---|
-| Ubuntu | `lsb_release -ds` | 24.04.5 LTS | 없음 |
-| WSL | (PowerShell) `wsl --version` | 2.7.12, WSLg 1.0.73 | 없음 |
-| WSL 메모리 | `free -h` | **7 GB** (Windows 전체 15.7 GB 의 기본 절반) | **1단계**: 10 GB 로 늘림 |
-| `.wslconfig` | (PowerShell) `Test-Path $env:USERPROFILE\.wslconfig` | 없음 | 1단계에서 새로 만듦 |
-| GPU | (PowerShell) `(Get-CimInstance Win32_VideoController).Name` | Intel UHD Graphics 730 (내장) | 8단계에서 Gazebo 화면 확인. 느리면 SETUP.md 5-4 |
-| 디스크 여유 | `df -h ~` | 861 GB | 없음 (15 GB 이상이면 됨) |
-| ROS2 | `ls /opt/ros` | **없음** | 4단계 |
-| python3 | `which python3 && python3 --version` | **conda base 3.11** (`/home/user1/anaconda3/bin/python3`) | **3단계**: conda 자동 활성화 끄기 |
-| 시스템 Python | `/usr/bin/python3 --version` | 3.12.3 | 없음 (ROS2 Jazzy 짝) |
-| 웹캠 | `ls /dev/video*` | **없음** | 스마트폰으로 대체 (2·9단계) |
-
-### 설치 상태 (2026-11-10)
-
-현재 단계는 **개발 환경 설치**입니다. 아래 결과는 이 PC 기준이며 팀원별로 확인해야 합니다.
-
-| 항목 | 이 PC 상태 |
-|---|---|
-| WSL 메모리 | 11-10 에 9.7 GiB / swap 8.0 GiB 확인. 11-13 에 `.wslconfig` 가 사라져 7.6 GiB / swap 2 GiB 로 돌아감 → 다시 작성, 재시작 후 확인 필요 |
-| ROS2 | Jazzy 설치됨 |
-| Python 환경 | venv, Python 3.12.3, OpenCV 4.6.0, NumPy 1.26.4, PySide6 6.12.0 |
-| 시뮬레이터 패키지 | Gazebo Harmonic 8.15.0, MoveIt 2.12.4, UR MoveIt 설정 3.9.0 |
-| ur_robot_driver | Jazzy 3.9.0 설치·패키지 인식 확인 |
-| Windows usbipd | 5.3.0 설치됨 (스마트폰 입력에는 필요 없음) |
-| 웹캠 | Windows 카메라 장치 0개, WSL `/dev/video*` 없음. 스마트폰 IP 카메라로 대체 |
-
-`ur_robot_driver`는 `rosdep install`로 설치하거나 다음 명령으로 직접 설치합니다.
-
-```bash
-sudo apt install ros-jazzy-ur-robot-driver
-```
-
-설치 확인: `source /opt/ros/jazzy/setup.bash` 후 `ros2 pkg prefix ur_robot_driver`를 실행합니다.
-폰 카메라 앱 설치(2단계)와 폰 영상 수신 확인(9단계)이 남아 있습니다.
+스마트폰 영상, 실제 보정, RViz 버튼으로 직접 움직이기, 실제 나사·너트 → 2주차에 진행.

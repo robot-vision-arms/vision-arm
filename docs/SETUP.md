@@ -266,7 +266,76 @@ deactivate
 - 이 venv 에는 pip 판 OpenCV 5.x·NumPy 2.x 가 깔립니다 (2026-11-19 기준 5.1.0 / 2.5.4). 규칙 검출(A) 결과가 ROS 쪽 OpenCV 4.6 과 같은지 확인했습니다 (MVTec test 예측 710·대응 551 동일).
 - 실행 순서: `python scripts/train_yolo_obb.py` (YOLO 학습, CPU 약 2시간) → `python notebooks/build_notebook.py --execute` (노트북 실행, 결과·그래프 저장). VS Code 에서 노트북을 열 때는 커널로 `.venv-ml` 의 Python 을 고릅니다.
 - 학습이 너무 느리면 Google Colab 무료 GPU 로 학습만 하고, 받은 가중치를 이 PC 에서 CPU 로 추론합니다.
-- 학습 모델은 ONNX 로 내보내 `vision_node` 에서 OpenCV DNN 으로 추론합니다 (`.venv` 에는 아무것도 더 설치하지 않음). 내보내는 PC 만 `.venv-ml` 에 `pip install onnx` 가 필요합니다 (WEEK4.md 동경 11-24, `scripts/export_yolo_onnx.py`).
+- 학습 모델은 ONNX 로 내보내 `vision_node` 에서 OpenCV DNN 으로 추론합니다 (`.venv` 에는 아무것도 더 설치하지 않음). 내보내는 PC 만 `.venv-ml` 에 `pip install onnx` 가 필요합니다 (WEEK3.md 동경 11-24, `scripts/export_yolo_onnx.py`).
+
+---
+
+## Step 9. 실행·보정·측정 명령 모음
+
+모두 `~/vision-arm` 에서 `source env.sh` 를 한 뒤 실행합니다 (저장소가 다른 곳이면 `ln -s <실제 경로> ~/vision-arm`).
+코드를 받으면 `colcon build --symlink-install && source env.sh` 로 다시 빌드합니다.
+
+### 시연 한 번에 켜기
+
+```bash
+scripts/run_demo.sh            # 실물 폰 + YOLO (기본)      scripts/run_demo.sh rule   실물 폰 + 규칙
+scripts/run_demo.sh sim        # Gazebo 가상 카메라 (끌 때 Ctrl+C)
+scripts/run_demo.sh stop       # 끄기 (yolo·rule)
+ROTATE=270 scripts/run_demo.sh # 폰이 세로 영상을 보낼 때. CAMERA=rtsp://...  CALIB_DIR=...  IMAGE_DIR=<사진 폴더>
+```
+
+- YOLO 는 `data/models/yolo_green.onnx`, `yolo_green.json` 두 파일이 있어야 합니다 (git 에 없음, 따로 전달).
+- 가상 카메라 반복 시험(9개 2회): `python scripts/run_team2_demo.py --gui --realistic --randomize --seed 5 --objects 9 --speed .6 --acceleration .7 --position-jitter-mm 4 --compact-return --cycles 2 --transport-trials 1 --out logs/<폴더>`
+
+### 카메라 보정 (폰이나 시트를 움직이면 2번을 다시)
+
+```bash
+python3 scripts/make_calib_sheets.py                                                     # 인쇄용 시트 (A4 가로 100 %)
+python3 scripts/live_view.py rtsp://172.20.10.1:8554/live data/calib/sheet               # s 저장, r 회전, q 끝
+python3 scripts/calibrate_camera.py --images data/calib/charuco --rotate ccw --dist-model none      # 1. 내부 파라미터
+python3 scripts/compute_homography.py --aruco --image data/calib/sheet/<파일>                        # 2. 작업 시트 (부품 없이)
+```
+
+시트 사진은 노드와 같은 회전으로 찍습니다. `Connection refused` 는 폰 앱이 꺼진 것입니다. 아이폰은 자동 잠금을 끕니다.
+
+### KPI 측정
+
+```bash
+ROTATE=270 scripts/measure_phone_kpi.sh yolo      # 폰 100회 송신 (Gazebo 끄고, 부품 5~8개). rule 도 같은 방법
+G=data/ground_truth/<폴더>; C=src/vision_pick_place/config
+python3 scripts/collect_ground_truth.py --print-sheet data/ground_truth/pose_sheet_green.pdf --green     # 인쇄용 자세 시트
+python3 scripts/collect_ground_truth.py --rotate 270 --method print --out-dir $G --params $C/params.yaml $C/params_green.yaml
+PYTHONPATH=src/vision_pick_place python3 scripts/evaluate_kpi.py --truth $G/poses.csv --homography <npz> \
+    --params $C/params.yaml $C/params_green.yaml $C/params_yolo.yaml --out logs/kpi_<이름>.json           # 규칙은 params_yolo.yaml 을 뺌
+```
+
+미달이어도 좋은 값만 고르지 않습니다. 다시 재면 횟수와 값을 모두 적습니다.
+
+### YOLO 재학습
+
+```bash
+python3 -m vision_pick_place.gui.label_obb data/captures/green                                        # 라벨
+python3 -m vision_pick_place.gui.label_obb data/captures/green --export data/models/green_yolo_obb
+.venv-ml/bin/python scripts/finetune_obb.py train    --data data/models/green_yolo_obb
+.venv-ml/bin/python scripts/finetune_obb.py evaluate --data data/models/green_yolo_obb --draw         # 마지막에 --split test 한 번
+.venv-ml/bin/python scripts/export_yolo_onnx.py && python3 scripts/export_yolo_onnx.py --verify
+```
+
+### 나눠서 실행·확인
+
+```bash
+ros2 launch ur5e_pick_place sim.launch.py gazebo_gui:=false launch_rviz:=false   # 터미널 1
+ros2 launch vision_pick_place team2_link.launch.py                               # 터미널 2: TCP 서버·브리지·스폰
+ros2 run vision_pick_place vision_node --ros-args --params-file src/vision_pick_place/config/params_sim.yaml   # 가상 카메라
+python3 -m vision_pick_place.gui.main_window --calib-dir data/calib/sim
+ros2 service call /sim/vacuum std_srvs/srv/SetBool "{data: true}"                # 진공 켜기
+ros2 service call /sim/go_ready std_srvs/srv/Trigger                             # 대기 자세로 되돌리기
+ros2 service call /sim/move_to_target std_srvs/srv/Trigger                       # 지정 좌표로 이동
+python scripts/check_spawn_week3.py                                              # 스폰·흡착 확인
+python scripts/check_team_integration.py --count 100 --timeout 120               # 통신 100회
+python scripts/check_team2_roundtrip.py --domain 97 --duration 180 --restart-cycles 5 --interval 0.05   # 연속·재시작
+python scripts/preview_steps.py                                                  # 전처리 단계 보기
+```
 
 ---
 
@@ -294,7 +363,7 @@ deactivate
 ## 부록. 1주차 설치 체크리스트 (실행 순서)
 
 WEEK1.md 에 있던 설치 순서 체크리스트를 옮겨 왔다 (2026-11-19). 명령의 이유와 자세한 설명은 위 Step 들에 있고,
-여기는 "지금 무엇을 하고, 무엇이 나오면 다음으로 넘어가는지" 만 적는다. 팀원별 통과 여부는 [WEEK1.md 1절](WEEK1.md#1-현황-요약-2026-11-19) 표에 적는다.
+여기는 "지금 무엇을 하고, 무엇이 나오면 다음으로 넘어가는지" 만 적는다. 팀원 세 명 모두 2026-11-17 까지 통과했다 (폰은 가영 PC 에서만 연결).
 `sudo` 는 비밀번호를 묻기 때문에, 명령은 **각자 WSL 터미널에서 직접** 실행한다.
 
 ### 전체 순서
@@ -471,7 +540,7 @@ python -c "import cv2; c=cv2.VideoCapture('<camera_url>'); ok,f=c.read(); print(
 
 보유 MVTec 사진에는 실제 mm 정답이 없으므로 위치 KPI를 대신하지 않습니다.
 
-실시간 뷰어 사용법은 [WEEK1.md 2절](WEEK1.md#2-실행-방법) 에 있다.
+실시간 뷰어 사용법은 위 Step 9 에 있다.
 
 ### 10. 결과 기록
 
