@@ -5,6 +5,7 @@
 #   scripts/run_demo.sh stop       끄기 (yolo·rule 로 켠 것)
 # 바꿀 값 (앞에 붙인다):
 #   ROTATE=270                     폰이 세로 영상을 보낼 때
+#   CAMERA=rtsp://<폰 주소>:8554/live   params.yaml 의 camera_url 대신 (파일을 고치지 않는다)
 #   SHEET=white                    흰 시트 (기본은 초록 시트)
 #   CALIB_DIR=data/calib           보정 폴더 (intrinsics.npz, homography.npz)
 #   IMAGE_DIR=<사진 폴더>           폰 대신 사진을 재생 (폰 없이 시험)
@@ -73,7 +74,7 @@ sleep 3
 timeout 60 ros2 service call /sim/clear_objects std_srvs/srv/Trigger >/dev/null 2>&1
 nohup python3 -m vision_pick_place.team2_sized_vision --ros-args -r __node:=vision_node $PARAMS \
   -p intrinsics_path:=$CALIB_DIR/intrinsics.npz -p homography_path:=$CALIB_DIR/homography.npz \
-  ${IMAGE_DIR:+-p image_dir:=$IMAGE_DIR} ${ROTATE:+-p camera_rotate_deg:=$ROTATE} > logs/demo_vision.log 2>&1 &
+  ${IMAGE_DIR:+-p image_dir:=$IMAGE_DIR} ${CAMERA:+-p camera_url:=$CAMERA} ${ROTATE:+-p camera_rotate_deg:=$ROTATE} > logs/demo_vision.log 2>&1 &
 if [ -z "${NO_GUI:-}" ]; then
   nohup python3 -m vision_pick_place.gui.main_window --source real --calib-dir $CALIB_DIR > logs/demo_gui.log 2>&1 &
 fi

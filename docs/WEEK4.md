@@ -336,6 +336,29 @@ ROTATE=270 CALIB_DIR=data/calib scripts/run_demo.sh      # 폰이 세로 영상�
 
 **주의:** 성민 님 수정으로 Gazebo 에서 부품끼리는 서로 충돌하지 않는다. 8/8 은 "실제 로봇이 붙은 부품을 집는다" 는 뜻이 아니고, 검출 위치에 부품을 새로 만드는 방식이라 성공률로도 쓰지 않는다. 실제 폰 영상과 `sim` 모드를 이 스크립트로 켜는 것은 아직 확인하지 않았다 (`sim` 은 같은 명령을 직접 실행해 9/9).
 
+### 2026-11-25 폰 100회 송신 KPI 순서 `scripts/measure_phone_kpi.sh`
+
+폰이 고정된 자리의 PC 에서, **Gazebo 를 끄고** 잰다. 보정은 그 자리의 폰·시트로 만든 것을 쓴다.
+
+```bash
+cd ~/vision-arm && git pull && source env.sh && colcon build --symlink-install && source env.sh
+scripts/run_demo.sh stop                                                     # 켜져 있던 시연 끄기
+# 1. 시트 보정 (폰·시트가 움직였을 때). 부품 없이, 창에서 r 로 가로로 돌리고 s 로 저장, q 로 끝
+python3 scripts/live_view.py rtsp://172.20.10.1:8554/live data/calib/sheet
+python3 scripts/compute_homography.py --aruco --image data/calib/sheet/<방금 저장한 파일>      # 한 점씩 빼고 잰 오차가 약 0.5 mm 이하인지 확인
+# 2. 부품 5~8개를 놓고 손을 뺀 뒤 100회씩 (각 약 20초). 폰이 세로 영상이면 ROTATE=270, 주소가 다르면 CAMERA=rtsp://...
+ROTATE=270 scripts/measure_phone_kpi.sh yolo
+ROTATE=270 scripts/measure_phone_kpi.sh rule
+# 3. 같은 자리에서 시연 확인
+ROTATE=270 scripts/run_demo.sh
+```
+
+- 출력 예: `yolo: 송신 100/100 ACK, 검출→송신 P95 91.0 ms, 보정 [True]`. 결과 JSON 은 `logs/phone_kpi_<방식>_<시각>.json`.
+- **미달이어도 다시 재서 좋은 값만 고르지 않는다.** 다시 재면 횟수와 값을 모두 적는다.
+- 시간은 프레임을 읽은 직후부터 ACK 까지다 (PROJECT 정의). 폰에서 PC 까지 영상이 오는 시간은 들어가지 않는다. 연결 뒤 3초는 뺀다.
+- 측정에는 로봇·Gazebo 가 없고 `robot_server` 가 가상 로봇 자리다. 시연과 같은 검출 노드(`team2_sized_vision`)를 쓴다.
+- 확인 (폰 대신 사진 재생, **KPI 아님**): YOLO 100/100 · P95 91.0 ms, 규칙 100/100 · 12.9 ms. 폰이 없으면 이유를 알려 주고 끝난다.
+
 ### 2026-11-24 정답 30장 KPI: 규칙과 YOLO (`overlay_green_20261124`, 가영 님 촬영)
 
 ```bash
