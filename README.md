@@ -6,7 +6,7 @@ Gazebo 속 UR5e 가 그 결과로 부품을 집어 종류별로 분류합니다.
 | 단계 | 내용 |
 |---|---|
 | 과제 필수 | 중심·장축 각도 추정, px → mm 캘리브레이션, TCP 송신·ACK, GUI 4화면, KPI 4종 |
-| 확장 (4주) | Gazebo Harmonic + UR5e + MoveIt2 로 **나사·너트** Pick & Place 분류 |
+| 확장 (3주) | Gazebo Harmonic + UR5e + MoveIt2 로 **나사·너트** Pick & Place 분류 |
 | 최종 목표 | 같은 구조로 **여러 종류의 공구**까지 분류 |
 
 기본 입력은 거치대에 고정한 스마트폰의 실시간 영상입니다. 폰 IP 카메라 앱의 영상 주소를 Wi-Fi 로 받습니다 (docs/SETUP.md Step 7).
@@ -22,7 +22,7 @@ Gazebo 속 UR5e 가 그 결과로 부품을 집어 종류별로 분류합니다.
 ## 문서
 
 - [docs/PORTFOLIO.md](docs/PORTFOLIO.md): 포트폴리오 요약 (문제 정의 → 요구사항 → 시나리오 → 기술 선정 근거 → 설계 → Gazebo → 구현 → 시험·성능 → 개선 과정 → 한계·확장)
-- [docs/PROJECT.md](docs/PROJECT.md): 프로젝트 정의, 좌표·각도 정의, 시스템 구성, 역할 분담(주차별 순환), KPI, 4주 로드맵, 최종 목표
+- [docs/PROJECT.md](docs/PROJECT.md): 프로젝트 정의, 좌표·각도 정의, 시스템 구성, 역할 분담(주차별 순환), KPI, 3주 로드맵, 최종 목표
 - [docs/WEEK1.md](docs/WEEK1.md): 1주차 현황 요약·팀원별 기록 (설치 순서 체크리스트는 SETUP.md 부록)
 - [docs/WEEK2.md](docs/WEEK2.md): 2주차 현황 요약·실행 방법·팀원별 기록 (검출·MoveIt 이동·ROS2 발행, MVTec 평가)
 - [docs/WEEK3.md](docs/WEEK3.md): 3주차 현황 요약·실행 방법·팀원별 기록 (GUI·TCP 통신·스폰·흡착, 검출·분류 모델 비교)
